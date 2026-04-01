@@ -1,0 +1,12 @@
+ws/
+.claude/
+.blocks/
+*.local
+*.dcu
+*.exe
+delphi-jose-jwt/
+/Delphi-Neon
+/OpenAPI-Delphi
+/WiRL
+/CLAUDE.md
+__history/
