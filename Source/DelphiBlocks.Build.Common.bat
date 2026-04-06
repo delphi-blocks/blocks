@@ -2,7 +2,7 @@ SET _TARGET=%1
 IF [%1] == [] (SET _TARGET="Make")
 
 SET _CONFIG=%2
-IF [%2] == [] (SET _CONFIG="Debug")
+IF [%2] == [] (SET _CONFIG="Release")
 
 SET _PLATFORM=%3
 IF [%3] == [] (SET _PLATFORM="Win32")
@@ -14,7 +14,10 @@ SET BUILDPLATFORM="/p:platform=%_PLATFORM%"
 SET "ERRORCOUNT=0"
 
 @ECHO OFF
-msbuild DelphiBlocks.dproj %BUILDTARGET% %BUILDCONFIG% %BUILDPLATFORM% 
+msbuild Blocks.dproj %BUILDTARGET% %BUILDCONFIG% %BUILDPLATFORM% 
+IF %ERRORLEVEL% NEQ 0 set /a ERRORCOUNT+=1
+
+msbuild Launcher.dproj %BUILDTARGET% %BUILDCONFIG% %BUILDPLATFORM% 
 IF %ERRORLEVEL% NEQ 0 set /a ERRORCOUNT+=1
 
 
