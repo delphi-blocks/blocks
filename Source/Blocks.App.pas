@@ -461,14 +461,14 @@ begin
     end;
 
     // Step 6 — Resolve package folder for selected Delphi version
-    var PackageFolder := SelectedProduct.GetPackageFolder(Manifest.PackageFolders);
+    var PackageFolder := SelectedProduct.GetPackageFolder(Manifest.PackageOptions.PackageFolders);
 
     // Step 7 — Dependencies
-    if Length(Manifest.Dependencies) > 0 then
+    if not Manifest.Dependencies.IsEmpty then
     begin
       TConsole.WriteLine('Resolving dependencies...', clCyan);
-      for var I := 0 to High(Manifest.Dependencies) do
-        SelectedProduct.Install(Manifest.Dependencies[I], Database, FOptions.Silent, FOptions.Overwrite);
+      for var LDependency in Manifest.Dependencies do
+        SelectedProduct.Install(LDependency, Database, FOptions.Silent, FOptions.Overwrite);
       TConsole.WriteLine;
     end;
 
@@ -519,7 +519,7 @@ begin
     end;
 
     // Step 9 — Compile
-    SelectedProduct.BuildPackages(ProjectDir, PackageFolder, Manifest.Packages, Manifest.Platforms);
+    SelectedProduct.BuildPackages(ProjectDir, PackageFolder, Manifest.Packages, Manifest.SupportedPlatforms);
 
     // Step 10 — Update database
     if not FOptions.BuildOnly then

@@ -73,8 +73,8 @@ type
     /// <exception cref="Exception">Raised when a platform is not installed or a package fails to compile.</exception>
     procedure BuildPackages(
         const AProjectDir, APackageFolder: string;
-        const APackages: TArray<TManifestPackage>;
-        const APlatforms: TArray<TManifestPlatform>
+        const APackages: TManifestPackageList;
+        const APlatforms: TSupportedPlatforms
     );
 
     /// <summary>Appends source, browsing, and debug DCU paths to the Delphi library registry.</summary>
@@ -522,15 +522,13 @@ var
   Added: TStringList;
   NewPath: string;
 
-  procedure AppendPaths(const Paths: TArray<string>; const RegValue: string);
-  var
-    J: Integer;
+  procedure AppendPaths(APaths: TList<string>; const ARegValue: string);
   begin
-    if Length(Paths) = 0 then
+    if APaths.IsEmpty then
       Exit;
 
-    if Reg.ValueExists(RegValue) then
-      Existing := Reg.ReadString(RegValue)
+    if Reg.ValueExists(ARegValue) then
+      Existing := Reg.ReadString(ARegValue)
     else
       Existing := '';
 
@@ -542,13 +540,13 @@ var
       ExistingList.DelimitedText := Existing;
 
       // Remove empty entries left by trailing semicolons
-      for J := ExistingList.Count - 1 downto 0 do
+      for var J := ExistingList.Count - 1 downto 0 do
         if ExistingList[J] = '' then
           ExistingList.Delete(J);
 
-      for J := 0 to High(Paths) do
+      for var LPath in APaths do
       begin
-        NewPath := TPath.Combine(AProjectDir, Paths[J]);
+        NewPath := TPath.Combine(AProjectDir, LPath);
         if ExistingList.IndexOf(NewPath) < 0 then
         begin
           ExistingList.Add(NewPath);
@@ -558,9 +556,9 @@ var
 
       if Added.Count > 0 then
       begin
-        Reg.WriteString(RegValue, ExistingList.DelimitedText);
-        for J := 0 to Added.Count - 1 do
-          TConsole.WriteLine(Format('    + [%s] %s', [RegValue, Added[J]]), clDkGray);
+        Reg.WriteString(ARegValue, ExistingList.DelimitedText);
+        for var J := 0 to Added.Count - 1 do
+          TConsole.WriteLine(Format('    + [%s] %s', [ARegValue, Added[J]]), clDkGray);
       end;
     finally
       Added.Free;
@@ -589,8 +587,8 @@ end;
 
 procedure TProduct.BuildPackages(
     const AProjectDir, APackageFolder: string;
-    const APackages: TArray<TManifestPackage>;
-    const APlatforms: TArray<TManifestPlatform>
+    const APackages: TManifestPackageList;
+    const APlatforms: TSupportedPlatforms
 );
 begin
   var BdsDir := FRootDir;
@@ -616,14 +614,14 @@ begin
     SetEnvironmentVariable('PATH', PChar(NewPath));
 
   // Verify all platforms are installed before starting
-  for var Plat in APlatforms do
-    if not TestPlatformInstalled(Plat.Name) then
-      raise Exception.CreateFmt('Platform "%s" is not installed for %s.', [Plat.Name, FDisplayName]);
+  for var LPlatformPair in APlatforms do
+    if not TestPlatformInstalled(LPlatformPair.Key) then
+      raise Exception.CreateFmt('Platform "%s" is not installed for %s.', [LPlatformPair.Key, FDisplayName]);
 
   var PlatformNames := TStringList.Create;
   try
-    for var Plat in APlatforms do
-      PlatformNames.Add(Plat.Name);
+    for var LPlatformPair in APlatforms do
+      PlatformNames.Add(LPlatformPair.Key);
 
     TConsole.WriteLine('Compiling packages...', clCyan);
     TConsole.WriteLine('  MSBuild   : ' + MsBuild);
@@ -635,17 +633,16 @@ begin
     PlatformNames.Free;
   end;
 
-  for var I := 0 to High(APlatforms) do
+  for var LPlatformPair in APlatforms do
   begin
-    var Plat := APlatforms[I];
+    var Plat := LPlatformPair.Value;
 
-    TConsole.WriteLine('  [' + Plat.Name + ']', clDkCyan);
+    TConsole.WriteLine('  [' + LPlatformPair.Key + ']', clDkCyan);
 
-    for var J := 0 to High(APackages) do
+    for var Pkg in APackages do
     begin
-      var Pkg := APackages[J];
       var PkgName := Pkg.Name;
-      var TypeStr := string.Join(', ', Pkg.PackageTypes);
+      var TypeStr := string.Join(', ', Pkg.&Type.ToArray);
 
       var DprojPath := TPath.Combine(PackagesPath, PkgName + '.dproj');
       if not TFile.Exists(DprojPath) then
@@ -656,7 +653,7 @@ begin
       var CmdLine :=
           Format(
               '"%s" "%s" /t:Make /p:config=Release /p:platform=%s /nologo /v:quiet',
-              [MsBuild, DprojPath, Plat.Name]
+              [MsBuild, DprojPath, LPlatformPair.Key]
           );
 
       var Output: string;
@@ -671,11 +668,11 @@ begin
         for var Line in Lines do
           if ContainsText(Line, 'error') then
             TConsole.WriteLine('      ' + Line, clRed);
-        raise Exception.CreateFmt('Compilation failed on package "%s" for platform "%s".', [PkgName, Plat.Name]);
+        raise Exception.CreateFmt('Compilation failed on package "%s" for platform "%s".', [PkgName, LPlatformPair.Key]);
       end;
     end;
 
-    UpdateSearchPaths(Plat.Name, AProjectDir, Plat);
+    UpdateSearchPaths(LPlatformPair.Key, AProjectDir, Plat);
   end;
 
   TConsole.WriteLine;
@@ -743,11 +740,11 @@ begin
     end;
 
     // Recurse into sub-dependencies first
-    for var I := 0 to High(Manifest.Dependencies) do
-      Install(Manifest.Dependencies[I], ADatabase, ASilent, AOverwrite, ADepth + 1);
+    for var LDependency in Manifest.Dependencies do
+      Install(LDependency, ADatabase, ASilent, AOverwrite, ADepth + 1);
 
     // Resolve package folder for this Delphi version
-    var PackageFolder := GetPackageFolder(Manifest.PackageFolders);
+    var PackageFolder := GetPackageFolder(Manifest.PackageOptions.PackageFolders);
 
     // Resolve commit (fetch latest if not pinned)
     var Parts := DepId.Split(['.']);
@@ -767,7 +764,7 @@ begin
     var ProjectDir := THttpUtils.DownloadAndExtract(ZipUrl, TWorkspace.WorkDir, Manifest.Application.Name, AOverwrite, ASilent);
 
     // Compile
-    BuildPackages(ProjectDir, PackageFolder, Manifest.Packages, Manifest.Platforms);
+    BuildPackages(ProjectDir, PackageFolder, Manifest.Packages, Manifest.SupportedPlatforms);
 
     // Register in database
     ADatabase.Update(Manifest.Application.Id, ReqCommit, FVersionName);
