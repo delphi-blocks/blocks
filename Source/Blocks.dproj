@@ -90,6 +90,7 @@
         <DCCReference Include="Blocks.Manifest.pas"/>
         <DCCReference Include="Blocks.Workspace.pas"/>
         <DCCReference Include="Blocks.Product.pas"/>
+        <DCCReference Include="Blocks.JSON.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

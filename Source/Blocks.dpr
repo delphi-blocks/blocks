@@ -14,7 +14,8 @@ uses
   Blocks.Database in 'Blocks.Database.pas',
   Blocks.Manifest in 'Blocks.Manifest.pas',
   Blocks.Workspace in 'Blocks.Workspace.pas',
-  Blocks.Product in 'Blocks.Product.pas';
+  Blocks.Product in 'Blocks.Product.pas',
+  Blocks.JSON in 'Blocks.JSON.pas';
 
 begin
   try

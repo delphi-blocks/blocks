@@ -7,7 +7,9 @@ uses
   System.SysUtils,
   System.IOUtils,
   System.JSON,
-  System.Generics.Collections;
+  System.Generics.Collections,
+
+  Blocks.JSON;
 
 type
 
@@ -30,9 +32,6 @@ type
     FDescription: string;
     FUrl: string;
   public
-    procedure FromJson(LJSON: TJSONValue);
-    function ToJson: TJSONObject;
-
     property Id: string read FId write FId;
     property Name: string read FName write FName;
     property Description: string read FDescription write FDescription;
@@ -50,10 +49,12 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    procedure FromJson(LJSON: TJSONValue);
-    function ToJson: TJSONObject;
+
+    [JsonList(System.TypeInfo(string))]
     property SourcePath: TJsonStringList read FSourcePath;
+    [JsonList(System.TypeInfo(string))]
     property BrowsingPath: TJsonStringList read FBrowsingPath;
+    [JsonList(System.TypeInfo(string))]
     property DebugDCUPath: TJsonStringList read FDebugDCUPath;
   end;
 
@@ -63,8 +64,6 @@ type
   TSupportedPlatforms = class(TObjectDictionary<string, TManifestPlatform>)
   public
     constructor Create;
-    procedure FromJson(LJSON: TJSONValue);
-    function ToJson: TJSONObject;
   end;
 
   // -----------------------------------------------------------------------
@@ -77,9 +76,9 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    procedure FromJson(LJSON: TJSONValue);
-    function ToJson: TJSONObject;
+
     property Name: string read FName write FName;
+    [JsonList(System.TypeInfo(string))]
     property &Type: TJsonStringList read FType;
   end;
 
@@ -89,17 +88,12 @@ type
   TManifestPackageList = class(TObjectList<TManifestPackage>)
   public
     constructor Create;
-    procedure FromJson(LJSON: TJSONValue);
-    function ToJson: TJSONArray;
   end;
 
   // -----------------------------------------------------------------------
   // Package folders: Delphi version -> folder name
   // -----------------------------------------------------------------------
   TManifestPackageFolders = class(TDictionary<string, string>)
-  public
-    procedure FromJson(LJSON: TJSONValue);
-    function ToJson: TJSONObject;
   end;
 
   // -----------------------------------------------------------------------
@@ -111,8 +105,9 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    procedure FromJson(LJSON: TJSONValue);
-    function ToJson: TJSONObject;
+
+    [JsonName('package folders')]
+    [JsonDictionary(System.TypeInfo(string))]
     property PackageFolders: TManifestPackageFolders read FPackageFolders;
   end;
 
@@ -131,15 +126,15 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    procedure FromJson(LJSON: TJSONValue);
-    function ToJson: TJSONObject;
-    procedure FromJsonString(const AJson: string);
-    function ToJsonString: string;
 
     property Application: TApplicationInfo read FApplication;
+    [JsonDictionary(System.TypeInfo(TManifestPlatform))]
     property SupportedPlatforms: TSupportedPlatforms read FSupportedPlatforms;
+    [JsonList(System.TypeInfo(TManifestPackage))]
     property Packages: TManifestPackageList read FPackages;
+    [JsonName('package options')]
     property PackageOptions: TManifestPackageOptions read FPackageOptions;
+    [JsonList(System.TypeInfo(string))]
     property Dependencies: TJsonStringList read FDependencies;
   end;
 
@@ -171,27 +166,6 @@ begin
     Result.Add(LValue);
 end;
 
-{ TApplicationInfo }
-
-procedure TApplicationInfo.FromJson(LJSON: TJSONValue);
-begin
-  if not Assigned(LJSON) then
-    Exit;
-  FId := LJSON.GetValue<string>('id', '');
-  FName := LJSON.GetValue<string>('name', '');
-  FDescription := LJSON.GetValue<string>('description', '');
-  FUrl := LJSON.GetValue<string>('url', '');
-end;
-
-function TApplicationInfo.ToJson: TJSONObject;
-begin
-  Result := TJSONObject.Create;
-  Result.AddPair('id', FId);
-  Result.AddPair('name', FName);
-  Result.AddPair('description', FDescription);
-  Result.AddPair('url', FUrl);
-end;
-
 { TManifestPlatform }
 
 constructor TManifestPlatform.Create;
@@ -210,52 +184,11 @@ begin
   inherited;
 end;
 
-procedure TManifestPlatform.FromJson(LJSON: TJSONValue);
-begin
-  if not Assigned(LJSON) then
-    Exit;
-  FSourcePath.FromJson(LJSON.FindValue('sourcePath'));
-  FBrowsingPath.FromJson(LJSON.FindValue('browsingPath'));
-  FDebugDCUPath.FromJson(LJSON.FindValue('debugDCUPath'));
-end;
-
-function TManifestPlatform.ToJson: TJSONObject;
-begin
-  Result := TJSONObject.Create;
-  Result.AddPair('sourcePath',   FSourcePath.ToJson);
-  Result.AddPair('browsingPath', FBrowsingPath.ToJson);
-  Result.AddPair('debugDCUPath', FDebugDCUPath.ToJson);
-end;
-
 { TSupportedPlatforms }
 
 constructor TSupportedPlatforms.Create;
 begin
   inherited Create([doOwnsValues]);
-end;
-
-procedure TSupportedPlatforms.FromJson(LJSON: TJSONValue);
-var
-  LPair: TJSONPair;
-  LPlatform: TManifestPlatform;
-begin
-  if not Assigned(LJSON) then
-    Exit;
-  for LPair in (LJSON as TJSONObject) do
-  begin
-    LPlatform := TManifestPlatform.Create;
-    LPlatform.FromJson(LPair.JsonValue);
-    Add(LPair.JsonString.Value, LPlatform);
-  end;
-end;
-
-function TSupportedPlatforms.ToJson: TJSONObject;
-var
-  LPair: TPair<string, TManifestPlatform>;
-begin
-  Result := TJSONObject.Create;
-  for LPair in Self do
-    Result.AddPair(LPair.Key, LPair.Value.ToJson);
 end;
 
 { TManifestPackage }
@@ -272,71 +205,11 @@ begin
   inherited;
 end;
 
-procedure TManifestPackage.FromJson(LJSON: TJSONValue);
-begin
-  if not Assigned(LJSON) then
-    Exit;
-  FName := LJSON.GetValue<string>('name', '');
-  FType.FromJson(LJSON.FindValue('type'));
-end;
-
-function TManifestPackage.ToJson: TJSONObject;
-begin
-  Result := TJSONObject.Create;
-  Result.AddPair('name', FName);
-  Result.AddPair('type', FType.ToJson);
-end;
-
 { TManifestPackageList }
 
 constructor TManifestPackageList.Create;
 begin
   inherited Create(True);
-end;
-
-procedure TManifestPackageList.FromJson(LJSON: TJSONValue);
-var
-  LItem: TJSONValue;
-  LPackage: TManifestPackage;
-begin
-  if not Assigned(LJSON) then
-    Exit;
-  for LItem in (LJSON as TJSONArray) do
-  begin
-    LPackage := TManifestPackage.Create;
-    LPackage.FromJson(LItem);
-    Add(LPackage);
-  end;
-end;
-
-function TManifestPackageList.ToJson: TJSONArray;
-var
-  LPackage: TManifestPackage;
-begin
-  Result := TJSONArray.Create;
-  for LPackage in Self do
-    Result.AddElement(LPackage.ToJson);
-end;
-
-{ TManifestPackageFolders }
-
-procedure TManifestPackageFolders.FromJson(LJSON: TJSONValue);
-var
-  LPair: TJSONPair;
-begin
-  if not Assigned(LJSON) then
-    Exit;
-  for LPair in (LJSON as TJSONObject) do
-    Add(LPair.JsonString.Value, LPair.JsonValue.Value);
-end;
-
-function TManifestPackageFolders.ToJson: TJSONObject;
-var
-  LPair: TPair<string, string>;
-begin
-  Result := TJSONObject.Create;
-  for LPair in Self do
-    Result.AddPair(LPair.Key, LPair.Value);
 end;
 
 { TManifestPackageOptions }
@@ -351,19 +224,6 @@ destructor TManifestPackageOptions.Destroy;
 begin
   FPackageFolders.Free;
   inherited;
-end;
-
-procedure TManifestPackageOptions.FromJson(LJSON: TJSONValue);
-begin
-  if not Assigned(LJSON) then
-    Exit;
-  FPackageFolders.FromJson(LJSON.FindValue('package folders'));
-end;
-
-function TManifestPackageOptions.ToJson: TJSONObject;
-begin
-  Result := TJSONObject.Create;
-  Result.AddPair('package folders', FPackageFolders.ToJson);
 end;
 
 { TManifest }
@@ -386,39 +246,6 @@ begin
   FPackageOptions.Free;
   FDependencies.Free;
   inherited;
-end;
-
-procedure TManifest.FromJson(LJSON: TJSONValue);
-begin
-  if not Assigned(LJSON) then
-    Exit;
-  FApplication.FromJson(LJSON.FindValue('application'));
-  FSupportedPlatforms.FromJson(LJSON.FindValue('supportedPlatforms'));
-  FPackages.FromJson(LJSON.FindValue('packages'));
-  FPackageOptions.FromJson(LJSON.FindValue('package options'));
-  FDependencies.FromJson(LJSON.FindValue('dependencies'));
-end;
-
-function TManifest.ToJson: TJSONObject;
-begin
-  Result := TJSONObject.Create;
-  Result.AddPair('application', FApplication.ToJson);
-  Result.AddPair('supportedPlatforms', FSupportedPlatforms.ToJson);
-  Result.AddPair('packages', FPackages.ToJson);
-  Result.AddPair('package options', FPackageOptions.ToJson);
-  Result.AddPair('dependencies', FDependencies.ToJson);
-end;
-
-procedure TManifest.FromJsonString(const AJson: string);
-var
-  LJSON: TJSONValue;
-begin
-  LJSON := TJSONObject.ParseJSONValue(AJson);
-  try
-    FromJson(LJSON);
-  finally
-    LJSON.Free;
-  end;
 end;
 
 class function TManifest.Load(const Source: string): TManifest;
@@ -452,25 +279,7 @@ begin
     Json := TFile.ReadAllText(FilePath, TEncoding.UTF8);
   end;
 
-  Result := TManifest.Create;
-  try
-    Result.FromJsonString(Json);
-  except
-    Result.Free;
-    raise;
-  end;
-end;
-
-function TManifest.ToJsonString: string;
-var
-  LJSON: TJSONObject;
-begin
-  LJSON := ToJson;
-  try
-    Result := LJSON.ToJSON;
-  finally
-    LJSON.Free;
-  end;
+  Result := TJsonHelper.JSONToObject<TManifest>(Json);
 end;
 
 end.
