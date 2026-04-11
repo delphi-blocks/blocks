@@ -6,6 +6,8 @@ uses
   System.SysUtils,
   System.Classes,
   System.IOUtils,
+  System.TypInfo,
+  System.Rtti,
   System.JSON,
   System.Math,
   System.StrUtils,
@@ -13,35 +15,101 @@ uses
   Winapi.Windows;
 
 type
-  TOptions = class
-    Silent, Overwrite, BuildOnly, Uninstall, ListProducts, List, Init, Help: Boolean;
-    Product, Install, Commit, ProjectFolder, WorkspacePath: string;
+  TApp = class
+  public
+    class procedure RunBlocks; static;
   end;
 
-  TApp = class
+  ParamAttribute = class(TCustomAttribute)
   private
-    FOptions: TOptions;
+    FParamName: string;
+  public
+    property ParamName: string read FParamName;
+    constructor Create(const AParamName: string = '');
+  end;
 
-    procedure ParseArgs;
+  TCommand = class;
+  TCommandClass = class of TCommand;
+
+  TCommand = class(TObject)
+  strict private
+    class var FRegistry: TDictionary<string, TCommandClass>;
+    class var FDefaultCommand: TCommandClass;
+    class var FContext: TRttiContext;
+    constructor InnerCreate;
+    class procedure InjectArgs(ACommand: TCommand);
+  protected
+    procedure ShowBanner(const AppName, Description: string);
+    procedure WriteOption(const AOption, AText: string); overload;
+    procedure WriteOption(const AText: string); overload;
+    procedure CheckWorkspace;
     procedure TestDelphiRunning;
-    procedure ShowHelp;
-    procedure ShowInstalledVersions;
-    procedure ShowInstalledPackages(const Product: string);
   public
-    procedure Run;
-
+    class constructor Create;
+    class destructor Destroy;
+    class procedure RegisterCommand(const AName: string; AClass: TCommandClass; ADefault: Boolean = False);
+    class function Create(const ACommandName: string): TCommand;
   public
-    constructor Create;
-    destructor Destroy; override;
+    procedure Execute; virtual;
+    procedure ShowHelp; virtual;
+  end;
 
-    /// <summary>Entry point for the Blocks package manager CLI.</summary>
-    /// <remarks>
-    ///   Parses command-line arguments and dispatches to the appropriate command:
-    ///   <c>-Install</c>, <c>-Init</c>, <c>-List</c>, <c>-Uninstall</c>,
-    ///   <c>-ListProducts</c>, or <c>-Help</c>.
-    ///   Exits with an unhandled exception on any fatal error.
-    /// </remarks>
-    class procedure RunBlocks; static;
+  THelpCommand = class(TCommand)
+  private
+    [Param]
+    FCommandName: string;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
+  TListCommand = class(TCommand)
+  private
+    [Param('product')]
+    FProduct: string;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
+  TListProductsCommand = class(TCommand)
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
+  TInitCommand = class(TCommand)
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
+  TInstallCommand = class(TCommand)
+  private
+    [Param('product')]
+    FProduct: string;
+    [Param('overwrite')]
+    FOverwrite: Boolean;
+    [Param('buildonly')]
+    FBuildOnly: Boolean;
+    [Param('silent')]
+    FSilent: Boolean;
+    [Param]
+    FPackageName: string;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
+  TUninstallCommand = class(TCommand)
+  private
+    [Param('product')]
+    FProduct: string;
+    [Param]
+    FPackageName: string;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
   end;
 
 implementation
@@ -55,103 +123,196 @@ uses
   Blocks.Manifest,
   Blocks.Workspace;
 
-constructor TApp.Create;
+const
+  OptionLength = 26;
+
+// -- Help and listing ----------------------------------------------------------
+
+class procedure TApp.RunBlocks;
 begin
-  inherited;
-  FOptions := TOptions.Create;
+  var LCommand := TCommand.Create(ParamStr(1));
+  try
+    LCommand.Execute;
+  finally
+    LCommand.Free;
+  end;
 end;
 
-destructor TApp.Destroy;
+{ THelpCommand }
+
+procedure THelpCommand.Execute;
 begin
-  FOptions.Free;
   inherited;
-end;
+  ShowBanner('', '');
 
-procedure TApp.ParseArgs;
-var
-  I: Integer;
-  Arg: string;
-
-  function NextArg: string;
+  if FCommandName = '' then
   begin
-    Inc(I);
-    if I <= ParamCount then
-      Result := ParamStr(I)
-    else
-      raise Exception.Create('Missing value after ' + Arg);
+    ShowHelp;
+    Exit;
+  end;
+
+  var LCommand := TCommand.Create(FCommandName);
+  try
+    LCommand.ShowHelp;
+  finally
+    LCommand.Free;
+  end;
+end;
+
+procedure THelpCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Delphi package manager: download, compile and register packages from a');
+  TConsole.WriteLine('GitHub-hosted repository into your Delphi/RAD Studio installation.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' <command> [options]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Commands:', clWhite);
+  WriteOption('install <source>', 'Install a package from a file path, URL, or registry ID.');
+  WriteOption('uninstall <source>', 'Remove a package from the workspace and database.');
+  WriteOption('init', 'Initialise the workspace and download the package repository.');
+  WriteOption('list', 'List packages installed in the current workspace.');
+  WriteOption('listproducts', 'List detected Delphi installations.');
+  WriteOption('help [command]', 'Show this message, or detailed help for a specific command.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package');
+  TConsole.WriteLine('  ' + AppExeName + ' install C:\path\to\manifest.json /overwrite');
+  TConsole.WriteLine('  ' + AppExeName + ' install https://example.com/manifest.json /silent');
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package /product delphi12');
+  TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package');
+  TConsole.WriteLine('  ' + AppExeName + ' list /product delphi12');
+  TConsole.WriteLine('  ' + AppExeName + ' help install');
+  TConsole.WriteLine;
+end;
+
+{ TCommand }
+
+class constructor TCommand.Create;
+begin
+  FRegistry := TDictionary<string, TCommandClass>.Create;
+  FContext := TRttiContext.Create;
+end;
+
+procedure TCommand.CheckWorkspace;
+begin
+  // Offer to initialise if .blocks\ is absent
+  if not TDirectory.Exists(TWorkspace.BlocksDir) then
+  begin
+    TConsole.WriteLine;
+    TConsole.WriteWarning('The current directory is not a valid Blocks workspace.');
+    TConsole.WriteLine('Proceeding will initialise it by downloading the package repository.', clYellow);
+    TConsole.WriteLine;
+    TConsole.Write('Initialise workspace now? [Y/N] (default: N): ');
+    var Confirm := TConsole.ReadLine;
+    if not SameText(Trim(Confirm), 'Y') then
+      raise Exception.Create('Operation cancelled. Run "blocks -Init" to initialise the workspace first.');
+    TWorkspace.Initialize(TWorkspace.WorkDir);
+    TConsole.WriteLine;
+  end;
+end;
+
+class function TCommand.Create(const ACommandName: string): TCommand;
+begin
+  var LCommandClass: TCommandClass := nil;
+  for var LPair in FRegistry do
+  begin
+    if SameText(LPair.Key, ACommandName) then
+    begin
+      LCommandClass := LPair.Value;
+      Break;
+    end;
+  end;
+  if not Assigned(LCommandClass) then
+  begin
+    TConsole.WriteError(Format('Command "%s" not found', [ACommandName]));
+    LCommandClass := FDefaultCommand;
+    if not Assigned(LCommandClass) then
+      Abort;
+  end;
+  Result := LCommandClass.InnerCreate;
+end;
+
+class destructor TCommand.Destroy;
+begin
+  FRegistry.Free;
+  FContext.Free;
+end;
+
+procedure TCommand.Execute;
+begin
+  TCommand.InjectArgs(Self);
+end;
+
+// Parse params like this:
+// blocks install /verbose /product package.name
+// and inject in a classdecorated with way:
+// [Param('verbose')]
+// FVerbose: Boolean;
+// [Param('product')]
+// FProduct: string;
+// [Param]
+// FPackageName: string; // This is an unnamed param (now only one is supported)
+class procedure TCommand.InjectArgs(ACommand: TCommand);
+
+  function FindClassFieldByParamName(const AParamName: string; out AUnnamedParam: Boolean): TRttiField;
+  begin
+    var LDefaultParam: TRttiField := nil;
+    AUnnamedParam := False;
+    var LRttiType := FContext.GetType(ACommand.ClassType);
+    for var F in LRttiType.GetFields do
+    begin
+      var LAttr := F.GetAttribute<ParamAttribute>;
+      if Assigned(LAttr) then
+      begin
+        // If it finds an unnamed param set the LDefaultParam
+        if LAttr.ParamName = '' then
+          LDefaultParam := F;
+
+        if SameText('/' + LAttr.ParamName, AParamName) then
+         Exit(F);
+      end;
+    end;
+    if AParamName.StartsWith('/') or not Assigned(LDefaultParam) then
+      raise Exception.CreateFmt('Param "%s" not found', [AParamName]);
+    Result := LDefaultParam;
+    AUnnamedParam := True;
   end;
 
 begin
-  I := 1;
+  var I := 2;
+  var LUnnamedParam: Boolean;
   while I <= ParamCount do
   begin
-    Arg := ParamStr(I);
-
-    if SameText(Arg, '-Silent') then
-      FOptions.Silent := True
-    else if SameText(Arg, '-Overwrite') then
-      FOptions.Overwrite := True
-    else if SameText(Arg, '-BuildOnly') then
-      FOptions.BuildOnly := True
-    else if SameText(Arg, '-Uninstall') then
-      FOptions.Uninstall := True
-    else if SameText(Arg, '-ListProducts') then
-      FOptions.ListProducts := True
-    else if SameText(Arg, '-List') then
-      FOptions.List := True
-    else if SameText(Arg, '-Init') then
-      FOptions.Init := True
-    else if SameText(Arg, '-Help') or (Arg = '-?') or (Arg = '/?') then
-      FOptions.Help := True
-    else if SameText(Arg, '-Product') then
-      FOptions.Product := NextArg
-    else if SameText(Arg, '-Install') then
-      FOptions.Install := NextArg
-    else if SameText(Arg, '-Commit') then
-      FOptions.Commit := NextArg
-    else if SameText(Arg, '-ProjectFolder') then
-      FOptions.ProjectFolder := NextArg
-    else if SameText(Arg, '-WorkspacePath') then
-      FOptions.WorkspacePath :=
-          NextArg
-              // First positional argument without a flag prefix = Install
-    else if (FOptions.Install = '') and not Arg.StartsWith('-') then
-      FOptions.Install := Arg;
-
+    var LField := FindClassFieldByParamName(ParamStr(I), LUnnamedParam);
+    if LField.DataType.TypeKind = tkEnumeration then // boolean expected
+      LField.SetValue(ACommand, True)
+    else if LField.DataType.TypeKind = tkUString then
+    begin
+      if not LUnnamedParam then
+        Inc(I);
+      LField.SetValue(ACommand, ParamStr(I));
+    end
+    else
+      raise Exception.Create('Param type not supported');
     Inc(I);
   end;
 end;
 
-// -- Delphi running check ------------------------------------------------------
-
-procedure TApp.TestDelphiRunning;
+constructor TCommand.InnerCreate;
 begin
-  var Running := TStringList.Create;
-  try
-    for var P in TProduct.Products do
-      if P.IsRunning then
-        Running.Add(P.DisplayName);
+  inherited;
+end;
 
-    if Running.Count = 0 then
-      Exit;
-
-    TConsole.WriteLine;
-    TConsole.WriteWarning('The following Delphi instance(s) are currently open:');
-    for var Name in Running do
-      TConsole.WriteLine('  - ' + Name, clYellow);
-    TConsole
-        .WriteLine('  Please close Delphi before continuing, or the installation may not work correctly.', clYellow);
-    TConsole.WriteLine;
-    TConsole.Write('Press ENTER to continue anyway, or close Delphi and then press ENTER: ');
-    var Confirm := TConsole.ReadLine;
-  finally
-    Running.Free;
-  end;
+class procedure TCommand.RegisterCommand(const AName: string; AClass: TCommandClass; ADefault: Boolean = False);
+begin
+  FRegistry.Add(AName, AClass);
+  if ADefault then
+    FDefaultCommand := AClass;
 end;
 
 // -- Banner, app name and description -----------------------------------------
-
-procedure ShowBanner(const AppName, Description: string);
+procedure TCommand.ShowBanner(const AppName, Description: string);
 var
   BoxWidth: Integer;
 
@@ -199,92 +360,71 @@ begin
   TConsole.WriteLine;
 end;
 
-// -- Help and listing ----------------------------------------------------------
-
-procedure TApp.ShowHelp;
-const
-  OptionLength = 26;
-
-  procedure WriteOption(const AOption, AText: string); overload;
-  begin
-    TConsole.Write('  ' + AOption + StringOfChar(' ', OptionLength - Length(AOption) - 3), clCyan);
-    TConsole.WriteLine(AText, clGray);
-  end;
-
-  procedure WriteOption(const AText: string); overload;
-  begin
-    TConsole.WriteLine(AText);
-  end;
-
-
+procedure TCommand.ShowHelp;
 begin
-  TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' [options]', clWhite);
-  TConsole.WriteLine;
-  TConsole.WriteLine('Options:', clWhite);
-  WriteOption('-Init','Initialise the workspace: create .blocks\ and download the repository.');
-  WriteOption('-Install <path|url>','Load configuration from a local file, remote URL, or package ID.');
-  WriteOption('-Uninstall','Remove the project directory and its database entry.');
-  WriteOption('-Silent','Skip all non-critical prompts (uses defaults).');
-  WriteOption('', 'Critical prompts (Delphi version, overwrite) are still shown.');
-  WriteOption('-Overwrite', 'Automatically overwrite existing project directory without asking.');
-  WriteOption('-Product <version>','Select Delphi version by its internal name (no quoting needed).');
-  WriteOption('', 'Use -ListProducts to see available values.');
-  WriteOption('-Commit <sha>','Download a specific commit SHA instead of the latest.');
-  WriteOption('-WorkspacePath <dir>','Working directory (default: current directory).');
-  WriteOption('-ProjectFolder <dir>','Override the project directory name (default: application name).');
-  WriteOption('-BuildOnly','Skip download; assume project is already in place and build only.');
-  WriteOption('', 'Use -WorkspacePath to target a different directory.');
-  WriteOption('-ListProducts','Show installed Delphi versions and exit.');
-  WriteOption('-List','Show packages installed in the current workspace (all versions).');
-  WriteOption('', 'Use -Product to filter by Delphi version.');
-  WriteOption('', 'Use -WorkspacePath to target a different workspace.');
-  WriteOption('-Help','Show this help message.');
-  TConsole.WriteLine;
-  TConsole.WriteLine('Examples:', clWhite);
-  TConsole.WriteLine('  ' + AppExeName);
-  TConsole.WriteLine('  ' + AppExeName + ' -Silent -Overwrite');
-  TConsole.WriteLine('  ' + AppExeName + ' -Product delphi12 -Overwrite');
-  TConsole.WriteLine('  ' + AppExeName + ' -BuildOnly -Silent -Product delphi13');
-  TConsole.WriteLine('  ' + AppExeName + ' -Install C:\repository\mylib.json');
-  TConsole.WriteLine('  ' + AppExeName + ' -Install https://example.com/repository/mylib.json');
-  TConsole.WriteLine;
+
 end;
 
-procedure TApp.ShowInstalledVersions;
+// -- Delphi running check ------------------------------------------------------
+
+procedure TCommand.TestDelphiRunning;
 begin
-  if TProduct.Products.Count = 0 then
-  begin
-    TConsole.WriteWarning('No Delphi versions found in the registry.');
-    Exit;
+  var Running := TStringList.Create;
+  try
+    for var P in TProduct.Products do
+      if P.IsRunning then
+        Running.Add(P.DisplayName);
+
+    if Running.Count = 0 then
+      Exit;
+
+    TConsole.WriteLine;
+    TConsole.WriteWarning('The following Delphi instance(s) are currently open:');
+    for var Name in Running do
+      TConsole.WriteLine('  - ' + Name, clYellow);
+    TConsole
+        .WriteLine('  Please close Delphi before continuing, or the installation may not work correctly.', clYellow);
+    TConsole.WriteLine;
+    TConsole.Write('Press ENTER to continue anyway, or close Delphi and then press ENTER: ');
+    var Confirm := TConsole.ReadLine;
+  finally
+    Running.Free;
   end;
-  TConsole.WriteLine;
-  TConsole.WriteLine('Installed Delphi versions:', clWhite);
-  TConsole.WriteLine;
-  for var P in TProduct.Products do
-    TConsole.WriteLine(Format('  %-20s %s', [P.VersionName, P.DisplayName]));
-  TConsole.WriteLine;
 end;
 
-procedure TApp.ShowInstalledPackages(const Product: string);
+procedure TCommand.WriteOption(const AText: string);
 begin
-  if (Product <> '') and (TProduct.Products.Count > 0) then
+  TConsole.WriteLine(AText);
+end;
+
+procedure TCommand.WriteOption(const AOption, AText: string);
+begin
+  TConsole.Write('  ' + AOption + StringOfChar(' ', OptionLength - Length(AOption) - 3), clCyan);
+  TConsole.WriteLine(AText, clGray);
+end;
+
+{ TListCommand }
+
+procedure TListCommand.Execute;
+begin
+  inherited;
+  if (FProduct <> '') and (TProduct.Products.Count > 0) then
   begin
     var Found := False;
     for var P in TProduct.Products do
-      if SameText(P.DisplayName, Product) or SameText(P.VersionName, Product) then
+      if SameText(P.DisplayName, FProduct) or SameText(P.VersionName, FProduct) then
       begin
         Found := True;
         Break;
       end;
     if not Found then
-      raise Exception.CreateFmt('Product "%s" not found.', [Product]);
+      raise Exception.CreateFmt('Product "%s" not found.', [FProduct]);
   end;
 
   var HasOutput := False;
   for var P in TProduct.Products do
   begin
-    if (Product <> '') and not SameText(P.DisplayName, Product) and not SameText(P.VersionName, Product) then
+    if (FProduct <> '') and not SameText(P.DisplayName, FProduct) and not SameText(P.VersionName, FProduct) then
       Continue;
 
     var DbPath := TPath.Combine(TWorkspace.BlocksDir, P.VersionName + '-database.json');
@@ -327,85 +467,92 @@ begin
   TConsole.WriteLine;
 end;
 
-procedure TApp.Run;
+procedure TListCommand.ShowHelp;
 begin
-  ParseArgs;
+  TConsole.WriteLine;
+  TConsole.WriteLine('Lists all packages installed in the current workspace.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' list [options]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/product <version>', 'Filter by Delphi version (e.g. delphi12, delphi13).');
+  WriteOption('', 'Run "' + AppExeName + ' listproducts" to see valid values.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' list');
+  TConsole.WriteLine('  ' + AppExeName + ' list /product delphi12');
+  TConsole.WriteLine;
+end;
 
-  // No meaningful arguments ? show help
-  if not (FOptions.Help or FOptions.ListProducts or FOptions.List or FOptions.Init or FOptions.Uninstall)
-      and (FOptions.Install = '') then
+{ TListProductsCommand }
+
+procedure TListProductsCommand.Execute;
+begin
+  inherited;
+  if TProduct.Products.Count = 0 then
   begin
-    ShowBanner('', '');
-    ShowHelp;
+    TConsole.WriteWarning('No Delphi versions found in the registry.');
     Exit;
   end;
+  TConsole.WriteLine;
+  TConsole.WriteLine('Installed Delphi versions:', clWhite);
+  TConsole.WriteLine;
+  for var P in TProduct.Products do
+    TConsole.WriteLine(Format('  %-20s %s', [P.VersionName, P.DisplayName]));
+  TConsole.WriteLine;
+end;
 
-  if FOptions.Help then
-  begin
-    ShowBanner('', '');
-    ShowHelp;
-    Exit;
-  end;
+procedure TListProductsCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Lists all Delphi installations detected in the Windows registry.');
+  TConsole.WriteLine('Use the version name shown here as the /product argument for other commands.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' listproducts', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Example:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' listproducts');
+  TConsole.WriteLine;
+end;
 
-  if FOptions.ListProducts then
-  begin
-    ShowBanner('', '');
-    ShowInstalledVersions;
-    Exit;
-  end;
+{ TInitCommand }
 
-  if FOptions.List then
-  begin
-    ShowBanner('', '');
-    TWorkspace.WorkDir := IfThen(FOptions.WorkspacePath <> '', FOptions.WorkspacePath, GetCurrentDir);
-    TConsole.WriteLine('Installed packages in: ' + TWorkspace.WorkDir, clWhite);
-    ShowInstalledPackages(FOptions.Product);
-    Exit;
-  end;
+procedure TInitCommand.Execute;
+begin
+  inherited;
+  ShowBanner('', '');
+  TWorkspace.Initialize(GetCurrentDir);
+  TConsole.WriteLine('Initialising workspace: ' + TWorkspace.WorkDir, clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Workspace initialised.', clGreen);
+  TConsole.WriteLine;
+  Exit;
+end;
 
-  if FOptions.Init then
-  begin
-    ShowBanner('', '');
-    TWorkspace.Initialize(IfThen(FOptions.WorkspacePath <> '', FOptions.WorkspacePath, GetCurrentDir));
-    TConsole.WriteLine('Initialising workspace: ' + TWorkspace.WorkDir, clWhite);
-    TConsole.WriteLine;
-    TConsole.WriteLine('Workspace initialised.', clGreen);
-    TConsole.WriteLine;
-    Exit;
-  end;
+procedure TInitCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Creates the .blocks\ directory in the current folder and downloads');
+  TConsole.WriteLine('the remote package repository. Run this once before using install.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' init', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Example:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' init');
+  TConsole.WriteLine;
+end;
 
-  if FOptions.Uninstall and (FOptions.Install = '') then
-    raise Exception.Create('-Uninstall requires a package ID, path, or URL.');
+{ TInstallCommand }
 
-  // Step 1 — Working directory
-  if FOptions.WorkspacePath <> '' then
-  begin
-    if not TDirectory.Exists(FOptions.WorkspacePath) then
-      TDirectory.CreateDirectory(FOptions.WorkspacePath);
-    TWorkspace.WorkDir := FOptions.WorkspacePath;
-  end;
-
-  // Offer to initialise if .blocks\ is absent
-  if not TDirectory.Exists(TWorkspace.BlocksDir) then
-  begin
-    TConsole.WriteLine;
-    TConsole.WriteWarning('The current directory is not a valid Blocks workspace.');
-    TConsole.WriteLine('Proceeding will initialise it by downloading the package repository.', clYellow);
-    TConsole.WriteLine;
-    TConsole.Write('Initialise workspace now? [Y/N] (default: N): ');
-    var Confirm := TConsole.ReadLine;
-    if not SameText(Trim(Confirm), 'Y') then
-      raise Exception.Create('Operation cancelled. Run "blocks -Init" to initialise the workspace first.');
-    TWorkspace.Initialize(TWorkspace.WorkDir);
-    TConsole.WriteLine;
-  end;
-
-  // Step 2 — Extract optional @commit suffix from -Install (e.g. "owner.pkg@abc1234")
-  var InstallSource := FOptions.Install;
+procedure TInstallCommand.Execute;
+begin
+  inherited;
+  CheckWorkspace;
+  var InstallSource := FPackageName;
   var InstallCommit := '';
-  if ContainsStr(FOptions.Install, '@') then
+  if ContainsStr(FPackageName, '@') then
   begin
-    var Parts := FOptions.Install.Split(['@'], 2);
+    var Parts := FPackageName.Split(['@'], 2);
     InstallSource := Trim(Parts[0]);
     InstallCommit := Trim(Parts[1]);
   end;
@@ -413,9 +560,9 @@ begin
   var Database := TDatabase.Create;
   var Manifest := TManifest.Load(InstallSource);
   try
-    ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
+    //ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
 
-    TConsole.WriteLine('Config: ' + FOptions.Install, clDkGray);
+    TConsole.WriteLine('Config: ' + FPackageName, clDkGray);
     TConsole.WriteLine;
 
     TestDelphiRunning;
@@ -424,35 +571,13 @@ begin
     TConsole.WriteLine;
 
     // Step 3 — Delphi version
-    var SelectedProduct := TProduct.Select(FOptions.Product);
+    var SelectedProduct := TProduct.Select(FProduct);
     TConsole.WriteLine('Selected version: ' + SelectedProduct.DisplayName, clGreen);
     TConsole.WriteLine;
 
-    // Step 4 — Uninstall path
-    if FOptions.Uninstall then
-    begin
-      var DirName := IfThen(FOptions.ProjectFolder <> '', FOptions.ProjectFolder, Manifest.Application.Name);
-      var ProjectDir := TPath.Combine(TWorkspace.WorkDir, DirName);
-
-      if TDirectory.Exists(ProjectDir) then
-      begin
-        TDirectory.Delete(ProjectDir, True);
-        TConsole.WriteLine('Removed: ' + ProjectDir, clYellow);
-      end
-      else
-        TConsole.WriteLine('Directory not found: ' + ProjectDir, clYellow);
-
-      Database.RemoveEntry(Manifest.Application.Id, SelectedProduct.VersionName);
-
-      TConsole.WriteLine;
-      TConsole.WriteLine('Uninstalled: ' + Manifest.Application.Name, clGreen);
-      TConsole.WriteLine;
-      Exit;
-    end;
-
-    // Step 5 — Skip if already installed (unless -Overwrite or -BuildOnly)
-    if not FOptions.Overwrite
-        and not FOptions.BuildOnly
+    // Step 4 — Skip if already installed (unless -Overwrite or -BuildOnly)
+    if not FOverwrite
+        and not FBuildOnly
         and Database.IsInstalled(Manifest.Application.Id, SelectedProduct.VersionName) then
     begin
       TConsole.WriteWarning('Already installed: ' + Manifest.Application.Id);
@@ -460,23 +585,23 @@ begin
       Exit;
     end;
 
-    // Step 6 — Resolve package folder for selected Delphi version
+    // Step 5 — Resolve package folder for selected Delphi version
     var PackageFolder := SelectedProduct.GetPackageFolder(Manifest.PackageOptions.PackageFolders);
 
-    // Step 7 — Dependencies
+    // Step 6 — Dependencies
     if not Manifest.Dependencies.IsEmpty then
     begin
       TConsole.WriteLine('Resolving dependencies...', clCyan);
       for var LDependency in Manifest.Dependencies do
-        SelectedProduct.Install(LDependency, Database, FOptions.Silent, FOptions.Overwrite);
+        SelectedProduct.Install(LDependency, Database, FSilent, FOverwrite);
       TConsole.WriteLine;
     end;
 
     var CommitSha: string;
     var ProjectDir: string;
-    if not FOptions.BuildOnly then
+    if not FBuildOnly then
     begin
-      // Step 8 — Resolve commit and download
+      // Step 7 — Resolve commit and download
       TConsole.WriteLine('--- ' + Manifest.Application.Id + ' / ' + Manifest.Application.Name + ' ---', clWhite);
       TConsole.WriteLine('Fetching repository info...', clCyan);
       var RepoInfo := THttpUtils.GetGitHubInfo(Manifest.Application.Url);
@@ -489,11 +614,6 @@ begin
         CommitSha := InstallCommit;
         TConsole.WriteLine('Commit: ' + CommitSha + ' (from @)');
       end
-      else if FOptions.Commit <> '' then
-      begin
-        CommitSha := Trim(FOptions.Commit);
-        TConsole.WriteLine('Commit: ' + CommitSha + ' (from -Commit)');
-      end
       else
       begin
         CommitSha := RepoInfo.LatestCommit;
@@ -502,14 +622,14 @@ begin
       TConsole.WriteLine;
 
       var ZipUrl := THttpUtils.GetGitHubZipUrl(RepoInfo.Owner, RepoInfo.Repo, CommitSha);
-      var DirName := IfThen(FOptions.ProjectFolder <> '', FOptions.ProjectFolder, Manifest.Application.Name);
-      ProjectDir := THttpUtils.DownloadAndExtract(ZipUrl, TWorkspace.WorkDir, DirName, FOptions.Overwrite, FOptions.Silent);
+      var DirName := Manifest.Application.Name;
+      ProjectDir := THttpUtils.DownloadAndExtract(ZipUrl, TWorkspace.WorkDir, DirName, FOverwrite, FSilent);
       TConsole.WriteLine('Project downloaded to: ' + ProjectDir, clGreen);
       TConsole.WriteLine;
     end
     else
     begin
-      var DirName := IfThen(FOptions.ProjectFolder <> '', FOptions.ProjectFolder, Manifest.Application.Name);
+      var DirName := Manifest.Application.Name;
       ProjectDir := TPath.Combine(TWorkspace.WorkDir, DirName);
       if not TDirectory.Exists(ProjectDir) then
         raise Exception.CreateFmt('Build-only mode: project directory not found: %s', [ProjectDir]);
@@ -518,11 +638,11 @@ begin
       CommitSha := '';
     end;
 
-    // Step 9 — Compile
+    // Step 8 — Compile
     SelectedProduct.BuildPackages(ProjectDir, PackageFolder, Manifest.Packages, Manifest.SupportedPlatforms);
 
-    // Step 10 — Update database
-    if not FOptions.BuildOnly then
+    // Step 9 — Update database
+    if not FBuildOnly then
       Database.Update(Manifest.Application.Id, CommitSha, SelectedProduct.VersionName);
 
     TConsole.WriteLine;
@@ -538,14 +658,126 @@ begin
   end;
 end;
 
-class procedure TApp.RunBlocks;
+procedure TInstallCommand.ShowHelp;
 begin
-  var LApp := TApp.Create;
+  TConsole.WriteLine;
+  TConsole.WriteLine('Downloads, compiles and registers a Delphi package into the active');
+  TConsole.WriteLine('Delphi installation. The source can be a registry ID, a local file, or a URL.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' install <source> [options]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Arguments:', clWhite);
+  WriteOption('<source>', 'Package ID, local file path, or remote URL of a manifest (.json).');
+  WriteOption('', 'Append @<sha> to pin a specific commit  (e.g. owner.pkg@abc1234).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/product <version>', 'Target Delphi version (e.g. delphi12, delphi13).');
+  WriteOption('', 'If omitted you will be prompted to choose.');
+  WriteOption('/overwrite', 'Overwrite the project directory if it already exists.');
+  WriteOption('/buildonly', 'Skip download; compile the already-extracted project.');
+  WriteOption('/silent', 'Skip non-critical interactive prompts (use defaults).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package');
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package@abc1234');
+  TConsole.WriteLine('  ' + AppExeName + ' install C:\repos\mylib.json /overwrite');
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package /product delphi12 /silent');
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package /buildonly /product delphi13');
+  TConsole.WriteLine;
+end;
+
+{ TUninstallCommand }
+
+procedure TUninstallCommand.Execute;
+begin
+  inherited;
+  CheckWorkspace;
+  var InstallSource := FPackageName;
+  var InstallCommit := '';
+  if ContainsStr(FPackageName, '@') then
+  begin
+    var Parts := FPackageName.Split(['@'], 2);
+    InstallSource := Trim(Parts[0]);
+    InstallCommit := Trim(Parts[1]);
+  end;
+
+  var Database := TDatabase.Create;
+  var Manifest := TManifest.Load(InstallSource);
   try
-    LApp.Run;
+    //ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
+
+    TConsole.WriteLine('Config: ' + FPackageName, clDkGray);
+    TConsole.WriteLine;
+
+    TestDelphiRunning;
+
+    TConsole.WriteLine('Workspace: ' + TWorkspace.WorkDir, clDkGray);
+    TConsole.WriteLine;
+
+    // Step 3 — Delphi version
+    var SelectedProduct := TProduct.Select(FProduct);
+    TConsole.WriteLine('Selected version: ' + SelectedProduct.DisplayName, clGreen);
+    TConsole.WriteLine;
+
+    // Step 4 — Uninstall path
+    var DirName := Manifest.Application.Name;
+    var ProjectDir := TPath.Combine(TWorkspace.WorkDir, DirName);
+
+    if TDirectory.Exists(ProjectDir) then
+    begin
+      TDirectory.Delete(ProjectDir, True);
+      TConsole.WriteLine('Removed: ' + ProjectDir, clYellow);
+    end
+    else
+      TConsole.WriteLine('Directory not found: ' + ProjectDir, clYellow);
+
+    Database.RemoveEntry(Manifest.Application.Id, SelectedProduct.VersionName);
+
+    TConsole.WriteLine;
+    TConsole.WriteLine('Uninstalled: ' + Manifest.Application.Name, clGreen);
+    TConsole.WriteLine;
   finally
-    LApp.Free;
+    Manifest.Free;
+    Database.Free;
   end;
 end;
+
+procedure TUninstallCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Removes a previously installed package: deletes its project directory');
+  TConsole.WriteLine('and the corresponding entry from the local database.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' uninstall <source> [options]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Arguments:', clWhite);
+  WriteOption('<source>', 'Package ID, local file path, or remote URL of a manifest (.json).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/product <version>', 'Target Delphi version (e.g. delphi12, delphi13).');
+  WriteOption('', 'If omitted you will be prompted to choose.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package');
+  TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package /product delphi12');
+  TConsole.WriteLine;
+end;
+
+{ ParamAttribute }
+
+constructor ParamAttribute.Create(const AParamName: string);
+begin
+  inherited Create;
+  FParamName := AParamName;
+end;
+
+initialization
+
+TCommand.RegisterCommand('help', THelpCommand, True);
+TCommand.RegisterCommand('list', TListCommand);
+TCommand.RegisterCommand('listproducts', TListProductsCommand);
+TCommand.RegisterCommand('init', TInitCommand);
+TCommand.RegisterCommand('install', TInstallCommand);
+TCommand.RegisterCommand('uninstall', TUninstallCommand);
 
 end.
