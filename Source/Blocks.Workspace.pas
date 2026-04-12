@@ -3,21 +3,35 @@ unit Blocks.Workspace;
 interface
 
 uses
-  System.Classes,
-  System.SysUtils,
-  System.IOUtils,
-  System.Types,
-  System.Zip;
+  System.Classes, System.SysUtils, System.IOUtils, System.Generics.Collections,
+  System.Types, System.Zip,
+
+  Blocks.Database,
+  Blocks.JSON,
+  Blocks.Types;
 
 type
+  TConfig = class;
+
   TWorkspace = class
   private
     class var
       FWorkDir: string;
+      FConfig: TConfig;
+      FDatabase: TDatabase;
     class function GetWorkDir: string; static;
     class function GetBlocksDir: string; static;
     class procedure SetWorkDir(const AValue: string); static;
+
+    class function GetConfig: TConfig; static;
+    class function GetDatabase: TDatabase; static;
+    class constructor Create;
+    class destructor  Destroy;
   public
+    /// <summary>Get a refernce to the database of installed packages.</summary>
+    class property Database: TDatabase read GetDatabase;
+    /// <summary>Get a refernce to the workspace configuration.</summary>
+    class property Config: TConfig read GetConfig;
     /// <summary>Initialises a directory as a Blocks workspace and sets <see cref="WorkDir"/>.</summary>
     /// <param name="AWorkDir">Directory to initialise as the workspace root.</param>
     /// <remarks>
@@ -41,6 +55,26 @@ type
     class property BlocksDir: string read GetBlocksDir;
   end;
 
+  TConfig = class(TObject)
+  private
+    FSources: TJSONStringList;
+    function ConfigPath: string;
+  public
+    function DefaultSource: string;
+    [JsonList(System.TypeInfo(string))]
+    property Sources: TJSONStringList read FSources;
+
+    procedure Load;
+    procedure Save;
+
+    function Get(const AKey: string): string;
+    procedure &Set(const AKey, AValue: string);
+    procedure Add(const AKey, AValue: string);
+
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
 implementation
 
 uses
@@ -48,12 +82,48 @@ uses
   Blocks.Console,
   Blocks.Http;
 
+const
+  DefaultBlocksRepositoryUrl = 'https://github.com/lminuti/blocks-repository';
+
+{ TWorkspace }
+
+class function TWorkspace.GetConfig: TConfig;
+begin
+  if not Assigned(FConfig) then
+  begin
+    FConfig := TConfig.Create;
+    FConfig.Load;
+  end;
+  Result := FConfig;
+end;
+
+class function TWorkspace.GetDatabase: TDatabase;
+begin
+  if not Assigned(FDatabase) then
+  begin
+    FDatabase := TDatabase.Create;
+  end;
+  Result := FDatabase;
+end;
+
 class function TWorkspace.GetWorkDir: string;
 begin
   if FWorkDir <> '' then
     Result := FWorkDir
   else
     Result := GetCurrentDir;
+end;
+
+class constructor TWorkspace.Create;
+begin
+  FConfig := nil;
+  FDatabase := nil;
+end;
+
+class destructor TWorkspace.Destroy;
+begin
+  FConfig.Free;
+  FDatabase.Free;
 end;
 
 class function TWorkspace.GetBlocksDir: string;
@@ -85,7 +155,7 @@ begin
   TDirectory.CreateDirectory(DownloadDir);
 
   TConsole.WriteLine('Fetching repository info...', clCyan);
-  var RepoInfo := THttpUtils.GetGitHubInfo(BlocksRepositoryUrl);
+  var RepoInfo := THttpUtils.GetGitHubInfo(Config.DefaultSource);
   TConsole.WriteLine('  Branch : ' + RepoInfo.DefaultBranch);
   TConsole.WriteLine('  Latest : ' + RepoInfo.LatestCommit);
   TConsole.WriteLine;
@@ -128,6 +198,84 @@ begin
   TConsole.WriteLine('Repository updated: ' + RepoDir, clGreen);
 
   TDirectory.Delete(DownloadDir, True);
+end;
+
+{ TConfig }
+
+procedure TConfig.&Set(const AKey, AValue: string);
+begin
+  if SameText(AKey, 'sources') then
+  begin
+    var LSources := AValue.Split([',']);
+    FSources.Clear;
+    for var S in LSources do
+      FSources.Add(S);
+  end
+  else
+    raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
+end;
+
+procedure TConfig.Add(const AKey, AValue: string);
+begin
+  if SameText(AKey, 'sources') then
+  begin
+    FSources.Add(AValue)
+  end
+  else
+    raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
+end;
+
+function TConfig.ConfigPath: string;
+begin
+  var LWorkDir := TWorkspace.BlocksDir;
+  ForceDirectories(LWorkDir);
+  Result := TPath.Combine(LWorkDir, 'workspace.json');
+end;
+
+
+constructor TConfig.Create;
+begin
+  inherited;
+  FSources := TJSONStringList.Create;
+  FSources.Add(DefaultBlocksRepositoryUrl);
+end;
+
+function TConfig.DefaultSource: string;
+begin
+  if FSources.Count < 1 then
+    raise Exception.Create('Source list is empty!');
+  Result := Sources[0];
+end;
+
+destructor TConfig.Destroy;
+begin
+  FSources.Free;
+  inherited;
+end;
+
+function TConfig.Get(const AKey: string): string;
+begin
+  if SameText(AKey, 'sources') then
+    Result := string.Join(',', FSources.ToArray)
+  else
+    raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
+end;
+
+procedure TConfig.Load;
+begin
+  if FileExists(ConfigPath) then
+  begin
+    var LJSON := TFile.ReadAllText(ConfigPath);
+    TJsonHelper.JSONToObject(Self, LJSON);
+  end
+  else
+    Save;
+end;
+
+procedure TConfig.Save;
+begin
+  var LJsonString := TJsonHelper.ObjectToJSONString(Self);
+  TFile.WriteAllText(ConfigPath, LJsonString);
 end;
 
 end.

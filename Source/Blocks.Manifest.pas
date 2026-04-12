@@ -9,19 +9,10 @@ uses
   System.JSON,
   System.Generics.Collections,
 
+  Blocks.Types,
   Blocks.JSON;
 
 type
-
-  // -----------------------------------------------------------------------
-  // JSON-aware string list
-  // -----------------------------------------------------------------------
-  TJsonStringList = class(TList<string>)
-  public
-    procedure FromJson(LJSON: TJSONValue);
-    function ToJson: TJSONArray;
-  end;
-
   // -----------------------------------------------------------------------
   // Application info
   // -----------------------------------------------------------------------
@@ -144,27 +135,6 @@ uses
   Blocks.Console,
   Blocks.Http,
   Blocks.Workspace;
-
-{ TJsonStringList }
-
-procedure TJsonStringList.FromJson(LJSON: TJSONValue);
-var
-  LItem: TJSONValue;
-begin
-  if not Assigned(LJSON) then
-    Exit;
-  for LItem in (LJSON as TJSONArray) do
-    Add(LItem.Value);
-end;
-
-function TJsonStringList.ToJson: TJSONArray;
-var
-  LValue: string;
-begin
-  Result := TJSONArray.Create;
-  for LValue in Self do
-    Result.Add(LValue);
-end;
 
 { TManifestPlatform }
 

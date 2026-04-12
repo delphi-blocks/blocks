@@ -10,8 +10,6 @@ uses
 // -- Application constants ----------------------------------------------------
 
 const
-  BlocksRepositoryUrl = 'https://github.com/lminuti/blocks-repository';
-
   VersionOrder: array[0..10] of string = (
       'delphixe6',
       'delphixe7',

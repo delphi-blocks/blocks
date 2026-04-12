@@ -87,6 +87,17 @@ type
     procedure ShowHelp; override;
   end;
 
+  TConfigCommand = class(TBaseCommand)
+  private
+    [Param('add')]
+    FAdd: Boolean;
+    [Param]
+    FConfigs: TArray<string>;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
 implementation
 
 uses
@@ -155,6 +166,7 @@ begin
   WriteOption('init', 'Initialise the workspace and download the package repository.');
   WriteOption('list', 'List packages installed in the current workspace.');
   WriteOption('listproducts', 'List detected Delphi installations.');
+  WriteOption('config', 'Read or write workspace configuration values.');
   WriteOption('help [command]', 'Show this message, or detailed help for a specific command.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
@@ -316,7 +328,6 @@ begin
     InstallCommit := Trim(Parts[1]);
   end;
 
-  var Database := TDatabase.Create;
   var Manifest := TManifest.Load(InstallSource);
   try
     ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
@@ -337,7 +348,7 @@ begin
     // Step 4 — Skip if already installed (unless -Overwrite or -BuildOnly)
     if not FOverwrite
         and not FBuildOnly
-        and Database.IsInstalled(Manifest.Application.Id, SelectedProduct.VersionName) then
+        and TWorkspace.Database.IsInstalled(Manifest.Application.Id, SelectedProduct.VersionName) then
     begin
       TConsole.WriteWarning('Already installed: ' + Manifest.Application.Id);
       TConsole.WriteLine;
@@ -352,7 +363,7 @@ begin
     begin
       TConsole.WriteLine('Resolving dependencies...', clCyan);
       for var LDependency in Manifest.Dependencies do
-        SelectedProduct.Install(LDependency, Database, FSilent, FOverwrite);
+        SelectedProduct.Install(LDependency, TWorkspace.Database, FSilent, FOverwrite);
       TConsole.WriteLine;
     end;
 
@@ -402,7 +413,7 @@ begin
 
     // Step 9 — Update database
     if not FBuildOnly then
-      Database.Update(Manifest.Application.Id, CommitSha, SelectedProduct.VersionName);
+      TWorkspace.Database.Update(Manifest.Application.Id, CommitSha, SelectedProduct.VersionName);
 
     TConsole.WriteLine;
     TConsole.WriteLine('============================================', clGreen);
@@ -413,7 +424,6 @@ begin
     TConsole.WriteLine;
   finally
     Manifest.Free;
-    Database.Free;
   end;
 end;
 
@@ -460,7 +470,6 @@ begin
     InstallCommit := Trim(Parts[1]);
   end;
 
-  var Database := TDatabase.Create;
   var Manifest := TManifest.Load(InstallSource);
   try
     ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
@@ -490,14 +499,13 @@ begin
     else
       TConsole.WriteLine('Directory not found: ' + ProjectDir, clYellow);
 
-    Database.RemoveEntry(Manifest.Application.Id, SelectedProduct.VersionName);
+    TWorkspace.Database.RemoveEntry(Manifest.Application.Id, SelectedProduct.VersionName);
 
     TConsole.WriteLine;
     TConsole.WriteLine('Uninstalled: ' + Manifest.Application.Name, clGreen);
     TConsole.WriteLine;
   finally
     Manifest.Free;
-    Database.Free;
   end;
 end;
 
@@ -602,6 +610,63 @@ begin
   TConsole.WriteLine(AText, clGray);
 end;
 
+{ TConfigCommand }
+
+procedure TConfigCommand.Execute;
+begin
+  inherited;
+  if Length(FConfigs) = 0 then
+  begin
+    ShowHelp;
+    Exit;
+  end;
+
+  for var LConfig in FConfigs do
+  begin
+    var LEqualPos := Pos('=', LConfig);
+    if LEqualPos < 1 then
+    begin
+      var LValue := TWorkspace.Config.Get(LConfig);
+      TConsole.WriteLine(Format('%s: %s', [LConfig, LValue]));
+    end
+    else
+    begin
+      var LKey := Copy(LConfig, 1, LEqualPos - 1);
+      var LValue := Copy(LConfig, LEqualPos + 1, Length(LConfig));
+      if FAdd then
+        TWorkspace.Config.Add(LKey, LValue)
+      else
+        TWorkspace.Config.&Set(LKey, LValue);
+      TWorkspace.Config.Save;
+      TConsole.WriteLine('Config applyed');
+    end;
+  end;
+end;
+
+procedure TConfigCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Reads or writes workspace configuration values.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' config [/add] [<key>[=<value>] ...]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Arguments:', clWhite);
+  WriteOption('<key>', 'Print the current value of the given key.');
+  WriteOption('<key>=<value>', 'Set the key to the given value.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/add', 'Append the value instead of replacing it (for list keys).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Keys:', clWhite);
+  WriteOption('sources', 'Comma-separated list of repository URLs used by "init".');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' config sources');
+  TConsole.WriteLine('  ' + AppExeName + ' config sources=https://github.com/owner/my-repo');
+  TConsole.WriteLine('  ' + AppExeName + ' config /add sources=https://github.com/owner/other-repo');
+  TConsole.WriteLine;
+end;
+
 initialization
 
 TCommand.RegisterCommand('help', THelpCommand, True);
@@ -610,5 +675,6 @@ TCommand.RegisterCommand('listproducts', TListProductsCommand);
 TCommand.RegisterCommand('init', TInitCommand);
 TCommand.RegisterCommand('install', TInstallCommand);
 TCommand.RegisterCommand('uninstall', TUninstallCommand);
+TCommand.RegisterCommand('config', TConfigCommand);
 
 end.

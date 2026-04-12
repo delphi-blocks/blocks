@@ -45,6 +45,8 @@ type
     class function JSONToObject<T: class, constructor>(const AJsonString: string):T; overload; static;
     class function JSONToObject(AType: TRttiType; AJSON: TJSONValue): TObject; overload;
     class procedure JSONToObject(AObject: TObject; AType: TRttiType; AJSON: TJSONValue); overload;
+    class procedure JSONToObject(AObject: TObject; AJSON: TJSONValue); overload;
+    class procedure JSONToObject(AObject: TObject; const AJSONString: string); overload;
 
     class function ObjectToJSONString(AObject: TObject): string; overload;
     class function ObjectToJSON(AObject: TObject): TJSONValue; overload;
@@ -130,6 +132,22 @@ begin
     LDeserializer.JSONToObject(AObject, AType, AJSON);
   finally
     LDeserializer.Free;
+  end;
+end;
+
+class procedure TJsonHelper.JSONToObject(AObject: TObject; AJSON: TJSONValue);
+begin
+  JSONToObject(AObject, TRttiHelper.Context.GetType(AObject.ClassType) , AJSON);
+end;
+
+class procedure TJsonHelper.JSONToObject(AObject: TObject;
+  const AJSONString: string);
+begin
+  var LJson := TJSONObject.ParseJSONValue(AJsonString, False, True);
+  try
+    JSONToObject(AObject, LJson);
+  finally
+    LJson.Free;
   end;
 end;
 
@@ -355,8 +373,14 @@ begin
   if AddMethod = nil then
     Exit;
 
+  var LMethodClear := ListType.GetMethod('Clear');
+  if not Assigned(LMethodClear) or (LMethodClear.MethodKind <> mkProcedure) then
+    Exit;
+
   // Get RttiType of the value (T) from PTypeInfo
   var ValueRttiType := TRttiHelper.Context.GetType(ADataType);
+
+  LMethodClear.Invoke(AObject, []);
 
   for var JsonItem in (AJSON as TJSONArray) do
   begin
@@ -583,6 +607,7 @@ begin
     Exit(nil);
 
   var LListType := TRttiHelper.Context.GetType(AObject.ClassType);
+
   var LMethodGetEnumerator := LListType.GetMethod('GetEnumerator');
   if not Assigned(LMethodGetEnumerator) or
      (LMethodGetEnumerator.MethodKind <> mkFunction) or
