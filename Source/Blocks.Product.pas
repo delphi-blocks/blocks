@@ -26,6 +26,7 @@ type
 
     class procedure LoadProducts;
     function GetRank: Integer;
+    class function GetProductNames: TArray<string>; static;
 
   public
     constructor Create(const ABdsVersion, AVersionName, ADisplayName, ARootDir: string);
@@ -105,6 +106,8 @@ type
 
     /// <summary>All installed Delphi/RAD Studio products, sorted newest-first.</summary>
     class property Products: TObjectList<TProduct> read FProducts;
+    /// <summary>All installed Delphi/RAD Studio products by name.</summary>
+    class property ProductNames: TArray<string> read GetProductNames;
 
     /// <summary>Internal BDS registry key version string (e.g. <c>23.0</c> for Delphi 12 Athens).</summary>
     property BdsVersion: string read FBdsVersion;
@@ -482,6 +485,14 @@ begin
     raise Exception.CreateFmt('No compatible package folder found for "%s". Delphi version too old?', [FVersionName]);
 
   Result := APackageFolders[BestKey];
+end;
+
+class function TProduct.GetProductNames: TArray<string>;
+begin
+  Result := [];
+  var LProducts := Products;
+  for var P in LProducts do
+    Result := Result + [P.DisplayName];
 end;
 
 function TProduct.TestPlatformInstalled(const APlatform: string): Boolean;

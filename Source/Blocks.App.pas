@@ -3,16 +3,14 @@
 interface
 
 uses
-  System.SysUtils,
-  System.Classes,
-  System.IOUtils,
-  System.TypInfo,
-  System.Rtti,
-  System.JSON,
-  System.Math,
-  System.StrUtils,
+  System.SysUtils, System.Classes, System.IOUtils, System.TypInfo,
+  System.Rtti, System.JSON, System.Math, System.StrUtils,
   System.Generics.Collections,
-  Winapi.Windows;
+
+  Winapi.Windows,
+
+  Blocks.Product,
+  Blocks.Command;
 
 type
   TApp = class
@@ -20,41 +18,16 @@ type
     class procedure RunBlocks; static;
   end;
 
-  ParamAttribute = class(TCustomAttribute)
-  private
-    FParamName: string;
-  public
-    property ParamName: string read FParamName;
-    constructor Create(const AParamName: string = '');
-  end;
-
-  TCommand = class;
-  TCommandClass = class of TCommand;
-
-  TCommand = class(TObject)
-  strict private
-    class var FRegistry: TDictionary<string, TCommandClass>;
-    class var FDefaultCommand: TCommandClass;
-    class var FContext: TRttiContext;
-    constructor InnerCreate;
-    class procedure InjectArgs(ACommand: TCommand);
+  TBaseCommand = class(TCommand)
   protected
     procedure ShowBanner(const AppName, Description: string);
     procedure WriteOption(const AOption, AText: string); overload;
     procedure WriteOption(const AText: string); overload;
     procedure CheckWorkspace;
     procedure TestDelphiRunning;
-  public
-    class constructor Create;
-    class destructor Destroy;
-    class procedure RegisterCommand(const AName: string; AClass: TCommandClass; ADefault: Boolean = False);
-    class function Create(const ACommandName: string): TCommand;
-  public
-    procedure Execute; virtual;
-    procedure ShowHelp; virtual;
   end;
 
-  THelpCommand = class(TCommand)
+  THelpCommand = class(TBaseCommand)
   private
     [Param]
     FCommandName: string;
@@ -63,28 +36,30 @@ type
     procedure ShowHelp; override;
   end;
 
-  TListCommand = class(TCommand)
+  TListCommand = class(TBaseCommand)
   private
     [Param('product')]
     FProduct: string;
+    procedure ListBlocks(AProduct: TProduct); overload;
+    procedure ListBlocks(const AProductName: string); overload;
   public
     procedure Execute; override;
     procedure ShowHelp; override;
   end;
 
-  TListProductsCommand = class(TCommand)
+  TListProductsCommand = class(TBaseCommand)
   public
     procedure Execute; override;
     procedure ShowHelp; override;
   end;
 
-  TInitCommand = class(TCommand)
+  TInitCommand = class(TBaseCommand)
   public
     procedure Execute; override;
     procedure ShowHelp; override;
   end;
 
-  TInstallCommand = class(TCommand)
+  TInstallCommand = class(TBaseCommand)
   private
     [Param('product')]
     FProduct: string;
@@ -101,7 +76,7 @@ type
     procedure ShowHelp; override;
   end;
 
-  TUninstallCommand = class(TCommand)
+  TUninstallCommand = class(TBaseCommand)
   private
     [Param('product')]
     FProduct: string;
@@ -118,7 +93,6 @@ uses
   Blocks.Consts,
   Blocks.Console,
   Blocks.Database,
-  Blocks.Product,
   Blocks.Http,
   Blocks.Manifest,
   Blocks.Workspace;
@@ -186,285 +160,62 @@ begin
   TConsole.WriteLine;
 end;
 
-{ TCommand }
-
-class constructor TCommand.Create;
-begin
-  FRegistry := TDictionary<string, TCommandClass>.Create;
-  FContext := TRttiContext.Create;
-end;
-
-procedure TCommand.CheckWorkspace;
-begin
-  // Offer to initialise if .blocks\ is absent
-  if not TDirectory.Exists(TWorkspace.BlocksDir) then
-  begin
-    TConsole.WriteLine;
-    TConsole.WriteWarning('The current directory is not a valid Blocks workspace.');
-    TConsole.WriteLine('Proceeding will initialise it by downloading the package repository.', clYellow);
-    TConsole.WriteLine;
-    TConsole.Write('Initialise workspace now? [Y/N] (default: N): ');
-    var Confirm := TConsole.ReadLine;
-    if not SameText(Trim(Confirm), 'Y') then
-      raise Exception.Create('Operation cancelled. Run "blocks -Init" to initialise the workspace first.');
-    TWorkspace.Initialize(TWorkspace.WorkDir);
-    TConsole.WriteLine;
-  end;
-end;
-
-class function TCommand.Create(const ACommandName: string): TCommand;
-begin
-  var LCommandClass: TCommandClass := nil;
-  for var LPair in FRegistry do
-  begin
-    if SameText(LPair.Key, ACommandName) then
-    begin
-      LCommandClass := LPair.Value;
-      Break;
-    end;
-  end;
-  if not Assigned(LCommandClass) then
-  begin
-    TConsole.WriteError(Format('Command "%s" not found', [ACommandName]));
-    LCommandClass := FDefaultCommand;
-    if not Assigned(LCommandClass) then
-      Abort;
-  end;
-  Result := LCommandClass.InnerCreate;
-end;
-
-class destructor TCommand.Destroy;
-begin
-  FRegistry.Free;
-  FContext.Free;
-end;
-
-procedure TCommand.Execute;
-begin
-  TCommand.InjectArgs(Self);
-end;
-
-// Parse params like this:
-// blocks install /verbose /product package.name
-// and inject in a classdecorated with way:
-// [Param('verbose')]
-// FVerbose: Boolean;
-// [Param('product')]
-// FProduct: string;
-// [Param]
-// FPackageName: string; // This is an unnamed param (now only one is supported)
-class procedure TCommand.InjectArgs(ACommand: TCommand);
-
-  function FindClassFieldByParamName(const AParamName: string; out AUnnamedParam: Boolean): TRttiField;
-  begin
-    var LDefaultParam: TRttiField := nil;
-    AUnnamedParam := False;
-    var LRttiType := FContext.GetType(ACommand.ClassType);
-    for var F in LRttiType.GetFields do
-    begin
-      var LAttr := F.GetAttribute<ParamAttribute>;
-      if Assigned(LAttr) then
-      begin
-        // If it finds an unnamed param set the LDefaultParam
-        if LAttr.ParamName = '' then
-          LDefaultParam := F;
-
-        if SameText('/' + LAttr.ParamName, AParamName) then
-         Exit(F);
-      end;
-    end;
-    if AParamName.StartsWith('/') or not Assigned(LDefaultParam) then
-      raise Exception.CreateFmt('Param "%s" not found', [AParamName]);
-    Result := LDefaultParam;
-    AUnnamedParam := True;
-  end;
-
-begin
-  var I := 2;
-  var LUnnamedParam: Boolean;
-  while I <= ParamCount do
-  begin
-    var LField := FindClassFieldByParamName(ParamStr(I), LUnnamedParam);
-    if LField.DataType.TypeKind = tkEnumeration then // boolean expected
-      LField.SetValue(ACommand, True)
-    else if LField.DataType.TypeKind = tkUString then
-    begin
-      if not LUnnamedParam then
-        Inc(I);
-      LField.SetValue(ACommand, ParamStr(I));
-    end
-    else
-      raise Exception.Create('Param type not supported');
-    Inc(I);
-  end;
-end;
-
-constructor TCommand.InnerCreate;
-begin
-  inherited;
-end;
-
-class procedure TCommand.RegisterCommand(const AName: string; AClass: TCommandClass; ADefault: Boolean = False);
-begin
-  FRegistry.Add(AName, AClass);
-  if ADefault then
-    FDefaultCommand := AClass;
-end;
-
-// -- Banner, app name and description -----------------------------------------
-procedure TCommand.ShowBanner(const AppName, Description: string);
-var
-  BoxWidth: Integer;
-
-  function BoxLn(const T: string): string;
-  var
-    S: string;
-  begin
-    S := #$2502 + T;
-    while Length(S) < BoxWidth + 1 do
-      S := S + ' ';
-    Result := S + #$2502;
-  end;
-
-var
-  Line, Top, Sep, Bot: string;
-begin
-  BoxWidth := 50;
-  if Length(Description) > BoxWidth then
-    BoxWidth := Length(Description) + 15;
-
-  Line := StringOfChar(#$2500, BoxWidth);
-  Top := #$256D + Line + #$256E;
-  Sep := #$251C + Line + #$2524;
-  Bot := #$2570 + Line + #$256F;
-
-  TConsole.WriteLine;
-  TConsole.WriteLine(Top, clCyan);
-  TConsole.WriteLine(BoxLn('  ____  _     ___   ____  _  __ ____   '), clCyan);
-  TConsole.WriteLine(BoxLn(' | __ )| |   / _ \ / ___|| |/ // ___|  '), clCyan);
-  TConsole.WriteLine(BoxLn(' |  _ \| |  | | | | |    | '' / \___ \  '), clCyan);
-  TConsole.WriteLine(BoxLn(' | |_) | |__| |_| | |___ | . \  ___) | '), clCyan);
-  TConsole.WriteLine(BoxLn(' |____/|_____\___/ \____||_|\_\|____/   '), clCyan);
-  TConsole.WriteLine(Sep, clDkCyan);
-  TConsole.WriteLine(BoxLn('  '#$25C6'  Delphi Package Installer'), clDkCyan);
-
-  if AppName <> '' then
-  begin
-    TConsole.WriteLine(Sep, clDkCyan);
-    TConsole.WriteLine(BoxLn('  Package  '#$25B8'  ' + AppName), clWhite);
-    if Description <> '' then
-      TConsole.WriteLine(BoxLn('  About    '#$25B8'  ' + Description), clGray);
-  end;
-
-  TConsole.WriteLine(Bot, clCyan);
-  TConsole.WriteLine;
-end;
-
-procedure TCommand.ShowHelp;
-begin
-
-end;
-
-// -- Delphi running check ------------------------------------------------------
-
-procedure TCommand.TestDelphiRunning;
-begin
-  var Running := TStringList.Create;
-  try
-    for var P in TProduct.Products do
-      if P.IsRunning then
-        Running.Add(P.DisplayName);
-
-    if Running.Count = 0 then
-      Exit;
-
-    TConsole.WriteLine;
-    TConsole.WriteWarning('The following Delphi instance(s) are currently open:');
-    for var Name in Running do
-      TConsole.WriteLine('  - ' + Name, clYellow);
-    TConsole
-        .WriteLine('  Please close Delphi before continuing, or the installation may not work correctly.', clYellow);
-    TConsole.WriteLine;
-    TConsole.Write('Press ENTER to continue anyway, or close Delphi and then press ENTER: ');
-    var Confirm := TConsole.ReadLine;
-  finally
-    Running.Free;
-  end;
-end;
-
-procedure TCommand.WriteOption(const AText: string);
-begin
-  TConsole.WriteLine(AText);
-end;
-
-procedure TCommand.WriteOption(const AOption, AText: string);
-begin
-  TConsole.Write('  ' + AOption + StringOfChar(' ', OptionLength - Length(AOption) - 3), clCyan);
-  TConsole.WriteLine(AText, clGray);
-end;
-
 { TListCommand }
 
 procedure TListCommand.Execute;
 begin
   inherited;
-  if (FProduct <> '') and (TProduct.Products.Count > 0) then
-  begin
-    var Found := False;
-    for var P in TProduct.Products do
-      if SameText(P.DisplayName, FProduct) or SameText(P.VersionName, FProduct) then
-      begin
-        Found := True;
-        Break;
-      end;
-    if not Found then
-      raise Exception.CreateFmt('Product "%s" not found.', [FProduct]);
-  end;
+  var LProducts := if FProduct <> '' then FProduct.Split([',']) else TProduct.ProductNames;
+  for var LProduct in LProducts do
+    ListBlocks(LProduct);
+end;
 
-  var HasOutput := False;
-  for var P in TProduct.Products do
-  begin
-    if (FProduct <> '') and not SameText(P.DisplayName, FProduct) and not SameText(P.VersionName, FProduct) then
-      Continue;
-
-    var DbPath := TPath.Combine(TWorkspace.BlocksDir, P.VersionName + '-database.json');
-    if not TFile.Exists(DbPath) then
-      Continue;
-
-    var Db := TJSONObject.ParseJSONValue(TFile.ReadAllText(DbPath, TEncoding.UTF8)) as TJSONObject;
-    try
-      var BlocksArr := Db.GetValue('blocks') as TJSONArray;
-      if (BlocksArr = nil) or (BlocksArr.Count = 0) then
-        Continue;
-
-      HasOutput := True;
-      TConsole.WriteLine;
-      TConsole.WriteLine('  ' + P.DisplayName, clCyan);
-      TConsole.WriteLine;
-      for var I := 0 to BlocksArr.Count - 1 do
-      begin
-        var Entry := (BlocksArr.Items[I] as TJSONString).Value;
-        var Parts := Entry.Split(['@'], 2);
-        if Length(Parts) = 2 then
-        begin
-          var Id := Parts[0];
-          var Commit := Copy(Parts[1], 1, Min(7, Length(Parts[1])));
-          TConsole.WriteLine(Format('    %-35s %s', [Id, Commit]));
-        end
-        else
-          TConsole.WriteLine('    ' + Entry);
-      end;
-    finally
-      Db.Free;
-    end;
-  end;
-
-  if not HasOutput then
-  begin
-    TConsole.WriteLine;
-    TConsole.WriteWarning('  No packages installed.');
-  end;
+procedure TListCommand.ListBlocks(AProduct: TProduct);
+begin
   TConsole.WriteLine;
+  TConsole.WriteLine('  ' + AProduct.DisplayName, clCyan);
+  TConsole.WriteLine;
+
+  var DbPath := TPath.Combine(TWorkspace.BlocksDir, AProduct.VersionName + '-database.json');
+  if not TFile.Exists(DbPath) then
+  begin
+    TConsole.WriteLine('    No packages installed.');
+    Exit;
+  end;
+
+  var Db := TJSONObject.ParseJSONValue(TFile.ReadAllText(DbPath, TEncoding.UTF8)) as TJSONObject;
+  try
+    var BlocksArr := Db.GetValue('blocks') as TJSONArray;
+    if (BlocksArr = nil) or (BlocksArr.Count = 0) then
+    begin
+      TConsole.WriteLine('    No packages installed.');
+      Exit;
+    end;
+
+    for var I := 0 to BlocksArr.Count - 1 do
+    begin
+      var Entry := (BlocksArr.Items[I] as TJSONString).Value;
+      var Parts := Entry.Split(['@'], 2);
+      if Length(Parts) = 2 then
+      begin
+        var Id := Parts[0];
+        var Commit := Copy(Parts[1], 1, Min(7, Length(Parts[1])));
+        TConsole.WriteLine(Format('    %-35s %s', [Id, Commit]));
+      end
+      else
+        TConsole.WriteLine('    ' + Entry);
+    end;
+  finally
+    Db.Free;
+  end;
+
+  TConsole.WriteLine;
+end;
+
+procedure TListCommand.ListBlocks(const AProductName: string);
+begin
+  var LProduct := TProduct.Find(AProductName);
+  ListBlocks(LProduct);
 end;
 
 procedure TListCommand.ShowHelp;
@@ -763,12 +514,111 @@ begin
   TConsole.WriteLine;
 end;
 
-{ ParamAttribute }
+{ TBaseCommand }
 
-constructor ParamAttribute.Create(const AParamName: string);
+procedure TBaseCommand.CheckWorkspace;
 begin
-  inherited Create;
-  FParamName := AParamName;
+  // Offer to initialise if .blocks\ is absent
+  if not TDirectory.Exists(TWorkspace.BlocksDir) then
+  begin
+    TConsole.WriteLine;
+    TConsole.WriteWarning('The current directory is not a valid Blocks workspace.');
+    TConsole.WriteLine('Proceeding will initialise it by downloading the package repository.', clYellow);
+    TConsole.WriteLine;
+    TConsole.Write('Initialise workspace now? [Y/N] (default: N): ');
+    var Confirm := TConsole.ReadLine;
+    if not SameText(Trim(Confirm), 'Y') then
+      raise Exception.Create('Operation cancelled. Run "blocks -Init" to initialise the workspace first.');
+    TWorkspace.Initialize(TWorkspace.WorkDir);
+    TConsole.WriteLine;
+  end;
+end;
+
+// -- Banner, app name and description -----------------------------------------
+procedure TBaseCommand.ShowBanner(const AppName, Description: string);
+var
+  BoxWidth: Integer;
+
+  function BoxLn(const T: string): string;
+  var
+    S: string;
+  begin
+    S := #$2502 + T;
+    while Length(S) < BoxWidth + 1 do
+      S := S + ' ';
+    Result := S + #$2502;
+  end;
+
+var
+  Line, Top, Sep, Bot: string;
+begin
+  BoxWidth := 50;
+  if Length(Description) > BoxWidth then
+    BoxWidth := Length(Description) + 15;
+
+  Line := StringOfChar(#$2500, BoxWidth);
+  Top := #$256D + Line + #$256E;
+  Sep := #$251C + Line + #$2524;
+  Bot := #$2570 + Line + #$256F;
+
+  TConsole.WriteLine;
+  TConsole.WriteLine(Top, clCyan);
+  TConsole.WriteLine(BoxLn('  ____  _     ___   ____  _  __ ____   '), clCyan);
+  TConsole.WriteLine(BoxLn(' | __ )| |   / _ \ / ___|| |/ // ___|  '), clCyan);
+  TConsole.WriteLine(BoxLn(' |  _ \| |  | | | | |    | '' / \___ \  '), clCyan);
+  TConsole.WriteLine(BoxLn(' | |_) | |__| |_| | |___ | . \  ___) | '), clCyan);
+  TConsole.WriteLine(BoxLn(' |____/|_____\___/ \____||_|\_\|____/   '), clCyan);
+  TConsole.WriteLine(Sep, clDkCyan);
+  TConsole.WriteLine(BoxLn('  '#$25C6'  Delphi Package Installer'), clDkCyan);
+
+  if AppName <> '' then
+  begin
+    TConsole.WriteLine(Sep, clDkCyan);
+    TConsole.WriteLine(BoxLn('  Package  '#$25B8'  ' + AppName), clWhite);
+    if Description <> '' then
+      TConsole.WriteLine(BoxLn('  About    '#$25B8'  ' + Description), clGray);
+  end;
+
+  TConsole.WriteLine(Bot, clCyan);
+  TConsole.WriteLine;
+end;
+
+// -- Delphi running check ------------------------------------------------------
+
+procedure TBaseCommand.TestDelphiRunning;
+begin
+  var Running := TStringList.Create;
+  try
+    for var P in TProduct.Products do
+      if P.IsRunning then
+        Running.Add(P.DisplayName);
+
+    if Running.Count = 0 then
+      Exit;
+
+    TConsole.WriteLine;
+    TConsole.WriteWarning('The following Delphi instance(s) are currently open:');
+    for var Name in Running do
+      TConsole.WriteLine('  - ' + Name, clYellow);
+    TConsole
+        .WriteLine('  Please close Delphi before continuing, or the installation may not work correctly.', clYellow);
+    TConsole.WriteLine;
+    TConsole.Write('Press ENTER to continue anyway, or close Delphi and then press ENTER: ');
+    var Confirm := TConsole.ReadLine;
+  finally
+    Running.Free;
+  end;
+end;
+
+procedure TBaseCommand.WriteOption(const AText: string);
+begin
+  TConsole.WriteLine(AText);
+end;
+
+procedure TBaseCommand.WriteOption(const AOption, AText: string);
+begin
+  TConsole.Write('  ' + AOption + StringOfChar(' ', OptionLength - Length(AOption) - 3), clCyan);
+  TConsole.WriteLine(AText, clGray);
 end;
 
 initialization

@@ -15,7 +15,8 @@ uses
   Blocks.Manifest in 'Blocks.Manifest.pas',
   Blocks.Workspace in 'Blocks.Workspace.pas',
   Blocks.Product in 'Blocks.Product.pas',
-  Blocks.JSON in 'Blocks.JSON.pas';
+  Blocks.JSON in 'Blocks.JSON.pas',
+  Blocks.Command in 'Blocks.Command.pas';
 
 begin
   try

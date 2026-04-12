@@ -43,6 +43,7 @@ type
   protected
     FHandle: THandle;
     FWriter: TStreamWriter;
+    FUTF8Encoding: TEncoding;
     procedure SetColor(AColor: TConsoleColor);
     function GetWriterHandle: THandle; virtual; abstract;
   public
@@ -216,8 +217,10 @@ constructor TConsoleWriter.Create;
 begin
   inherited;
   FHandle := GetWriterHandle();
+  // I need this to avoid the BOM
+  FUTF8Encoding := TUTF8Encoding.Create(False);
   SetConsoleOutputCP(CP_UTF8);
-  FWriter := TStreamWriter.Create(THandleStream.Create(FHandle), TEncoding.UTF8);
+  FWriter := TStreamWriter.Create(THandleStream.Create(FHandle), FUTF8Encoding);
   FWriter.AutoFlush := True;
   FWriter.OwnStream;
 end;
@@ -226,6 +229,7 @@ destructor TConsoleWriter.Destroy;
 begin
   SetColor(clDefault);
   FWriter.Free;
+  FUTF8Encoding.Free;
   inherited;
 end;
 
