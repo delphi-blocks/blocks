@@ -25,6 +25,7 @@ type
 
     class function GetConfig: TConfig; static;
     class function GetDatabase: TDatabase; static;
+    class procedure InitializeFromSource(const ASource: string); static;
     class constructor Create;
     class destructor  Destroy;
   public
@@ -60,7 +61,6 @@ type
     FSources: TJSONStringList;
     function ConfigPath: string;
   public
-    function DefaultSource: string;
     [JsonList(System.TypeInfo(string))]
     property Sources: TJSONStringList read FSources;
 
@@ -140,46 +140,16 @@ class procedure TWorkspace.Initialize(const AWorkDir: string);
 begin
   SetWorkDir(AWorkDir);
 
-  var DownloadDir := TPath.Combine(GetBlocksDir, 'download');
-  var ZipPath := TPath.Combine(DownloadDir, 'repository.zip');
-  var RepoDir := TPath.Combine(GetBlocksDir, 'repository');
-
   if not TDirectory.Exists(GetBlocksDir) then
   begin
     TDirectory.CreateDirectory(GetBlocksDir);
     TConsole.WriteLine('Created: ' + GetBlocksDir, clGreen);
   end;
 
-  if TDirectory.Exists(DownloadDir) then
-    TDirectory.Delete(DownloadDir, True);
-  TDirectory.CreateDirectory(DownloadDir);
+  if Config.Sources.Count = 0 then
+    raise Exception.Create('No sources configured. Use "blocks config /add sources=<url>" to add one.');
 
-  TConsole.WriteLine('Fetching repository info...', clCyan);
-  var RepoInfo := THttpUtils.GetGitHubInfo(Config.DefaultSource);
-  TConsole.WriteLine('  Branch : ' + RepoInfo.DefaultBranch);
-  TConsole.WriteLine('  Latest : ' + RepoInfo.LatestCommit);
-  TConsole.WriteLine;
-
-  var ZipUrl := THttpUtils.GetGitHubZipUrl(RepoInfo.Owner, RepoInfo.Repo, RepoInfo.LatestCommit);
-
-  TConsole.WriteLine('Downloading repository...', clCyan);
-  THttpUtils.DownloadFile(ZipUrl, ZipPath);
-
-  TConsole.WriteLine('Extracting...', clCyan);
-  var ExtractDir := TPath.Combine(DownloadDir, 'extract');
-  TDirectory.CreateDirectory(ExtractDir);
-  TZipFile.ExtractZipFile(ZipPath, ExtractDir);
-
-  // GitHub wraps content in a subdirectory (e.g. "lminuti-blocks-repository-abc1234")
-  var InnerDirs := TDirectory.GetDirectories(ExtractDir);
-  if Length(InnerDirs) = 0 then
-    raise Exception.Create('Unexpected zip structure: no subdirectory found.');
-  var InnerDir := InnerDirs[0];
-
-  var SourceRepo := TPath.Combine(InnerDir, '.blocks\repository');
-  if not TDirectory.Exists(SourceRepo) then
-    raise Exception.Create('Repository folder not found in downloaded archive: .blocks\repository');
-
+  var RepoDir := TPath.Combine(GetBlocksDir, 'repository');
   if TDirectory.Exists(RepoDir) then
   begin
     TConsole.WriteLine(Format('Directory "%s" already exists.', [RepoDir]), clYellow);
@@ -188,16 +158,69 @@ begin
     if not SameText(Trim(Confirm), 'Y') then
     begin
       TConsole.WriteLine('Operation cancelled.', clYellow);
-      TDirectory.Delete(DownloadDir, True);
       Exit;
     end;
     TDirectory.Delete(RepoDir, True);
   end;
 
+  for var LSource in Config.Sources do
+    InitializeFromSource(LSource);
+end;
+
+class procedure TWorkspace.InitializeFromSource(const ASource: string);
+begin
+  var RepoDir := TPath.Combine(GetBlocksDir, 'repository');
+  var DownloadDir := '';
+  var SourceRepo: string;
+
+  if ASource.StartsWith('http', True) then
+  begin
+    DownloadDir := TPath.Combine(GetBlocksDir, 'download');
+    var ZipPath := TPath.Combine(DownloadDir, 'repository.zip');
+
+    if TDirectory.Exists(DownloadDir) then
+      TDirectory.Delete(DownloadDir, True);
+    TDirectory.CreateDirectory(DownloadDir);
+
+    TConsole.WriteLine(Format('Fetching repository info from "%s"...', [ASource]), clCyan);
+    var RepoInfo := THttpUtils.GetGitHubInfo(ASource);
+    TConsole.WriteLine('  Branch : ' + RepoInfo.DefaultBranch);
+    TConsole.WriteLine('  Latest : ' + RepoInfo.LatestCommit);
+    TConsole.WriteLine;
+
+    var ZipUrl := THttpUtils.GetGitHubZipUrl(RepoInfo.Owner, RepoInfo.Repo, RepoInfo.LatestCommit);
+
+    TConsole.WriteLine('Downloading repository...', clCyan);
+    THttpUtils.DownloadFile(ZipUrl, ZipPath);
+
+    TConsole.WriteLine('Extracting...', clCyan);
+    var ExtractDir := TPath.Combine(DownloadDir, 'extract');
+    TDirectory.CreateDirectory(ExtractDir);
+    TZipFile.ExtractZipFile(ZipPath, ExtractDir);
+
+    // GitHub wraps content in a subdirectory (e.g. "lminuti-blocks-repository-abc1234")
+    var InnerDirs := TDirectory.GetDirectories(ExtractDir);
+    if Length(InnerDirs) = 0 then
+      raise Exception.Create('Unexpected zip structure: no subdirectory found.');
+
+    SourceRepo := TPath.Combine(InnerDirs[0], '.blocks\repository');
+    if not TDirectory.Exists(SourceRepo) then
+      raise Exception.Create('Repository folder not found in downloaded archive: .blocks\repository');
+  end
+  else
+  begin
+    SourceRepo := TPath.Combine(ASource, '.blocks\repository');
+    if not TDirectory.Exists(SourceRepo) then
+      raise Exception.CreateFmt('Source folder not found: %s', [SourceRepo]);
+    TConsole.WriteLine('Using local repository: ' + SourceRepo, clCyan);
+    TConsole.WriteLine;
+  end;
+
   TDirectory.Copy(SourceRepo, RepoDir);
   TConsole.WriteLine('Repository updated: ' + RepoDir, clGreen);
 
-  TDirectory.Delete(DownloadDir, True);
+  if DownloadDir <> '' then
+    TDirectory.Delete(DownloadDir, True);
 end;
 
 { TConfig }
@@ -238,13 +261,6 @@ begin
   inherited;
   FSources := TJSONStringList.Create;
   FSources.Add(DefaultBlocksRepositoryUrl);
-end;
-
-function TConfig.DefaultSource: string;
-begin
-  if FSources.Count < 1 then
-    raise Exception.Create('Source list is empty!');
-  Result := Sources[0];
 end;
 
 destructor TConfig.Destroy;
