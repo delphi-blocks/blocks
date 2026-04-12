@@ -119,6 +119,8 @@ type
     /// <summary>Reads and returns one line of text from the console input stream.</summary>
     /// <returns>The line of text entered by the user, without the trailing newline.</returns>
     class function ReadLine: string; static;
+    /// <summary>Resets stdout and stderr text colour to the default (gray).</summary>
+    class procedure ResetColor; static;
   end;
 
   TStdOutConsole = class(TConsoleWriter)
@@ -174,6 +176,12 @@ end;
 class function TConsole.ReadLine: string;
 begin
   Result := StdIn.ReadLine;
+end;
+
+class procedure TConsole.ResetColor;
+begin
+  SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), Word(clDefault));
+  SetConsoleTextAttribute(GetStdHandle(STD_ERROR_HANDLE), Word(clDefault));
 end;
 
 class procedure TConsole.Write(const AText: string; AColor: TConsoleColor);

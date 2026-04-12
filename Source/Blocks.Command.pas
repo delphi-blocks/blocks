@@ -23,6 +23,7 @@ type
     class var FRegistry: TDictionary<string, TCommandClass>;
     class var FDefaultCommand: TCommandClass;
     class var FContext: TRttiContext;
+    class function FindCommand(const ACommandName: string): TCommandClass;
     constructor InnerCreate;
   public
     class constructor Create;
@@ -79,22 +80,24 @@ end;
 
 class function TCommand.Create(const ACommandName: string): TCommand;
 begin
-  var LCommandClass: TCommandClass := nil;
-  for var LPair in FRegistry do
+  var LCommandClass: TCommandClass;
+  if ACommandName = '' then
   begin
-    if SameText(LPair.Key, ACommandName) then
+    LCommandClass := FDefaultCommand;
+  end
+  else
+  begin
+    LCommandClass := FindCommand(ACommandName);
+    if not Assigned(LCommandClass) then
     begin
-      LCommandClass := LPair.Value;
-      Break;
+      TConsole.WriteError(Format('Command "%s" not found', [ACommandName]));
+      LCommandClass := FDefaultCommand;
     end;
   end;
+
   if not Assigned(LCommandClass) then
-  begin
-    TConsole.WriteError(Format('Command "%s" not found', [ACommandName]));
-    LCommandClass := FDefaultCommand;
-    if not Assigned(LCommandClass) then
-      Abort;
-  end;
+    Abort;
+
   Result := LCommandClass.InnerCreate;
 end;
 
@@ -107,6 +110,20 @@ end;
 procedure TCommand.Execute;
 begin
   TCommand.InjectArgs(Self);
+end;
+
+class function TCommand.FindCommand(const ACommandName: string): TCommandClass;
+begin
+  Result := nil;
+
+  for var LPair in FRegistry do
+  begin
+    if SameText(LPair.Key, ACommandName) then
+    begin
+      Exit(LPair.Value);
+    end;
+  end;
+  Exit;
 end;
 
 class procedure TCommand.InjectArgs(ACommand: TCommand);

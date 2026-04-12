@@ -100,10 +100,18 @@ uses
 const
   OptionLength = 26;
 
-// -- Help and listing ----------------------------------------------------------
+function CtrlHandler(CtrlType: DWORD): BOOL; stdcall;
+begin
+  TConsole.ResetColor;
+  TConsole.WriteLine;
+  TConsole.WriteLine('Interrupted.', clYellow);
+  TConsole.WriteLine;
+  Result := False; // pass to the default handler, which terminates the process
+end;
 
 class procedure TApp.RunBlocks;
 begin
+  SetConsoleCtrlHandler(@CtrlHandler, True);
   var LCommand := TCommand.Create(ParamStr(1));
   try
     LCommand.Execute;
@@ -311,7 +319,7 @@ begin
   var Database := TDatabase.Create;
   var Manifest := TManifest.Load(InstallSource);
   try
-    //ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
+    ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
 
     TConsole.WriteLine('Config: ' + FPackageName, clDkGray);
     TConsole.WriteLine;
@@ -455,7 +463,7 @@ begin
   var Database := TDatabase.Create;
   var Manifest := TManifest.Load(InstallSource);
   try
-    //ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
+    ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
 
     TConsole.WriteLine('Config: ' + FPackageName, clDkGray);
     TConsole.WriteLine;
@@ -536,51 +544,24 @@ end;
 
 // -- Banner, app name and description -----------------------------------------
 procedure TBaseCommand.ShowBanner(const AppName, Description: string);
-var
-  BoxWidth: Integer;
-
-  function BoxLn(const T: string): string;
-  var
-    S: string;
-  begin
-    S := #$2502 + T;
-    while Length(S) < BoxWidth + 1 do
-      S := S + ' ';
-    Result := S + #$2502;
-  end;
-
-var
-  Line, Top, Sep, Bot: string;
 begin
-  BoxWidth := 50;
-  if Length(Description) > BoxWidth then
-    BoxWidth := Length(Description) + 15;
-
-  Line := StringOfChar(#$2500, BoxWidth);
-  Top := #$256D + Line + #$256E;
-  Sep := #$251C + Line + #$2524;
-  Bot := #$2570 + Line + #$256F;
-
   TConsole.WriteLine;
-  TConsole.WriteLine(Top, clCyan);
-  TConsole.WriteLine(BoxLn('  ____  _     ___   ____  _  __ ____   '), clCyan);
-  TConsole.WriteLine(BoxLn(' | __ )| |   / _ \ / ___|| |/ // ___|  '), clCyan);
-  TConsole.WriteLine(BoxLn(' |  _ \| |  | | | | |    | '' / \___ \  '), clCyan);
-  TConsole.WriteLine(BoxLn(' | |_) | |__| |_| | |___ | . \  ___) | '), clCyan);
-  TConsole.WriteLine(BoxLn(' |____/|_____\___/ \____||_|\_\|____/   '), clCyan);
-  TConsole.WriteLine(Sep, clDkCyan);
-  TConsole.WriteLine(BoxLn('  '#$25C6'  Delphi Package Installer'), clDkCyan);
+  TConsole.WriteLine(' ██████╗ ██╗      ██████╗  ██████╗██╗  ██╗███████╗', clCyan);
+  TConsole.WriteLine(' ██╔══██╗██║     ██╔═══██╗██╔════╝██║ ██╔╝██╔════╝', clCyan);
+  TConsole.WriteLine(' ██████╔╝██║     ██║   ██║██║     █████╔╝ ███████╗', clCyan);
+  TConsole.WriteLine(' ██╔══██╗██║     ██║   ██║██║     ██╔═██╗ ╚════██║', clCyan);
+  TConsole.WriteLine(' ██████╔╝███████╗╚██████╔╝╚██████╗██║  ██╗███████║', clCyan);
+  TConsole.WriteLine(' ╚═════╝ ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚══════╝', clDkCyan);
+  TConsole.WriteLine('   ▸  Delphi Package Installer', clDkCyan);
+  TConsole.WriteLine;
 
   if AppName <> '' then
   begin
-    TConsole.WriteLine(Sep, clDkCyan);
-    TConsole.WriteLine(BoxLn('  Package  '#$25B8'  ' + AppName), clWhite);
+    TConsole.WriteLine('  Package  ▸  ' + AppName, clWhite);
     if Description <> '' then
-      TConsole.WriteLine(BoxLn('  About    '#$25B8'  ' + Description), clGray);
+      TConsole.WriteLine('  About    ▸  ' + Description, clGray);
+    TConsole.WriteLine;
   end;
-
-  TConsole.WriteLine(Bot, clCyan);
-  TConsole.WriteLine;
 end;
 
 // -- Delphi running check ------------------------------------------------------
