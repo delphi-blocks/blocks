@@ -20,35 +20,63 @@ A command-line package manager for Delphi / RAD Studio. DelphiBlocks automates d
 ## Usage
 
 ```
-DelphiBlocks.exe [options]
+blocks <command> [options]
 
-  -Init                    Initialise workspace (clone package registry)
-  -Install <path|url|id>   Install a package by file path, URL, or registry ID
-  -Uninstall               Remove the package from the workspace and database
-  -Product <version>       Target Delphi version (e.g. delphi12, delphi13)
-  -Commit <sha>            Pin installation to a specific GitHub commit
-  -WorkspacePath <dir>     Override workspace root (default: current directory)
-  -ProjectFolder <dir>     Override the extracted project directory name
-  -BuildOnly               Compile without re-downloading
-  -Overwrite               Overwrite an existing project directory
-  -Silent                  Skip interactive prompts
-  -List                    List packages installed in the workspace
-  -ListProducts            List detected Delphi installations
-  -Help                    Show usage
+Commands:
+  install <id[@constraint]>   Download, compile and register a package
+  uninstall <id>              Remove a package from the workspace and database
+  init                        Initialise the workspace and download the repository
+  list                        List installed packages
+  listproducts                List detected Delphi installations
+  config [<key>[=<value>]]    Read or write workspace configuration
+  view <id[@version]>         Show package details from the repository
+  help [command]              Show help
 ```
 
 ### Quick start
 
 ```bat
 REM Initialise the workspace in the current directory
-DelphiBlocks.exe -Init
+blocks init
 
-REM Install a package (uses the detected Delphi version)
-DelphiBlocks.exe -Install owner.packagename
+REM Install a package (prompts for Delphi version)
+blocks install owner.package
 
-REM Target a specific Delphi version
-DelphiBlocks.exe -Install owner.packagename -Product delphi13
+REM Install a specific version
+blocks install owner.package@1.2.0
+
+REM Target a specific Delphi version, skip prompts
+blocks install owner.package /product delphi13 /silent
+
+REM Uninstall
+blocks uninstall owner.package /product delphi13
+
+REM List installed packages
+blocks list
+blocks list /product delphi12
+
+REM View package info
+blocks view owner.package@1.2.0
+blocks view owner.package /versions
+
+REM Manage repository sources
+blocks config sources
+blocks config /add sources=https://github.com/owner/my-repo
 ```
+
+### Version constraints
+
+Append `@<constraint>` to a package ID to pin or restrict the version:
+
+| Syntax | Meaning |
+|--------|---------|
+| `@1.2.0` | Exact version |
+| `@^1.2.0` | Same major (`>=1.2.0 <2.0.0`) |
+| `@~1.2.0` | Same minor (`>=1.2.0 <1.3.0`) |
+| `@>=1.0.0` | At least 1.0.0 |
+| `@>=1.0.0 <2.0.0` | Explicit range |
+
+> **Note:** In `cmd.exe` the `^` character must be escaped as `^^` (e.g. `owner.package@^^1.2.0`). In PowerShell no escaping is needed.
 
 ## Building from source
 
@@ -63,7 +91,7 @@ DelphiBlocks.Build.130.bat Make Release Win32
 ```
 
 Requires Delphi 13 Florence (`BDS=C:\Program Files (x86)\Embarcadero\Studio\37.0`).  
-The compiled executables (`Blocks.exe`, `Launcher.exe`) are placed in the project root.
+The compiled executable (`Blocks.exe`) is placed in the project root.
 
 ## License
 
