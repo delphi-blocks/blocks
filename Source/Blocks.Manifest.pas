@@ -8,6 +8,7 @@ uses
   System.IOUtils,
   System.JSON,
   System.Generics.Collections,
+  System.Generics.Defaults,
 
   Blocks.Types,
   Blocks.JSON;
@@ -58,6 +59,12 @@ type
   end;
 
   // -----------------------------------------------------------------------
+  // Dependency map: name -> version
+  // -----------------------------------------------------------------------
+  TDependencyMap = class(TDictionary<string, string>)
+  end;
+
+  // -----------------------------------------------------------------------
   // A Delphi package
   // -----------------------------------------------------------------------
   TManifestPackage = class
@@ -92,14 +99,45 @@ type
   // -----------------------------------------------------------------------
   TManifestPackageOptions = class
   private
-    FPackageFolders: TManifestPackageFolders;
+    FFolders: TManifestPackageFolders;
   public
     constructor Create;
     destructor Destroy; override;
 
-    [JsonName('package folders')]
     [JsonDictionary(System.TypeInfo(string))]
-    property PackageFolders: TManifestPackageFolders read FPackageFolders;
+    property Folders: TManifestPackageFolders read FFolders;
+  end;
+
+  // -----------------------------------------------------------------------
+  // Manifest repository information
+  // -----------------------------------------------------------------------
+
+  TManifestRepository = class
+  private
+    FRepoType: string;
+    FUrl: string;
+  public
+    [JsonName('type')]
+    property RepoType: string read FRepoType write FRepoType;
+    property Url: string read FUrl write FUrl;
+  end;
+
+  // -----------------------------------------------------------------------
+  // Semantic version (major.minor.patch)
+  // -----------------------------------------------------------------------
+  TSemVer = record
+  public
+    Major: Integer;
+    Minor: Integer;
+    Patch: Integer;
+    class function TryParse(const S: string; out V: TSemVer): Boolean; static;
+    class function Parse(const S: string): TSemVer; static;
+    /// <summary>Returns the highest version in AVersions that satisfies AConstraint.
+    /// Returns False if no version matches.</summary>
+    class function BestMatch(const AVersions: TArray<TSemVer>; const AConstraint: string; out ABest: TSemVer): Boolean; static;
+    function CompareTo(const Other: TSemVer): Integer;
+    function MatchesConstraint(const AConstraint: string): Boolean;
+    function ToString: string;
   end;
 
   // -----------------------------------------------------------------------
@@ -107,26 +145,47 @@ type
   // -----------------------------------------------------------------------
   TManifest = class
   private
-    FApplication: TApplicationInfo;
-    FSupportedPlatforms: TSupportedPlatforms;
+    FRepository: TManifestRepository;
+    FPlatforms: TSupportedPlatforms;
     FPackages: TManifestPackageList;
     FPackageOptions: TManifestPackageOptions;
-    FDependencies: TJsonStringList;
+    FDependencies: TDependencyMap;
+    FId: string;
+    FVersion: string;
+    FName: string;
+    FLicense: string;
+    FDescription: string;
+    FHomepage: string;
+    FAuthor: string;
+    FKeywords: TJSONStringList;
   public
-    class function Load(const Source: string): TManifest; static;
+    class function GetManifest(const APackageName, APackageVersion: string): TManifest;
+    /// <summary>Returns all available versions of a package, sorted ascending.</summary>
+    /// <param name="APackageName">Package identifier in the form <c>vendor.name</c>.</param>
+    class function GetVersions(const APackageName: string): TArray<TSemVer>;
   public
     constructor Create;
     destructor Destroy; override;
 
-    property Application: TApplicationInfo read FApplication;
+    property Id: string read FId write FId;
+    property Name: string read FName write FName;
+    property Version: string read FVersion write FVersion;
+    property Description: string read FDescription write FDescription;
+    property License: string read FLicense write FLicense;
+    property Homepage: string read FHomepage write FHomepage;
+    property Repository: TManifestRepository read FRepository;
+    property Author: string read FAuthor write FAuthor;
+    [JsonList(System.TypeInfo(string))]
+    property Keywords: TJSONStringList read FKeywords;
+
     [JsonDictionary(System.TypeInfo(TManifestPlatform))]
-    property SupportedPlatforms: TSupportedPlatforms read FSupportedPlatforms;
+    property Platforms: TSupportedPlatforms read FPlatforms;
     [JsonList(System.TypeInfo(TManifestPackage))]
     property Packages: TManifestPackageList read FPackages;
-    [JsonName('package options')]
+    [JsonName('packageOptions')]
     property PackageOptions: TManifestPackageOptions read FPackageOptions;
-    [JsonList(System.TypeInfo(string))]
-    property Dependencies: TJsonStringList read FDependencies;
+    [JsonDictionary(System.TypeInfo(string))]
+    property Dependencies: TDependencyMap read FDependencies;
   end;
 
 implementation
@@ -135,6 +194,132 @@ uses
   Blocks.Console,
   Blocks.Http,
   Blocks.Workspace;
+
+{ TSemVer }
+
+class function TSemVer.TryParse(const S: string; out V: TSemVer): Boolean;
+begin
+  V := Default(TSemVer);
+  var LParts := S.Trim.Split(['.']);
+  if Length(LParts) < 1 then
+    Exit(False);
+  if not TryStrToInt(LParts[0], V.Major) then
+    Exit(False);
+  if (Length(LParts) >= 2) and not TryStrToInt(LParts[1], V.Minor) then
+    Exit(False);
+  if (Length(LParts) >= 3) and not TryStrToInt(LParts[2], V.Patch) then
+    Exit(False);
+  Result := True;
+end;
+
+class function TSemVer.Parse(const S: string): TSemVer;
+begin
+  if not TryParse(S, Result) then
+    raise Exception.CreateFmt('Invalid version: "%s"', [S]);
+end;
+
+function TSemVer.CompareTo(const Other: TSemVer): Integer;
+begin
+  if Major <> Other.Major then Exit(Major - Other.Major);
+  if Minor <> Other.Minor then Exit(Minor - Other.Minor);
+  Result := Patch - Other.Patch;
+end;
+
+class function TSemVer.BestMatch(const AVersions: TArray<TSemVer>;
+  const AConstraint: string; out ABest: TSemVer): Boolean;
+begin
+  Result := False;
+  for var LVer in AVersions do
+  begin
+    if not LVer.MatchesConstraint(AConstraint) then
+      Continue;
+    if not Result or (LVer.CompareTo(ABest) > 0) then
+      ABest := LVer;
+    Result := True;
+  end;
+end;
+
+function TSemVer.ToString: string;
+begin
+  Result := Format('%d.%d.%d', [Major, Minor, Patch]);
+end;
+
+function TSemVer.MatchesConstraint(const AConstraint: string): Boolean;
+var
+  LConstraint: string;
+  LVer, LUpper: TSemVer;
+begin
+  LConstraint := Trim(AConstraint);
+
+  if (LConstraint = '') or (LConstraint = '*') then
+    Exit(True);
+
+  // Explicit range: two or more space-separated constraints (implicit AND)
+  // e.g. ">=1.2.0 <2.0.0"
+  if LConstraint.Contains(' ') then
+  begin
+    for var LPart in LConstraint.Split([' ']) do
+      if not MatchesConstraint(Trim(LPart)) then
+        Exit(False);
+    Exit(True);
+  end;
+
+  // Wildcards: 1.* or 1.2.*
+  if LConstraint.Contains('*') then
+  begin
+    var LParts := LConstraint.Split(['.']);
+    var LMajor, LMinor: Integer;
+    if (Length(LParts) >= 1) and (LParts[0] <> '*') then
+      if not TryStrToInt(LParts[0], LMajor) or (Major <> LMajor) then
+        Exit(False);
+    if (Length(LParts) >= 2) and (LParts[1] <> '*') then
+      if not TryStrToInt(LParts[1], LMinor) or (Minor <> LMinor) then
+        Exit(False);
+    Exit(True);
+  end;
+
+  if LConstraint.StartsWith('>=') then
+  begin
+    if not TSemVer.TryParse(Copy(LConstraint, 3, MaxInt), LVer) then Exit(False);
+    Exit(CompareTo(LVer) >= 0);
+  end;
+  if LConstraint.StartsWith('<=') then
+  begin
+    if not TSemVer.TryParse(Copy(LConstraint, 3, MaxInt), LVer) then Exit(False);
+    Exit(CompareTo(LVer) <= 0);
+  end;
+  if LConstraint.StartsWith('>') then
+  begin
+    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then Exit(False);
+    Exit(CompareTo(LVer) > 0);
+  end;
+  if LConstraint.StartsWith('<') then
+  begin
+    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then Exit(False);
+    Exit(CompareTo(LVer) < 0);
+  end;
+  if LConstraint.StartsWith('^') then
+  begin
+    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then Exit(False);
+    LUpper := Default(TSemVer);
+    LUpper.Major := LVer.Major + 1;
+    Exit((CompareTo(LVer) >= 0) and (CompareTo(LUpper) < 0));
+  end;
+  if LConstraint.StartsWith('~') then
+  begin
+    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then Exit(False);
+    LUpper := Default(TSemVer);
+    LUpper.Major := LVer.Major;
+    LUpper.Minor := LVer.Minor + 1;
+    Exit((CompareTo(LVer) >= 0) and (CompareTo(LUpper) < 0));
+  end;
+
+  // Exact match
+  if TSemVer.TryParse(LConstraint, LVer) then
+    Exit(CompareTo(LVer) = 0);
+
+  Result := False;
+end;
 
 { TManifestPlatform }
 
@@ -187,12 +372,12 @@ end;
 constructor TManifestPackageOptions.Create;
 begin
   inherited Create;
-  FPackageFolders := TManifestPackageFolders.Create;
+  FFolders := TManifestPackageFolders.Create;
 end;
 
 destructor TManifestPackageOptions.Destroy;
 begin
-  FPackageFolders.Free;
+  FFolders.Free;
   inherited;
 end;
 
@@ -201,55 +386,78 @@ end;
 constructor TManifest.Create;
 begin
   inherited Create;
-  FApplication := TApplicationInfo.Create;
-  FSupportedPlatforms := TSupportedPlatforms.Create;
+  FRepository := TManifestRepository.Create;
+  FKeywords := TJSONStringList.Create;
+  FPlatforms := TSupportedPlatforms.Create;
   FPackages := TManifestPackageList.Create;
   FPackageOptions := TManifestPackageOptions.Create;
-  FDependencies := TJsonStringList.Create;
+  FDependencies := TDependencyMap.Create;
 end;
 
 destructor TManifest.Destroy;
 begin
-  FApplication.Free;
-  FSupportedPlatforms.Free;
+  FRepository.Free;
+  FKeywords.Free;
+  FPlatforms.Free;
   FPackages.Free;
   FPackageOptions.Free;
   FDependencies.Free;
   inherited;
 end;
 
-class function TManifest.Load(const Source: string): TManifest;
-var
-  Parts: TArray<string>;
-  SubPath: string;
-  FilePath: string;
-  Json: string;
+class function TManifest.GetManifest(const APackageName,
+  APackageVersion: string): TManifest;
 begin
-  if Source = '' then
-    raise Exception.Create('-Install is required. Use -Help for usage information.');
+  var LPackagePair := APackageName.Split(['.']);
+  if Length(LPackagePair) <> 2 then
+    raise Exception.Create('Package id should be "vendor.name"');
 
-  if not Source.StartsWith('http://', True)
-      and not Source.StartsWith('https://', True)
-      and not Source.EndsWith('.json', True) then
-  begin
-    Parts := Source.Split(['.', '/'], 2);
-    SubPath := Parts[0] + '\' + Parts[1] + '.json';
-    FilePath := TPath.Combine(TWorkspace.BlocksDir, 'repository\' + SubPath);
-    TConsole.WriteLine('Resolving ID to: ' + FilePath, clDkGray);
-  end
-  else
-    FilePath := Source;
+  var LVersions := GetVersions(APackageName);
 
-  if FilePath.StartsWith('http://', True) or FilePath.StartsWith('https://', True) then
-    Json := THttpUtils.GetAsString(FilePath)
-  else
+  var LBest: TSemVer;
+  if not TSemVer.BestMatch(LVersions, APackageVersion, LBest) then
   begin
-    if not TFile.Exists(FilePath) then
-      raise Exception.CreateFmt('Config file not found: %s', [FilePath]);
-    Json := TFile.ReadAllText(FilePath, TEncoding.UTF8);
+    if APackageVersion = '' then
+      raise Exception.CreateFmt('No versions found for package "%s". Try to update the repository', [APackageName])
+    else
+      raise Exception.CreateFmt('No version matching "%s" found for package "%s". Try to update the repository', [APackageVersion, APackageName]);
   end;
 
-  Result := TJsonHelper.JSONToObject<TManifest>(Json);
+  var LVersionsDir := TPath.Combine(TWorkspace.BlocksDir, 'repository', LPackagePair[0], LPackagePair[1]);
+  var LFullPath := TPath.Combine(LVersionsDir, LBest.ToString, LPackagePair[0] + '.' + LPackagePair[1] + '.manifest.json');
+  if not FileExists(LFullPath) then
+    raise Exception.CreateFmt('Manifest file not found: %s', [LFullPath]);
+
+  Result := TJsonHelper.JSONToObject<TManifest>(TFile.ReadAllText(LFullPath));
+end;
+
+class function TManifest.GetVersions(const APackageName: string): TArray<TSemVer>;
+var
+  LResult: TArray<TSemVer>;
+begin
+  var LPackagePair := APackageName.Split(['.']);
+  if Length(LPackagePair) <> 2 then
+    raise Exception.Create('Package id should be "vendor.name"');
+
+  var LVersionsDir := TPath.Combine(TWorkspace.BlocksDir, 'repository', LPackagePair[0], LPackagePair[1]);
+  if not TDirectory.Exists(LVersionsDir) then
+    raise Exception.CreateFmt('Package "%s" not found in repository. Try to update the repository', [APackageName]);
+
+  LResult := [];
+  for var LDir in TDirectory.GetDirectories(LVersionsDir) do
+  begin
+    var LVer: TSemVer;
+    if TSemVer.TryParse(TPath.GetFileName(LDir), LVer) then
+      LResult := LResult + [LVer];
+  end;
+
+  TArray.Sort<TSemVer>(LResult, TComparer<TSemVer>.Construct(
+    function(const A, B: TSemVer): Integer
+    begin
+      Result := A.CompareTo(B);
+    end));
+
+  Result := LResult;
 end;
 
 end.

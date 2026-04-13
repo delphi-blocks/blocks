@@ -4,7 +4,7 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.IOUtils, System.TypInfo,
-  System.Rtti, System.JSON, System.Math, System.StrUtils,
+  System.Rtti, System.StrUtils,
   System.Generics.Collections,
 
   Winapi.Windows,
@@ -69,6 +69,8 @@ type
     FBuildOnly: Boolean;
     [Param('silent')]
     FSilent: Boolean;
+    [Param('force')]
+    FForce: Boolean;
     [Param]
     FPackageName: string;
   public
@@ -98,15 +100,28 @@ type
     procedure ShowHelp; override;
   end;
 
+  TViewCommand = class(TBaseCommand)
+  private
+    [Param('raw')]
+    FRaw: Boolean;
+    [Param('versions')]
+    FVersions: Boolean;
+    [Param]
+    FPackage: string;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
 implementation
 
 uses
   Blocks.Consts,
   Blocks.Console,
   Blocks.Database,
-  Blocks.Http,
   Blocks.Manifest,
-  Blocks.Workspace;
+  Blocks.Workspace,
+  Blocks.JSON;
 
 const
   OptionLength = 26;
@@ -167,6 +182,7 @@ begin
   WriteOption('list', 'List packages installed in the current workspace.');
   WriteOption('listproducts', 'List detected Delphi installations.');
   WriteOption('config', 'Read or write workspace configuration values.');
+  WriteOption('view <id@version>', 'Show details of a package from the repository.');
   WriteOption('help [command]', 'Show this message, or detailed help for a specific command.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
@@ -196,37 +212,21 @@ begin
   TConsole.WriteLine('  ' + AProduct.DisplayName, clCyan);
   TConsole.WriteLine;
 
-  var DbPath := TPath.Combine(TWorkspace.BlocksDir, AProduct.VersionName + '-database.json');
-  if not TFile.Exists(DbPath) then
+  var Entries := TWorkspace.Database.ListEntries(AProduct.VersionName);
+  if Length(Entries) = 0 then
   begin
     TConsole.WriteLine('    No packages installed.');
+    TConsole.WriteLine;
     Exit;
   end;
 
-  var Db := TJSONObject.ParseJSONValue(TFile.ReadAllText(DbPath, TEncoding.UTF8)) as TJSONObject;
-  try
-    var BlocksArr := Db.GetValue('blocks') as TJSONArray;
-    if (BlocksArr = nil) or (BlocksArr.Count = 0) then
-    begin
-      TConsole.WriteLine('    No packages installed.');
-      Exit;
-    end;
-
-    for var I := 0 to BlocksArr.Count - 1 do
-    begin
-      var Entry := (BlocksArr.Items[I] as TJSONString).Value;
-      var Parts := Entry.Split(['@'], 2);
-      if Length(Parts) = 2 then
-      begin
-        var Id := Parts[0];
-        var Commit := Copy(Parts[1], 1, Min(7, Length(Parts[1])));
-        TConsole.WriteLine(Format('    %-35s %s', [Id, Commit]));
-      end
-      else
-        TConsole.WriteLine('    ' + Entry);
-    end;
-  finally
-    Db.Free;
+  for var Entry in Entries do
+  begin
+    var Parts := Entry.Split(['@'], 2);
+    if Length(Parts) = 2 then
+      TConsole.WriteLine(Format('    %-35s %s', [Parts[0], Parts[1]]))
+    else
+      TConsole.WriteLine('    ' + Entry);
   end;
 
   TConsole.WriteLine;
@@ -316,115 +316,23 @@ end;
 { TInstallCommand }
 
 procedure TInstallCommand.Execute;
+var
+  LPackageName: string;
+  LVersionConstraint: string;
 begin
   inherited;
   CheckWorkspace;
-  var InstallSource := FPackageName;
-  var InstallCommit := '';
+  LPackageName := FPackageName;
+  LVersionConstraint := '';
   if ContainsStr(FPackageName, '@') then
   begin
-    var Parts := FPackageName.Split(['@'], 2);
-    InstallSource := Trim(Parts[0]);
-    InstallCommit := Trim(Parts[1]);
+    var LParts := FPackageName.Split(['@'], 2);
+    LPackageName := Trim(LParts[0]);
+    LVersionConstraint := Trim(LParts[1]);
   end;
-
-  var Manifest := TManifest.Load(InstallSource);
-  try
-    ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
-
-    TConsole.WriteLine('Config: ' + FPackageName, clDkGray);
-    TConsole.WriteLine;
-
-    TestDelphiRunning;
-
-    TConsole.WriteLine('Workspace: ' + TWorkspace.WorkDir, clDkGray);
-    TConsole.WriteLine;
-
-    // Step 3 — Delphi version
-    var SelectedProduct := TProduct.Select(FProduct);
-    TConsole.WriteLine('Selected version: ' + SelectedProduct.DisplayName, clGreen);
-    TConsole.WriteLine;
-
-    // Step 4 — Skip if already installed (unless -Overwrite or -BuildOnly)
-    if not FOverwrite
-        and not FBuildOnly
-        and TWorkspace.Database.IsInstalled(Manifest.Application.Id, SelectedProduct.VersionName) then
-    begin
-      TConsole.WriteWarning('Already installed: ' + Manifest.Application.Id);
-      TConsole.WriteLine;
-      Exit;
-    end;
-
-    // Step 5 — Resolve package folder for selected Delphi version
-    var PackageFolder := SelectedProduct.GetPackageFolder(Manifest.PackageOptions.PackageFolders);
-
-    // Step 6 — Dependencies
-    if not Manifest.Dependencies.IsEmpty then
-    begin
-      TConsole.WriteLine('Resolving dependencies...', clCyan);
-      for var LDependency in Manifest.Dependencies do
-        SelectedProduct.Install(LDependency, TWorkspace.Database, FSilent, FOverwrite);
-      TConsole.WriteLine;
-    end;
-
-    var CommitSha: string;
-    var ProjectDir: string;
-    if not FBuildOnly then
-    begin
-      // Step 7 — Resolve commit and download
-      TConsole.WriteLine('--- ' + Manifest.Application.Id + ' / ' + Manifest.Application.Name + ' ---', clWhite);
-      TConsole.WriteLine('Fetching repository info...', clCyan);
-      var RepoInfo := THttpUtils.GetGitHubInfo(Manifest.Application.Url);
-      TConsole.WriteLine('  Branch : ' + RepoInfo.DefaultBranch);
-      TConsole.WriteLine('  Latest : ' + RepoInfo.LatestCommit);
-      TConsole.WriteLine;
-
-      if InstallCommit <> '' then
-      begin
-        CommitSha := InstallCommit;
-        TConsole.WriteLine('Commit: ' + CommitSha + ' (from @)');
-      end
-      else
-      begin
-        CommitSha := RepoInfo.LatestCommit;
-        TConsole.WriteLine('Commit: ' + CommitSha + ' (latest)');
-      end;
-      TConsole.WriteLine;
-
-      var ZipUrl := THttpUtils.GetGitHubZipUrl(RepoInfo.Owner, RepoInfo.Repo, CommitSha);
-      var DirName := Manifest.Application.Name;
-      ProjectDir := THttpUtils.DownloadAndExtract(ZipUrl, TWorkspace.WorkDir, DirName, FOverwrite, FSilent);
-      TConsole.WriteLine('Project downloaded to: ' + ProjectDir, clGreen);
-      TConsole.WriteLine;
-    end
-    else
-    begin
-      var DirName := Manifest.Application.Name;
-      ProjectDir := TPath.Combine(TWorkspace.WorkDir, DirName);
-      if not TDirectory.Exists(ProjectDir) then
-        raise Exception.CreateFmt('Build-only mode: project directory not found: %s', [ProjectDir]);
-      TConsole.WriteLine('Build-only mode. Using existing directory: ' + ProjectDir, clYellow);
-      TConsole.WriteLine;
-      CommitSha := '';
-    end;
-
-    // Step 8 — Compile
-    SelectedProduct.BuildPackages(ProjectDir, PackageFolder, Manifest.Packages, Manifest.SupportedPlatforms);
-
-    // Step 9 — Update database
-    if not FBuildOnly then
-      TWorkspace.Database.Update(Manifest.Application.Id, CommitSha, SelectedProduct.VersionName);
-
-    TConsole.WriteLine;
-    TConsole.WriteLine('============================================', clGreen);
-    TConsole.WriteLine('  Done!', clGreen);
-    TConsole.WriteLine('  Project  : ' + ProjectDir, clGreen);
-    TConsole.WriteLine('  Packages : ' + TPath.Combine(ProjectDir, 'packages\' + PackageFolder), clGreen);
-    TConsole.WriteLine('============================================', clGreen);
-    TConsole.WriteLine;
-  finally
-    Manifest.Free;
-  end;
+  ShowBanner('', '');
+  TestDelphiRunning;
+  TWorkspace.Install(LPackageName, LVersionConstraint, FProduct, FOverwrite, FBuildOnly, FSilent, FForce);
 end;
 
 procedure TInstallCommand.ShowHelp;
@@ -437,7 +345,8 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('Arguments:', clWhite);
   WriteOption('<source>', 'Package ID, local file path, or remote URL of a manifest (.json).');
-  WriteOption('', 'Append @<sha> to pin a specific commit  (e.g. owner.pkg@abc1234).');
+  WriteOption('', 'Append @<constraint> to specify a version constraint (e.g. owner.pkg@1.2.0,');
+  WriteOption('', 'owner.pkg@^1.2.0, owner.pkg@>=1.0.0).');
   TConsole.WriteLine;
   TConsole.WriteLine('Options:', clWhite);
   WriteOption('/product <version>', 'Target Delphi version (e.g. delphi12, delphi13).');
@@ -445,10 +354,13 @@ begin
   WriteOption('/overwrite', 'Overwrite the project directory if it already exists.');
   WriteOption('/buildonly', 'Skip download; compile the already-extracted project.');
   WriteOption('/silent', 'Skip non-critical interactive prompts (use defaults).');
+  WriteOption('/force', 'Skip dependencies that conflict with the requested constraint');
+  WriteOption('', 'instead of raising an error, using the already-installed version.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package');
-  TConsole.WriteLine('  ' + AppExeName + ' install owner.package@abc1234');
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package@1.2.0');
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package@^1.2.0 /force');
   TConsole.WriteLine('  ' + AppExeName + ' install C:\repos\mylib.json /overwrite');
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package /product delphi12 /silent');
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package /buildonly /product delphi13');
@@ -461,52 +373,9 @@ procedure TUninstallCommand.Execute;
 begin
   inherited;
   CheckWorkspace;
-  var InstallSource := FPackageName;
-  var InstallCommit := '';
-  if ContainsStr(FPackageName, '@') then
-  begin
-    var Parts := FPackageName.Split(['@'], 2);
-    InstallSource := Trim(Parts[0]);
-    InstallCommit := Trim(Parts[1]);
-  end;
-
-  var Manifest := TManifest.Load(InstallSource);
-  try
-    ShowBanner(Manifest.Application.Name, Manifest.Application.Description);
-
-    TConsole.WriteLine('Config: ' + FPackageName, clDkGray);
-    TConsole.WriteLine;
-
-    TestDelphiRunning;
-
-    TConsole.WriteLine('Workspace: ' + TWorkspace.WorkDir, clDkGray);
-    TConsole.WriteLine;
-
-    // Step 3 — Delphi version
-    var SelectedProduct := TProduct.Select(FProduct);
-    TConsole.WriteLine('Selected version: ' + SelectedProduct.DisplayName, clGreen);
-    TConsole.WriteLine;
-
-    // Step 4 — Uninstall path
-    var DirName := Manifest.Application.Name;
-    var ProjectDir := TPath.Combine(TWorkspace.WorkDir, DirName);
-
-    if TDirectory.Exists(ProjectDir) then
-    begin
-      TDirectory.Delete(ProjectDir, True);
-      TConsole.WriteLine('Removed: ' + ProjectDir, clYellow);
-    end
-    else
-      TConsole.WriteLine('Directory not found: ' + ProjectDir, clYellow);
-
-    TWorkspace.Database.RemoveEntry(Manifest.Application.Id, SelectedProduct.VersionName);
-
-    TConsole.WriteLine;
-    TConsole.WriteLine('Uninstalled: ' + Manifest.Application.Name, clGreen);
-    TConsole.WriteLine;
-  finally
-    Manifest.Free;
-  end;
+  ShowBanner('', '');
+  TestDelphiRunning;
+  TWorkspace.Uninstall(FPackageName, FProduct);
 end;
 
 procedure TUninstallCommand.ShowHelp;
@@ -518,7 +387,7 @@ begin
   TConsole.WriteLine('Usage: ' + AppExeName + ' uninstall <source> [options]', clWhite);
   TConsole.WriteLine;
   TConsole.WriteLine('Arguments:', clWhite);
-  WriteOption('<source>', 'Package ID, local file path, or remote URL of a manifest (.json).');
+  WriteOption('<id>', 'Package identifier (e.g. owner.package).');
   TConsole.WriteLine;
   TConsole.WriteLine('Options:', clWhite);
   WriteOption('/product <version>', 'Target Delphi version (e.g. delphi12, delphi13).');
@@ -667,6 +536,169 @@ begin
   TConsole.WriteLine;
 end;
 
+{ TViewCommand }
+
+procedure TViewCommand.Execute;
+begin
+  inherited;
+  if FPackage = '' then
+    raise Exception.Create('Package name needed');
+
+  if FVersions then
+  begin
+    var LVersions := TManifest.GetVersions(FPackage);
+    if Length(LVersions) = 0 then
+    begin
+      TConsole.WriteWarning('No versions found for: ' + FPackage);
+      Exit;
+    end;
+    TConsole.WriteLine;
+    TConsole.WriteLine('Available versions of ' + FPackage + ':', clWhite);
+    TConsole.WriteLine;
+    for var LVer in LVersions do
+      TConsole.WriteLine('  ' + LVer.ToString);
+    TConsole.WriteLine;
+    Exit;
+  end;
+
+  var LPackageName := '';
+  var LPackageVersion := '';
+  var LPackageNamePair := FPackage.Split(['@']);
+  case Length(LPackageNamePair) of
+    1:
+      LPackageName := LPackageNamePair[0];
+    2:
+    begin
+      LPackageName := LPackageNamePair[0];
+      LPackageVersion := LPackageNamePair[1];
+    end;
+    else
+      raise Exception.Create('Package id should be in the form vendor.name@version');
+  end;
+
+  var LManifest := TManifest.GetManifest(LPackageName, LPackageVersion);
+  try
+    if FRaw then
+    begin
+      TConsole.WriteLine(TJsonHelper.PrettyPrint(TJsonHelper.ObjectToJSONString(LManifest)));
+      Exit;
+    end;
+
+    const LabelW = 13;
+    var LField: TProc<string, string>;
+    LField := procedure(ALabel, AValue: string)
+      begin
+        if AValue = '' then
+          Exit;
+        TConsole.Write('  ' + ALabel.PadRight(LabelW), clCyan);
+        TConsole.WriteLine('▸  ' + AValue);
+      end;
+
+    var LSection: TProc<string>;
+    LSection := procedure(ATitle: string)
+      begin
+        TConsole.WriteLine;
+        TConsole.Write('  ', clDkGray);
+        TConsole.WriteLine(ATitle, clWhite);
+        TConsole.WriteLine('  ' + StringOfChar('─', 44), clDkGray);
+      end;
+
+    TConsole.WriteLine;
+    TConsole.WriteLine('  ' + LManifest.Name + '  ' + LManifest.Version, clWhite);
+    TConsole.WriteLine('  ' + StringOfChar('─', 44), clDkGray);
+    TConsole.WriteLine;
+
+    LField('Id',          LManifest.Id);
+    LField('Author',      LManifest.Author);
+    LField('License',     LManifest.License);
+    LField('Homepage',    LManifest.Homepage);
+    LField('Repository',  LManifest.Repository.Url);
+
+    if LManifest.Description <> '' then
+    begin
+      TConsole.WriteLine;
+      TConsole.WriteLine('  ' + LManifest.Description, clGray);
+    end;
+
+    if LManifest.Keywords.Count > 0 then
+      LField('Keywords', string.Join(', ', LManifest.Keywords.ToArray));
+
+    // Packages
+    if LManifest.Packages.Count > 0 then
+    begin
+      LSection('Packages');
+      for var LPkg in LManifest.Packages do
+      begin
+        TConsole.Write('    ' + LPkg.Name.PadRight(30), clWhite);
+        TConsole.WriteLine(string.Join(', ', LPkg.&Type.ToArray), clDkGray);
+      end;
+    end;
+
+    // Platforms
+    if LManifest.Platforms.Count > 0 then
+    begin
+      LSection('Platforms');
+      for var LPlat in LManifest.Platforms do
+      begin
+        TConsole.WriteLine('    ' + LPlat.Key, clCyan);
+        if LPlat.Value.SourcePath.Count > 0 then
+          LField('      Source',   string.Join(', ', LPlat.Value.SourcePath.ToArray));
+        if LPlat.Value.BrowsingPath.Count > 0 then
+          LField('      Browsing', string.Join(', ', LPlat.Value.BrowsingPath.ToArray));
+        if LPlat.Value.DebugDCUPath.Count > 0 then
+          LField('      Debug',    string.Join(', ', LPlat.Value.DebugDCUPath.ToArray));
+      end;
+    end;
+
+    // Dependencies
+    if LManifest.Dependencies.Count > 0 then
+    begin
+      LSection('Dependencies');
+      for var LDep in LManifest.Dependencies do
+      begin
+        TConsole.Write('    ' + LDep.Key.PadRight(30), clWhite);
+        TConsole.WriteLine(LDep.Value, clDkGray);
+      end;
+    end;
+
+    // Package folders
+    if LManifest.PackageOptions.Folders.Count > 0 then
+    begin
+      LSection('Package folders');
+      for var LFolder in LManifest.PackageOptions.Folders do
+      begin
+        TConsole.Write('    ' + LFolder.Key.PadRight(16), clCyan);
+        TConsole.WriteLine('→  ' + LFolder.Value);
+      end;
+    end;
+
+    TConsole.WriteLine;
+  finally
+    LManifest.Free;
+  end;
+end;
+
+procedure TViewCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Shows details of a package from the local repository.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' view <id@version> [options]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Arguments:', clWhite);
+  WriteOption('<id@version>', 'Package identifier and version (e.g. owner.package@1.2.0).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/raw', 'Print the raw manifest JSON instead of the formatted summary.');
+  WriteOption('/versions', 'List all available versions of the package (no @version needed).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' view owner.package@1.2.0');
+  TConsole.WriteLine('  ' + AppExeName + ' view owner.package@1.2.0 /raw');
+  TConsole.WriteLine('  ' + AppExeName + ' view owner.package /versions');
+  TConsole.WriteLine;
+end;
+
 initialization
 
 TCommand.RegisterCommand('help', THelpCommand, True);
@@ -676,5 +708,6 @@ TCommand.RegisterCommand('init', TInitCommand);
 TCommand.RegisterCommand('install', TInstallCommand);
 TCommand.RegisterCommand('uninstall', TUninstallCommand);
 TCommand.RegisterCommand('config', TConfigCommand);
+TCommand.RegisterCommand('view', TViewCommand);
 
 end.

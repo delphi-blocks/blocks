@@ -88,22 +88,6 @@ type
     /// </remarks>
     procedure UpdateSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform);
 
-    /// <summary>Recursively installs a dependency and its sub-dependencies into the workspace.</summary>
-    /// <param name="ADependencySpec">Package identifier in the form <c>owner.pkg</c> or
-    ///   <c>owner.pkg@commitsha</c>.</param>
-    /// <param name="ADatabase">Database instance used to check and record installed packages.</param>
-    /// <param name="ASilent">When <c>True</c>, skips non-critical interactive prompts and uses defaults.</param>
-    /// <param name="AOverwrite">When <c>True</c>, replaces an existing project directory without asking.</param>
-    /// <param name="ADepth">Recursion depth used only to indent console output. Pass <c>0</c> for top-level calls.</param>
-    /// <remarks>Uses <see cref="TWorkspace.WorkDir"/> and <see cref="TWorkspace.BlocksDir"/>
-    ///   as the installation target.</remarks>
-    procedure Install(
-        const ADependencySpec: string;
-        ADatabase: TDatabase;
-        ASilent, AOverwrite: Boolean;
-        ADepth: Integer = 0
-    );
-
     /// <summary>All installed Delphi/RAD Studio products, sorted newest-first.</summary>
     class property Products: TObjectList<TProduct> read FProducts;
     /// <summary>All installed Delphi/RAD Studio products by name.</summary>
@@ -482,7 +466,7 @@ begin
   end;
 
   if BestKey = '' then
-    raise Exception.CreateFmt('No compatible package folder found for "%s". Delphi version too old?', [FVersionName]);
+    raise Exception.CreateFmt('No compatible package found for "%s". Delphi version too old?', [FVersionName]);
 
   Result := APackageFolders[BestKey];
 end;
@@ -688,102 +672,6 @@ begin
 
   TConsole.WriteLine;
   TConsole.WriteLine('All packages compiled successfully.', clGreen);
-end;
-
-procedure TProduct.Install(
-    const ADependencySpec: string;
-    ADatabase: TDatabase;
-    ASilent, AOverwrite: Boolean;
-    ADepth: Integer = 0
-);
-var
-  DepId, ReqCommit: string;
-  InstalledSha: string;
-begin
-  var Indent := StringOfChar(' ', (ADepth + 1) * 2);
-
-  // Parse "owner/repo@commitsha"
-  if ADependencySpec.Contains('@') then
-  begin
-    DepId := Trim(ADependencySpec.Split(['@'])[0]);
-    ReqCommit := Trim(ADependencySpec.Split(['@'])[1]);
-  end
-  else
-  begin
-    DepId := Trim(ADependencySpec);
-    ReqCommit := '';
-  end;
-
-  var Manifest := TManifest.Load(DepId);
-  try
-    TConsole.WriteLine(Indent + '--- ' + DepId + ' / ' + Manifest.Application.Name + ' ---', clWhite);
-
-    // Check if already installed in the database
-    InstalledSha := ADatabase.InstalledCommit(DepId, FVersionName);
-    if InstalledSha <> '' then
-    begin
-      if (ReqCommit = '') or SameText(InstalledSha, ReqCommit) then
-      begin
-        TConsole.WriteLine(Indent + '[WARN] Already installed', clYellow);
-        Exit;
-      end
-      else
-      begin
-        TConsole
-            .WriteLine(Format('%s[WARN] Installed @ %s, required: %s', [Indent, InstalledSha, ReqCommit]), clYellow);
-        if ASilent then
-        begin
-          TConsole.WriteLine(Indent + 'Continuing with installed version (-Silent).', clYellow);
-          Exit;
-        end;
-        TConsole.WriteLine(Indent + '  [S] Stop');
-        TConsole.WriteLine(Indent + '  [K] Keep installed version and continue');
-        TConsole.WriteLine(Indent + '  [I] Install required version');
-        TConsole.Write(Indent + 'Choice: ');
-        var Choice := TConsole.ReadLine;
-        case UpCase(Trim(Choice)[1]) of
-          'K': Exit;
-          'I': {continue with installation};
-        else
-          raise Exception.CreateFmt('Dependency commit mismatch: %s', [DepId]);
-        end;
-      end;
-    end;
-
-    // Recurse into sub-dependencies first
-    for var LDependency in Manifest.Dependencies do
-      Install(LDependency, ADatabase, ASilent, AOverwrite, ADepth + 1);
-
-    // Resolve package folder for this Delphi version
-    var PackageFolder := GetPackageFolder(Manifest.PackageOptions.PackageFolders);
-
-    // Resolve commit (fetch latest if not pinned)
-    var Parts := DepId.Split(['.']);
-    var Owner := Parts[0];
-    var Repo := Parts[1];
-    if ReqCommit = '' then
-    begin
-      var RepoInfo := THttpUtils.GetGitHubInfo(Manifest.Application.Url);
-      ReqCommit := RepoInfo.LatestCommit;
-      Owner := RepoInfo.Owner;
-      Repo := RepoInfo.Repo;
-      TConsole.WriteLine(Indent + 'Using latest commit: ' + ReqCommit);
-    end;
-
-    // Download and extract
-    var ZipUrl := THttpUtils.GetGitHubZipUrl(Owner, Repo, ReqCommit);
-    var ProjectDir := THttpUtils.DownloadAndExtract(ZipUrl, TWorkspace.WorkDir, Manifest.Application.Name, AOverwrite, ASilent);
-
-    // Compile
-    BuildPackages(ProjectDir, PackageFolder, Manifest.Packages, Manifest.SupportedPlatforms);
-
-    // Register in database
-    ADatabase.Update(Manifest.Application.Id, ReqCommit, FVersionName);
-
-    TConsole.WriteLine(Indent + '[DONE] ' + DepId, clGreen);
-  finally
-    Manifest.Free;
-  end;
 end;
 
 end.

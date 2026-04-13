@@ -1,4 +1,4 @@
-unit Blocks.Workspace;
+﻿unit Blocks.Workspace;
 
 interface
 
@@ -45,6 +45,22 @@ type
     /// </remarks>
     class procedure Initialize(const AWorkDir: string); static;
 
+    /// <summary>Downloads, compiles and registers a package in the workspace.</summary>
+    /// <param name="APackageName">Package identifier (without version suffix).</param>
+    /// <param name="AVersionConstraint">Version constraint string (e.g. <c>1.2.0</c>, <c>>=1.0.0</c>); empty for any version.</param>
+    /// <param name="AProduct">Target Delphi version name (e.g. <c>delphi13</c>); empty to select interactively.</param>
+    /// <param name="AOverwrite">Overwrite the project directory if it already exists.</param>
+    /// <param name="ABuildOnly">Skip download; compile the already-extracted project.</param>
+    /// <param name="ASilent">Skip non-critical interactive prompts.</param>
+    /// <param name="AForce">When <c>True</c>, log a warning on version conflict and continue instead of raising an exception.</param>
+    class procedure Install(const APackageName, AVersionConstraint, AProduct: string;
+        AOverwrite, ABuildOnly, ASilent, AForce: Boolean); static;
+
+    /// <summary>Removes a previously installed package from the workspace and the database.</summary>
+    /// <param name="APackageName">Package identifier or manifest path/URL.</param>
+    /// <param name="AProduct">Target Delphi version name; empty to select interactively.</param>
+    class procedure Uninstall(const APackageName, AProduct: string); static;
+
     /// <summary>Root directory of the current workspace.</summary>
     /// <remarks>
     ///   Returns the value set by the last call to <see cref="Initialize"/> or an explicit
@@ -80,7 +96,9 @@ implementation
 uses
   Blocks.Consts,
   Blocks.Console,
-  Blocks.Http;
+  Blocks.Http,
+  Blocks.Manifest,
+  Blocks.Product;
 
 const
   DefaultBlocksRepositoryUrl = 'https://github.com/lminuti/blocks-repository';
@@ -102,6 +120,7 @@ begin
   if not Assigned(FDatabase) then
   begin
     FDatabase := TDatabase.Create;
+    FDatabase.Load;
   end;
   Result := FDatabase;
 end;
@@ -221,6 +240,154 @@ begin
 
   if DownloadDir <> '' then
     TDirectory.Delete(DownloadDir, True);
+end;
+
+class procedure TWorkspace.Install(const APackageName, AVersionConstraint, AProduct: string;
+    AOverwrite, ABuildOnly, ASilent, AForce: Boolean);
+begin
+  var LManifest := TManifest.GetManifest(APackageName, AVersionConstraint);
+  try
+    TConsole.WriteLine('Config: ' + APackageName, clDkGray);
+    TConsole.WriteLine;
+
+    TConsole.WriteLine('Workspace: ' + WorkDir, clDkGray);
+    TConsole.WriteLine;
+
+    // Step 3 — Delphi version
+    var LSelectedProduct := TProduct.Select(AProduct);
+    TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
+    TConsole.WriteLine;
+
+    // Step 4 — Version compatibility check (unless -Overwrite or -BuildOnly)
+    if not AOverwrite and not ABuildOnly then
+    begin
+      var LInstalledVer := Database.InstalledVersion(LManifest.Id, LSelectedProduct.VersionName);
+      if LInstalledVer <> '' then
+      begin
+        var LInstalledSemVer: TSemVer;
+        if TSemVer.TryParse(LInstalledVer, LInstalledSemVer)
+            and LInstalledSemVer.MatchesConstraint(AVersionConstraint) then
+        begin
+          TConsole.WriteLine('Already installed: ' + LManifest.Id + ' ' + LInstalledVer, clGreen);
+          TConsole.WriteLine;
+          Exit;
+        end
+        else
+        begin
+          if AForce then
+          begin
+            TConsole.WriteWarning(
+                Format('Version conflict: %s installed %s, required %s — skipping (/force)',
+                [LManifest.Id, LInstalledVer, AVersionConstraint]));
+            TConsole.WriteLine;
+            Exit;
+          end
+          else
+            raise Exception.CreateFmt(
+                'Version conflict: %s installed %s, required %s',
+                [LManifest.Id, LInstalledVer, AVersionConstraint]);
+        end;
+      end;
+    end;
+
+    // Step 5 — Resolve package folder for selected Delphi version
+    var LPackageFolder := LSelectedProduct.GetPackageFolder(LManifest.PackageOptions.Folders);
+
+    // Step 6 — Dependencies
+    if not LManifest.Dependencies.IsEmpty then
+    begin
+      TConsole.WriteLine('Resolving dependencies...', clCyan);
+      for var LDependency in LManifest.Dependencies do
+        TWorkspace.Install(LDependency.Key, LDependency.Value, LSelectedProduct.VersionName, AOverwrite, ABuildOnly, ASilent, AForce);
+      TConsole.WriteLine;
+    end;
+
+    var LProjectDir: string;
+    if not ABuildOnly then
+    begin
+      // Step 7 — Build zip URL from repository URL and download
+      // Repository URL format: https://github.com/owner/repo/tree/ref
+      TConsole.WriteLine('--- ' + LManifest.Id + ' / ' + LManifest.Name + ' ---', clWhite);
+      TConsole.WriteLine('Version: ' + LManifest.Version, clCyan);
+      var LRepoParts := TrimRight(LManifest.Repository.Url, ['/']).Split(['/']);
+      if Length(LRepoParts) < 7 then
+        raise Exception.CreateFmt('Cannot parse repository URL: %s', [LManifest.Repository.Url]);
+      var LZipUrl := THttpUtils.GetGitHubZipUrl(LRepoParts[3], LRepoParts[4], LRepoParts[6]);
+      LProjectDir := THttpUtils.DownloadAndExtract(LZipUrl, WorkDir, LManifest.Name, AOverwrite, ASilent);
+      TConsole.WriteLine('Project downloaded to: ' + LProjectDir, clGreen);
+      TConsole.WriteLine;
+    end
+    else
+    begin
+      LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
+      if not TDirectory.Exists(LProjectDir) then
+        raise Exception.CreateFmt('Build-only mode: project directory not found: %s', [LProjectDir]);
+      TConsole.WriteLine('Build-only mode. Using existing directory: ' + LProjectDir, clYellow);
+      TConsole.WriteLine;
+    end;
+
+    // Step 8 — Compile
+    LSelectedProduct.BuildPackages(LProjectDir, LPackageFolder, LManifest.Packages, LManifest.Platforms);
+
+    // Step 9 — Update database
+    if not ABuildOnly then
+      Database.Update(LManifest.Id, LManifest.Version, LSelectedProduct.VersionName);
+
+    TConsole.WriteLine;
+    TConsole.WriteLine('============================================', clGreen);
+    TConsole.WriteLine('  Done!', clGreen);
+    TConsole.WriteLine('  Project  : ' + LProjectDir, clGreen);
+    TConsole.WriteLine('  Packages : ' + TPath.Combine(LProjectDir, 'packages\' + LPackageFolder), clGreen);
+    TConsole.WriteLine('============================================', clGreen);
+    TConsole.WriteLine;
+  finally
+    LManifest.Free;
+  end;
+end;
+
+class procedure TWorkspace.Uninstall(const APackageName, AProduct: string);
+begin
+  TConsole.WriteLine('Config: ' + APackageName, clDkGray);
+  TConsole.WriteLine;
+
+  TConsole.WriteLine('Workspace: ' + WorkDir, clDkGray);
+  TConsole.WriteLine;
+
+  // Step 3 — Delphi version
+  var LSelectedProduct := TProduct.Select(AProduct);
+  TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
+  TConsole.WriteLine;
+
+  // Step 4 — Check that the package is actually installed
+  var LInstalledVer := Database.InstalledVersion(APackageName, LSelectedProduct.VersionName);
+  if LInstalledVer = '' then
+  begin
+    TConsole.WriteWarning('Not installed: ' + APackageName);
+    TConsole.WriteLine;
+    Exit;
+  end;
+
+  var LManifest := TManifest.GetManifest(APackageName, LInstalledVer);
+  try
+    // Step 5 — Remove project directory
+    var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
+    if TDirectory.Exists(LProjectDir) then
+    begin
+      TDirectory.Delete(LProjectDir, True);
+      TConsole.WriteLine('Removed: ' + LProjectDir, clYellow);
+    end
+    else
+      TConsole.WriteLine('Directory not found: ' + LProjectDir, clYellow);
+
+    // Step 6 — Remove from database
+    Database.RemoveEntry(LManifest.Id, LSelectedProduct.VersionName);
+
+    TConsole.WriteLine;
+    TConsole.WriteLine('Uninstalled: ' + LManifest.Name + ' ' + LInstalledVer, clGreen);
+    TConsole.WriteLine;
+  finally
+    LManifest.Free;
+  end;
 end;
 
 { TConfig }
