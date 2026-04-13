@@ -207,6 +207,9 @@ uses
   Blocks.Http,
   Blocks.Workspace;
 
+const
+  ManifestSchemaUrl = 'https://delphi-blocks.dev/schema/package.v1.json';
+
 { TSemVer }
 
 class function TSemVer.TryParse(const S: string; out V: TSemVer): Boolean;
@@ -440,7 +443,13 @@ begin
   if not FileExists(LFullPath) then
     raise Exception.CreateFmt('Manifest file not found: %s', [LFullPath]);
 
-  Result := TJsonHelper.JSONToObject<TManifest>(TFile.ReadAllText(LFullPath));
+  var LJSON := TJSONObject.ParseJSONValue(TFile.ReadAllText(LFullPath), False, True);
+  try
+    TJsonHelper.CheckSchema(LJSON, ManifestSchemaUrl);
+    Result := TJsonHelper.JSONToObject<TManifest>(LJSON);
+  finally
+    LJSON.Free;
+  end;
 end;
 
 class function TManifest.GetVersions(const APackageName: string): TArray<TSemVer>;

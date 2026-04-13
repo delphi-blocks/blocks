@@ -64,6 +64,10 @@ type
     class function ObjectToJSON(AObject: TObject): TJSONValue; overload;
     class function PrettyPrint(AJSON: TJSONValue): string; overload; static;
     class function PrettyPrint(const AJSONString: string): string; overload; static;
+
+    /// <summary>Raises an exception if the JSON contains a "$schema" field that
+    /// does not match <c>AExpectedSchema</c>. A missing field is silently ignored.</summary>
+    class procedure CheckSchema(AJSON: TJSONValue; const AExpectedSchema: string); static;
   end;
 
   TJsonSerializer = class
@@ -279,6 +283,19 @@ end;
 class function TJsonHelper.JSONToObject<T>(AJson: TJSONValue): T;
 begin
   Result := JSONToObject(TRttiHelper.Context.GetType(TClass(T)), AJSON) as T;
+end;
+
+class procedure TJsonHelper.CheckSchema(AJSON: TJSONValue; const AExpectedSchema: string);
+var
+  LSchemaValue: TJSONValue;
+begin
+  if not (AJSON is TJSONObject) then
+    raise Exception.CreateFmt('Unsupported schema: expected "%s"', [AExpectedSchema]);
+  LSchemaValue := TJSONObject(AJSON).GetValue('$schema');
+  if not Assigned(LSchemaValue) then
+    raise Exception.CreateFmt('Unsupported schema: expected "%s"', [AExpectedSchema]);
+  if LSchemaValue.Value <> AExpectedSchema then
+    raise Exception.CreateFmt('Unsupported schema: "%s"', [LSchemaValue.Value]);
 end;
 
 { TJsonDeserializer }

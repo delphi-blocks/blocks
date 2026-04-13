@@ -87,8 +87,13 @@ type
 implementation
 
 uses
+  System.JSON,
+
   Blocks.Console,
   Blocks.Workspace;
+
+const
+  DatabaseSchemaUrl = 'https://delphi-blocks.dev/schema/database.v1.json';
 
 // -- TDatabase -----------------------------------------------------------------
 
@@ -114,8 +119,13 @@ end;
 
 procedure TDatabase.Save;
 begin
-  var LJsonString := TJsonHelper.ObjectToJSONString(Self);
-  TFile.WriteAllText(FDatabasePath, LJsonString);
+  var LJSON := TJsonHelper.ObjectToJSON(Self) as TJSONObject;
+  try
+    LJSON.AddPair('$schema', DatabaseSchemaUrl);
+    TFile.WriteAllText(FDatabasePath, LJSON.ToJSON);
+  finally
+    LJSON.Free;
+  end;
 end;
 
 function TDatabase.ListEntries(const DelphiVersionName: string): TArray<string>;
@@ -141,8 +151,13 @@ procedure TDatabase.Load;
 begin
   if FileExists(FDatabasePath) then
   begin
-    var LJSON := TFile.ReadAllText(FDatabasePath);
-    TJsonHelper.JSONToObject(Self, LJSON);
+    var LJSON := TJSONObject.ParseJSONValue(TFile.ReadAllText(FDatabasePath), False, True);
+    try
+      TJsonHelper.CheckSchema(LJSON, DatabaseSchemaUrl);
+      TJsonHelper.JSONToObject(Self, LJSON);
+    finally
+      LJSON.Free;
+    end;
   end
   else
     Save;

@@ -106,6 +106,8 @@ type
 implementation
 
 uses
+  System.JSON,
+
   Blocks.Consts,
   Blocks.Console,
   Blocks.Http,
@@ -114,6 +116,7 @@ uses
 
 const
   DefaultBlocksRepositoryUrl = 'https://github.com/lminuti/blocks-repository';
+  WorkspaceSchemaUrl = 'https://delphi-blocks.dev/schema/workspace.v1.json';
 
 { TWorkspace }
 
@@ -460,8 +463,13 @@ procedure TConfig.Load;
 begin
   if FileExists(ConfigPath) then
   begin
-    var LJSON := TFile.ReadAllText(ConfigPath);
-    TJsonHelper.JSONToObject(Self, LJSON);
+    var LJSON := TJSONObject.ParseJSONValue(TFile.ReadAllText(ConfigPath), False, True);
+    try
+      TJsonHelper.CheckSchema(LJSON, WorkspaceSchemaUrl);
+      TJsonHelper.JSONToObject(Self, LJSON);
+    finally
+      LJSON.Free;
+    end;
   end
   else
     Save;
@@ -469,8 +477,13 @@ end;
 
 procedure TConfig.Save;
 begin
-  var LJsonString := TJsonHelper.ObjectToJSONString(Self);
-  TFile.WriteAllText(ConfigPath, LJsonString);
+  var LJSON := TJsonHelper.ObjectToJSON(Self) as TJSONObject;
+  try
+    LJSON.AddPair('$schema', WorkspaceSchemaUrl);
+    TFile.WriteAllText(ConfigPath, LJSON.ToJSON);
+  finally
+    LJSON.Free;
+  end;
 end;
 
 end.
