@@ -56,6 +56,8 @@ type
     FHandle: THandle;
     FWriter: TStreamWriter;
     FUTF8Encoding: TEncoding;
+    FBarWidth: Integer; // for the progressbar
+    FLastProgress: Int64; // for the progressbar
     procedure SetColor(AColor: TConsoleColor);
     function GetWriterHandle: THandle; virtual; abstract;
   public
@@ -75,6 +77,27 @@ type
     /// <param name="AText">The text to write.</param>
     /// <param name="AColor">Console colour to apply.</param>
     procedure Write(const AText: string; AColor: TConsoleColor); overload;
+    /// <summary>Moves the console cursor to the specified position in the screen buffer.</summary>
+    /// <param name="X">Zero-based column index.</param>
+    /// <param name="Y">Zero-based row index.</param>
+    procedure SetCursorPosition(X, Y: Integer);
+    /// <summary>Returns the current cursor position in the screen buffer.</summary>
+    /// <param name="X">Receives the zero-based column index, or <c>-1</c> on failure.</param>
+    /// <param name="Y">Receives the zero-based row index, or <c>-1</c> on failure.</param>
+    procedure GetCursorPosition(var X, Y: Integer);
+    /// <summary>Returns the visible size of the console window in character cells.</summary>
+    /// <param name="Width">Receives the number of columns.</param>
+    /// <param name="Height">Receives the number of rows.</param>
+    procedure GetScreenBufferSize(var Width, Height: Integer);
+    /// <summary>Renders an in-place ASCII progress bar on the current line.</summary>
+    /// <param name="ACount">Number of bytes (or units) transferred so far.</param>
+    /// <param name="ASize">Total expected bytes (or units); used to compute the percentage.</param>
+    /// <remarks>
+    ///   Call with <c>ACount &lt; 1</c> to initialise the bar width from the current console
+    ///   window size. Subsequent calls advance the bar; the line is rewritten in place using
+    ///   a carriage-return (<c>#13</c>) so the cursor stays on the same row.
+    /// </remarks>
+    procedure WriteProgress(const ACount, ASize: Int64);
 
     constructor Create; virtual;
     destructor Destroy; override;
@@ -253,9 +276,44 @@ begin
   inherited;
 end;
 
+procedure TConsoleWriter.GetCursorPosition(var X, Y: Integer);
+var
+  CSBI: TConsoleScreenBufferInfo;
+begin
+  if GetConsoleScreenBufferInfo(FHandle, CSBI) then
+  begin
+    X := CSBI.dwCursorPosition.X;
+    Y := CSBI.dwCursorPosition.Y;
+  end
+  else
+  begin
+    X := -1;
+    Y := -1;
+  end;
+end;
+
+procedure TConsoleWriter.GetScreenBufferSize(var Width, Height: Integer);
+var
+  Info: CONSOLE_SCREEN_BUFFER_INFO;
+begin
+  GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), Info);
+
+  Width := Info.srWindow.Right - Info.srWindow.Left + 1;
+  Height := Info.srWindow.Bottom - Info.srWindow.Top + 1;
+end;
+
 procedure TConsoleWriter.SetColor(AColor: TConsoleColor);
 begin
   SetConsoleTextAttribute(FHandle, Word(AColor));
+end;
+
+procedure TConsoleWriter.SetCursorPosition(X, Y: Integer);
+var
+  Coo: TCoord;
+begin
+  Coo.X := X;
+  Coo.Y := Y;
+  SetConsoleCursorPosition(FHandle, Coo);
 end;
 
 procedure TConsoleWriter.WriteLine(const AText: string);
@@ -285,6 +343,39 @@ begin
   SetColor(AColor);
   FWriter.WriteLine(AText);
   SetColor(clDefault);
+end;
+
+procedure TConsoleWriter.WriteProgress(const ACount, ASize: Int64);
+var
+  Progress: Integer;
+  Filled: Integer;
+begin
+  if ACount < 1 then
+  begin
+    var Height: Integer;
+    GetScreenBufferSize(FBarWidth, Height);
+    FBarWidth := FBarWidth - 10;
+    FLastProgress := 0;
+    Exit;
+  end;
+
+  if ACount > ASize then
+    Exit;
+
+  Progress := Trunc((ACount / ASize) * 100);
+  if Progress <= FLastProgress then
+    Exit;
+
+  FLastProgress := Progress;
+
+  Filled := Trunc(Progress / 100 * FBarWidth);
+
+  Write(#13'[' +
+    StringOfChar('#', Filled) +
+    StringOfChar(' ', FBarWidth - Filled) +
+    '] ' +
+    Format('%3d%%', [Round(Progress)])
+  );
 end;
 
 { TStdOutConsole }

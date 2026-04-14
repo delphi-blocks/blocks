@@ -1,4 +1,4 @@
-{******************************************************************************}
+﻿{******************************************************************************}
 {                                                                              }
 {  DelphiBlock Installer                                                       }
 {                                                                              }
@@ -21,6 +21,7 @@ uses
   System.Zip,
   System.JSON,
   System.Net.HttpClient,
+  System.Net.URLClient,
   Blocks.Consts;
 
 /// <summary>Static HTTP helpers and GitHub API client.</summary>
@@ -80,8 +81,14 @@ class function THttpUtils.GetAsString(const Url: string): string;
 begin
   var Client := THTTPClient.Create;
   try
+    Client.ReceiveDataExCallback :=
+      procedure (const Sender: TObject; AContentLength, AReadCount: Int64; AChunk: Pointer; AChunkLength: Cardinal; var AAbort: Boolean)
+      begin
+        TConsole.StdOut.WriteProgress(AReadCount, AContentLength);
+      end;
     Client.CustomHeaders['User-Agent'] := 'BLOCKS/1.0';
     var Response := Client.Get(Url);
+    TConsole.WriteLine;
     if Response.StatusCode >= 400 then
       raise Exception.CreateFmt('HTTP %d for %s', [Response.StatusCode, Url]);
     Result := Response.ContentAsString(TEncoding.UTF8);
@@ -148,13 +155,19 @@ end;
 
 class procedure THttpUtils.DownloadFile(const Url, DestPath: string);
 begin
-  var Client := THTTPClient.Create;
+  var Client := THttpClient.Create;
   try
+    Client.ReceiveDataExCallback :=
+      procedure (const Sender: TObject; AContentLength, AReadCount: Int64; AChunk: Pointer; AChunkLength: Cardinal; var AAbort: Boolean)
+      begin
+        TConsole.StdOut.WriteProgress(AReadCount, AContentLength);
+      end;
     Client.CustomHeaders['User-Agent'] := 'BLOCKS/1.0';
     Client.HandleRedirects := True;
     var FS := TFileStream.Create(DestPath, fmCreate);
     try
       Client.Get(Url, FS);
+      TConsole.WriteLine;
     finally
       FS.Free;
     end;
