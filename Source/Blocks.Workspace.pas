@@ -47,31 +47,31 @@ type
     class property Config: TConfig read GetConfig;
     /// <summary>Initialises a directory as a Blocks workspace and sets <see cref="WorkDir"/>.</summary>
     /// <param name="AWorkDir">Directory to initialise as the workspace root.</param>
+    /// <param name="AProduct">Target Delphi version name (e.g. <c>delphi13</c>); empty to select interactively.</param>
     /// <remarks>
     ///   Performs the following steps in order:
     ///   1. Sets <see cref="WorkDir"/> to <c>AWorkDir</c> and creates <see cref="BlocksDir"/> if absent.
-    ///   2. Downloads the package repository archive from the canonical GitHub source
+    ///   2. Selects the target Delphi version and persists it in the workspace configuration.
+    ///   3. Downloads the package repository archive from the canonical GitHub source
     ///      (<see cref="BlocksRepositoryUrl"/>).
-    ///   3. Extracts the archive and installs <c>repository\</c> under <see cref="BlocksDir"/>.
+    ///   4. Extracts the archive and installs <c>repository\</c> under <see cref="BlocksDir"/>.
     ///   Prompts the user before overwriting an existing repository folder.
     /// </remarks>
-    class procedure Initialize(const AWorkDir: string); static;
+    class procedure Initialize(const AWorkDir, AProduct, ARegistryKey: string); static;
 
     /// <summary>Downloads, compiles and registers a package in the workspace.</summary>
     /// <param name="APackageName">Package identifier (without version suffix).</param>
     /// <param name="AVersionConstraint">Version constraint string (e.g. <c>1.2.0</c>, <c>>=1.0.0</c>); empty for any version.</param>
-    /// <param name="AProduct">Target Delphi version name (e.g. <c>delphi13</c>); empty to select interactively.</param>
     /// <param name="AOverwrite">Overwrite the project directory if it already exists.</param>
     /// <param name="ABuildOnly">Skip download; compile the already-extracted project.</param>
     /// <param name="ASilent">Skip non-critical interactive prompts.</param>
     /// <param name="AForce">When <c>True</c>, log a warning on version conflict and continue instead of raising an exception.</param>
-    class procedure Install(const APackageName, AVersionConstraint, AProduct: string;
+    class procedure Install(const APackageName, AVersionConstraint: string;
         AOverwrite, ABuildOnly, ASilent, AForce: Boolean); static;
 
     /// <summary>Removes a previously installed package from the workspace and the database.</summary>
     /// <param name="APackageName">Package identifier or manifest path/URL.</param>
-    /// <param name="AProduct">Target Delphi version name; empty to select interactively.</param>
-    class procedure Uninstall(const APackageName, AProduct: string); static;
+    class procedure Uninstall(const APackageName: string); static;
 
     /// <summary>Root directory of the current workspace.</summary>
     /// <remarks>
@@ -87,13 +87,19 @@ type
   TConfig = class(TObject)
   private
     FSources: TJSONStringList;
+    FProduct: string;
+    FRegistryKey: string;
     function ConfigPath: string;
   public
     [JsonList(System.TypeInfo(string))]
     property Sources: TJSONStringList read FSources;
 
+    property Product: string read FProduct write FProduct;
+    property RegistryKey: string read FRegistryKey write FRegistryKey;
+
     procedure Load;
     procedure Save;
+    function ToJson: string;
 
     function Get(const AKey: string): string;
     procedure &Set(const AKey, AValue: string);
@@ -170,7 +176,7 @@ begin
   FWorkDir := ExcludeTrailingPathDelimiter(AValue);
 end;
 
-class procedure TWorkspace.Initialize(const AWorkDir: string);
+class procedure TWorkspace.Initialize(const AWorkDir, AProduct, ARegistryKey: string);
 begin
   SetWorkDir(AWorkDir);
 
@@ -179,6 +185,23 @@ begin
     TDirectory.CreateDirectory(GetBlocksDir);
     TConsole.WriteLine('Created: ' + GetBlocksDir, clGreen);
   end;
+
+  // Select Delphi version and persist both version name and registry key
+  var LSelectedProduct: TProduct;
+  if AProduct = '' then
+    LSelectedProduct := TProduct.Select('')
+  else
+    LSelectedProduct := TProduct.FindByNameAndKey(
+        AProduct,
+        if ARegistryKey = '' then 'BDS' else ARegistryKey
+    );
+  Config.Product := LSelectedProduct.VersionName;
+  Config.RegistryKey := LSelectedProduct.RegistryKey;
+  Config.Save;
+  TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
+  if not SameText(LSelectedProduct.RegistryKey, 'BDS') then
+    TConsole.WriteLine('Registry key    : ' + LSelectedProduct.RegistryKey, clGreen);
+  TConsole.WriteLine;
 
   if Config.Sources.Count = 0 then
     raise Exception.Create('No sources configured. Use "blocks config /add sources=<url>" to add one.');
@@ -257,7 +280,7 @@ begin
     TDirectory.Delete(DownloadDir, True);
 end;
 
-class procedure TWorkspace.Install(const APackageName, AVersionConstraint, AProduct: string;
+class procedure TWorkspace.Install(const APackageName, AVersionConstraint: string;
     AOverwrite, ABuildOnly, ASilent, AForce: Boolean);
 begin
   var LManifest := TManifest.GetManifest(APackageName, AVersionConstraint);
@@ -268,15 +291,21 @@ begin
     TConsole.WriteLine('Workspace: ' + WorkDir, clDkGray);
     TConsole.WriteLine;
 
-    // Step 3 — Delphi version
-    var LSelectedProduct := TProduct.Select(AProduct);
+    // Step 3 — Delphi version (read from workspace configuration)
+    var LProduct := Config.Product;
+    if LProduct = '' then
+      raise Exception.Create(
+          'No Delphi version configured. Run "blocks init -product <version>" first.');
+    var LSelectedProduct := TProduct.FindByNameAndKey(LProduct, Config.RegistryKey);
     TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
+    if not SameText(LSelectedProduct.RegistryKey, 'BDS') then
+      TConsole.WriteLine('Registry key    : ' + LSelectedProduct.RegistryKey, clGreen);
     TConsole.WriteLine;
 
     // Step 4 — Version compatibility check (unless -Overwrite or -BuildOnly)
     if not AOverwrite and not ABuildOnly then
     begin
-      var LInstalledVer := Database.InstalledVersion(LManifest.Id, LSelectedProduct.VersionName);
+      var LInstalledVer := Database.InstalledVersion(LManifest.Id);
       if LInstalledVer <> '' then
       begin
         var LInstalledSemVer: TSemVer;
@@ -313,7 +342,7 @@ begin
     begin
       TConsole.WriteLine('Resolving dependencies...', clCyan);
       for var LDependency in LManifest.Dependencies do
-        TWorkspace.Install(LDependency.Key, LDependency.Value, LSelectedProduct.VersionName, AOverwrite, ABuildOnly, ASilent, AForce);
+        TWorkspace.Install(LDependency.Key, LDependency.Value, AOverwrite, ABuildOnly, ASilent, AForce);
       TConsole.WriteLine;
     end;
 
@@ -346,7 +375,7 @@ begin
 
     // Step 9 — Update database
     if not ABuildOnly then
-      Database.Update(LManifest.Id, LManifest.Version, LSelectedProduct.VersionName);
+      Database.Update(LManifest.Id, LManifest.Version);
 
     TConsole.WriteLine;
     TConsole.WriteLine('============================================', clGreen);
@@ -360,7 +389,7 @@ begin
   end;
 end;
 
-class procedure TWorkspace.Uninstall(const APackageName, AProduct: string);
+class procedure TWorkspace.Uninstall(const APackageName: string);
 begin
   TConsole.WriteLine('Config: ' + APackageName, clDkGray);
   TConsole.WriteLine;
@@ -368,13 +397,19 @@ begin
   TConsole.WriteLine('Workspace: ' + WorkDir, clDkGray);
   TConsole.WriteLine;
 
-  // Step 3 — Delphi version
-  var LSelectedProduct := TProduct.Select(AProduct);
+  // Step 3 — Delphi version (read from workspace configuration)
+  var LProduct := Config.Product;
+  if LProduct = '' then
+    raise Exception.Create(
+        'No Delphi version configured. Run "blocks init -product <version>" first.');
+  var LSelectedProduct := TProduct.FindByNameAndKey(LProduct, Config.RegistryKey);
   TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
+  if not SameText(LSelectedProduct.RegistryKey, 'BDS') then
+    TConsole.WriteLine('Registry key    : ' + LSelectedProduct.RegistryKey, clGreen);
   TConsole.WriteLine;
 
   // Step 4 — Check that the package is actually installed
-  var LInstalledVer := Database.InstalledVersion(APackageName, LSelectedProduct.VersionName);
+  var LInstalledVer := Database.InstalledVersion(APackageName);
   if LInstalledVer = '' then
   begin
     TConsole.WriteWarning('Not installed: ' + APackageName);
@@ -395,7 +430,7 @@ begin
       TConsole.WriteLine('Directory not found: ' + LProjectDir, clYellow);
 
     // Step 6 — Remove from database
-    Database.RemoveEntry(LManifest.Id, LSelectedProduct.VersionName);
+    Database.RemoveEntry(LManifest.Id);
 
     TConsole.WriteLine;
     TConsole.WriteLine('Uninstalled: ' + LManifest.Name + ' ' + LInstalledVer, clGreen);
@@ -416,6 +451,10 @@ begin
     for var S in LSources do
       FSources.Add(S);
   end
+  else if SameText(AKey, 'product') then
+    FProduct := AValue
+  else if SameText(AKey, 'registrykey') then
+    FRegistryKey := AValue
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;
@@ -423,9 +462,7 @@ end;
 procedure TConfig.Add(const AKey, AValue: string);
 begin
   if SameText(AKey, 'sources') then
-  begin
     FSources.Add(AValue)
-  end
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;
@@ -443,6 +480,7 @@ begin
   inherited;
   FSources := TJSONStringList.Create;
   FSources.Add(DefaultBlocksRepositoryUrl);
+  FRegistryKey := 'BDS';
 end;
 
 destructor TConfig.Destroy;
@@ -455,6 +493,10 @@ function TConfig.Get(const AKey: string): string;
 begin
   if SameText(AKey, 'sources') then
     Result := string.Join(',', FSources.ToArray)
+  else if SameText(AKey, 'product') then
+    Result := FProduct
+  else if SameText(AKey, 'registrykey') then
+    Result := FRegistryKey
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;
@@ -481,6 +523,17 @@ begin
   try
     LJSON.AddPair('$schema', WorkspaceSchemaUrl);
     TFile.WriteAllText(ConfigPath, LJSON.ToJSON);
+  finally
+    LJSON.Free;
+  end;
+end;
+
+function TConfig.ToJson: string;
+begin
+  var LJSON := TJsonHelper.ObjectToJSON(Self) as TJSONObject;
+  try
+    LJSON.AddPair('$schema', WorkspaceSchemaUrl);
+    Result := TJsonHelper.PrettyPrint(LJSON.ToJSON);
   finally
     LJSON.Free;
   end;

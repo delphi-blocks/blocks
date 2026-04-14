@@ -32,6 +32,7 @@ type
     FVersionName: string;
     FDisplayName: string;
     FRootDir: string;
+    FRegistryKey: string;
 
     class var
       FProducts: TObjectList<TProduct>;
@@ -41,7 +42,7 @@ type
     class function GetProductNames: TArray<string>; static;
 
   public
-    constructor Create(const ABdsVersion, AVersionName, ADisplayName, ARootDir: string);
+    constructor Create(const ABdsVersion, AVersionName, ADisplayName, ARootDir, ARegistryKey: string);
     class constructor Create;
     class destructor Destroy;
 
@@ -51,6 +52,12 @@ type
     /// <returns>The matching <see cref="TProduct"/> instance from <see cref="Products"/>.</returns>
     /// <exception cref="Exception">Raised when no installed product matches <c>AProduct</c>.</exception>
     class function Find(const AProduct: string): TProduct;
+
+    /// <summary>Finds an installed product by version name and registry key.</summary>
+    /// <param name="AVersionName">Internal version name (e.g. <c>delphi12</c>).</param>
+    /// <param name="ARegistryKey">Registry profile key (e.g. <c>BDS</c> or a custom key).</param>
+    /// <exception cref="Exception">Raised when no match is found.</exception>
+    class function FindByNameAndKey(const AVersionName, ARegistryKey: string): TProduct;
 
     /// <summary>Selects an installed product interactively or by name.</summary>
     /// <param name="AProduct">When non-empty, delegates to <see cref="Find"/>.
@@ -113,6 +120,8 @@ type
     property DisplayName: string read FDisplayName;
     /// <summary>Root installation directory of the IDE (e.g. <c>C:\Program Files (x86)\Embarcadero\Studio\23.0</c>).</summary>
     property RootDir: string read FRootDir;
+    /// <summary>Registry key name under <c>HKCU\Software\Embarcadero</c> for this IDE profile (e.g. <c>BDS</c>).</summary>
+    property RegistryKey: string read FRegistryKey;
   end;
 
 implementation
@@ -255,13 +264,14 @@ end;
 
 // -- TProduct ------------------------------------------------------------------
 
-constructor TProduct.Create(const ABdsVersion, AVersionName, ADisplayName, ARootDir: string);
+constructor TProduct.Create(const ABdsVersion, AVersionName, ADisplayName, ARootDir, ARegistryKey: string);
 begin
   inherited Create;
   FBdsVersion := ABdsVersion;
   FVersionName := AVersionName;
   FDisplayName := ADisplayName;
   FRootDir := ARootDir;
+  FRegistryKey := ARegistryKey;
 end;
 
 class constructor TProduct.Create;
@@ -295,7 +305,7 @@ var
   SeenBds: TDictionary<string, Boolean>;
   Temp: TList<TProduct>; // non-owning; items transferred to FProducts
 
-  procedure ScanPath(RootKey: HKEY; const SubPath: string);
+  procedure ScanPath(RootKey: HKEY; const SubPath, ARegKeyName: string);
   var
     VerName, DispName: string;
   begin
@@ -309,9 +319,12 @@ var
     for var I := 0 to Keys.Count - 1 do
     begin
       var BdsKey := Keys[I];
-      if SeenBds.ContainsKey(BdsKey) then
+      // Deduplication key includes the registry key name so the same Delphi
+      // version under different profiles is not collapsed
+      var DedupeKey := ARegKeyName + ':' + BdsKey;
+      if SeenBds.ContainsKey(DedupeKey) then
         Continue;
-      SeenBds.Add(BdsKey, True);
+      SeenBds.Add(DedupeKey, True);
 
       Reg.RootKey := RootKey;
       if not Reg.OpenKeyReadOnly(SubPath + '\' + BdsKey) then
@@ -329,11 +342,11 @@ var
       end
       else
       begin
-        VerName := 'bds_' + BdsKey;
-        DispName := 'Delphi (BDS ' + BdsKey + ')';
+        // Only include entries that match a known BDS version number
+        Continue;
       end;
 
-      var P := TProduct.Create(BdsKey, VerName, DispName, ExcludeTrailingPathDelimiter(RootDir));
+      var P := TProduct.Create(BdsKey, VerName, DispName, ExcludeTrailingPathDelimiter(RootDir), ARegKeyName);
       Temp.Add(P);
     end;
   end;
@@ -344,9 +357,25 @@ begin
   SeenBds := TDictionary<string, Boolean>.Create;
   Temp := TList<TProduct>.Create;
   try
-    ScanPath(HKEY_LOCAL_MACHINE, 'SOFTWARE\Embarcadero\BDS');
-    ScanPath(HKEY_LOCAL_MACHINE, 'SOFTWARE\WOW6432Node\Embarcadero\BDS');
-    ScanPath(HKEY_CURRENT_USER, 'SOFTWARE\Embarcadero\BDS');
+    // HKLM: standard installation entries always live under "BDS"
+    ScanPath(HKEY_LOCAL_MACHINE, 'SOFTWARE\Embarcadero\BDS', 'BDS');
+    ScanPath(HKEY_LOCAL_MACHINE, 'SOFTWARE\WOW6432Node\Embarcadero\BDS', 'BDS');
+
+    // HKCU: enumerate ALL sub-keys of SOFTWARE\Embarcadero so that custom
+    // profiles (created by running Delphi with -r <key>) are also detected
+    Reg.RootKey := HKEY_CURRENT_USER;
+    if Reg.OpenKeyReadOnly('SOFTWARE\Embarcadero') then
+    begin
+      var EmbKeys := TStringList.Create;
+      try
+        Reg.GetKeyNames(EmbKeys);
+        Reg.CloseKey;
+        for var I := 0 to EmbKeys.Count - 1 do
+          ScanPath(HKEY_CURRENT_USER, 'SOFTWARE\Embarcadero\' + EmbKeys[I], EmbKeys[I]);
+      finally
+        EmbKeys.Free;
+      end;
+    end;
 
     // Sort descending (newest first = default)
     Temp.Sort(
@@ -372,6 +401,15 @@ begin
   raise Exception.CreateFmt('Product "%s" not found among installed Delphi versions.', [AProduct]);
 end;
 
+class function TProduct.FindByNameAndKey(const AVersionName, ARegistryKey: string): TProduct;
+begin
+  for var P in FProducts do
+    if SameText(P.FVersionName, AVersionName) and SameText(P.FRegistryKey, ARegistryKey) then
+      Exit(P);
+  raise Exception.CreateFmt(
+      'Product "%s" with registry key "%s" not found.', [AVersionName, ARegistryKey]);
+end;
+
 class function TProduct.Select(const AProduct: string): TProduct;
 begin
   if FProducts.Count = 0 then
@@ -383,10 +421,13 @@ begin
   TConsole.WriteLine('Installed Delphi versions:', clGreen);
   for var I := 0 to FProducts.Count - 1 do
   begin
+    var LLabel := FProducts[I].DisplayName;
+    if not SameText(FProducts[I].RegistryKey, 'BDS') then
+      LLabel := LLabel + ' [' + FProducts[I].RegistryKey + ']';
     if I = 0 then
-      TConsole.WriteLine(Format('  [%d] %s (default)', [I + 1, FProducts[I].DisplayName]))
+      TConsole.WriteLine(Format('  [%d] %s (default)', [I + 1, LLabel]))
     else
-      TConsole.WriteLine(Format('  [%d] %s', [I + 1, FProducts[I].DisplayName]));
+      TConsole.WriteLine(Format('  [%d] %s', [I + 1, LLabel]));
   end;
   TConsole.WriteLine;
 
@@ -498,8 +539,8 @@ begin
   try
     for var RegPath
         in [
-            'SOFTWARE\WOW6432Node\Embarcadero\BDS\' + FBdsVersion + '\Library\' + APlatform,
-            'SOFTWARE\Embarcadero\BDS\' + FBdsVersion + '\Library\' + APlatform] do
+            'SOFTWARE\WOW6432Node\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\Library\' + APlatform,
+            'SOFTWARE\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\Library\' + APlatform] do
     begin
       Reg.RootKey := HKEY_LOCAL_MACHINE;
       if Reg.OpenKeyReadOnly(RegPath) then
@@ -510,7 +551,7 @@ begin
       end;
     end;
     Reg.RootKey := HKEY_CURRENT_USER;
-    if Reg.OpenKeyReadOnly('SOFTWARE\Embarcadero\BDS\' + FBdsVersion + '\Library\' + APlatform) then
+    if Reg.OpenKeyReadOnly('SOFTWARE\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\Library\' + APlatform) then
     begin
       Reg.CloseKey;
       Result := True;
@@ -574,7 +615,7 @@ var
   end;
 
 begin
-  RegPath := 'Software\Embarcadero\BDS\' + FBdsVersion + '\Library\' + APlatform;
+  RegPath := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\Library\' + APlatform;
 
   Reg := TRegistry.Create(KEY_READ or KEY_WRITE);
   try

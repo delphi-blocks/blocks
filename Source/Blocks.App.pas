@@ -51,22 +51,27 @@ type
 
   TListCommand = class(TBaseCommand)
   private
-    [Param('product')]
-    FProduct: string;
-    procedure ListBlocks(AProduct: TProduct); overload;
-    procedure ListBlocks(const AProductName: string); overload;
+    procedure ListBlocks(AProduct: TProduct);
   public
     procedure Execute; override;
     procedure ShowHelp; override;
   end;
 
   TListProductsCommand = class(TBaseCommand)
+  private
+    [Param('all')]
+    FAll: Boolean;
   public
     procedure Execute; override;
     procedure ShowHelp; override;
   end;
 
   TInitCommand = class(TBaseCommand)
+  private
+    [Param('product')]
+    FProduct: string;
+    [Param('registrykey')]
+    FRegistryKey: string;
   public
     procedure Execute; override;
     procedure ShowHelp; override;
@@ -74,8 +79,6 @@ type
 
   TInstallCommand = class(TBaseCommand)
   private
-    [Param('product')]
-    FProduct: string;
     [Param('overwrite')]
     FOverwrite: Boolean;
     [Param('buildonly')]
@@ -93,8 +96,6 @@ type
 
   TUninstallCommand = class(TBaseCommand)
   private
-    [Param('product')]
-    FProduct: string;
     [Param]
     FPackageName: string;
   public
@@ -209,12 +210,12 @@ begin
   WriteOption('help [command]', 'Show this message, or detailed help for a specific command.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' init /product delphi13');
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package');
   TConsole.WriteLine('  ' + AppExeName + ' install C:\path\to\manifest.json /overwrite');
   TConsole.WriteLine('  ' + AppExeName + ' install https://example.com/manifest.json /silent');
-  TConsole.WriteLine('  ' + AppExeName + ' install owner.package /product delphi12');
   TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package');
-  TConsole.WriteLine('  ' + AppExeName + ' list /product delphi12');
+  TConsole.WriteLine('  ' + AppExeName + ' list');
   TConsole.WriteLine('  ' + AppExeName + ' help install');
   TConsole.WriteLine;
 end;
@@ -224,9 +225,11 @@ end;
 procedure TListCommand.Execute;
 begin
   inherited;
-  var LProducts := if FProduct <> '' then FProduct.Split([',']) else TProduct.ProductNames;
-  for var LProduct in LProducts do
-    ListBlocks(LProduct);
+  var LProductName := TWorkspace.Config.Product;
+  if LProductName = '' then
+    raise Exception.Create(
+        'No Delphi version configured. Run "blocks init -product <version>" first.');
+  ListBlocks(TProduct.FindByNameAndKey(LProductName, TWorkspace.Config.RegistryKey));
 end;
 
 procedure TListCommand.ListBlocks(AProduct: TProduct);
@@ -235,7 +238,7 @@ begin
   TConsole.WriteLine('  ' + AProduct.DisplayName, clCyan);
   TConsole.WriteLine;
 
-  var Entries := TWorkspace.Database.ListEntries(AProduct.VersionName);
+  var Entries := TWorkspace.Database.ListEntries;
   if Length(Entries) = 0 then
   begin
     TConsole.WriteLine('    No packages installed.');
@@ -255,26 +258,16 @@ begin
   TConsole.WriteLine;
 end;
 
-procedure TListCommand.ListBlocks(const AProductName: string);
-begin
-  var LProduct := TProduct.Find(AProductName);
-  ListBlocks(LProduct);
-end;
-
 procedure TListCommand.ShowHelp;
 begin
   TConsole.WriteLine;
   TConsole.WriteLine('Lists all packages installed in the current workspace.');
+  TConsole.WriteLine('The Delphi version is read from the workspace configuration (set during init).');
   TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' list [options]', clWhite);
+  TConsole.WriteLine('Usage: ' + AppExeName + ' list', clWhite);
   TConsole.WriteLine;
-  TConsole.WriteLine('Options:', clWhite);
-  WriteOption('/product <version>', 'Filter by Delphi version (e.g. delphi12, delphi13).');
-  WriteOption('', 'Run "' + AppExeName + ' listproducts" to see valid values.');
-  TConsole.WriteLine;
-  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('Example:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' list');
-  TConsole.WriteLine('  ' + AppExeName + ' list /product delphi12');
   TConsole.WriteLine;
 end;
 
@@ -283,6 +276,22 @@ end;
 procedure TListProductsCommand.Execute;
 begin
   inherited;
+  if FAll then
+  begin
+    TConsole.WriteLine;
+    TConsole.WriteLine('Supported Delphi versions:', clWhite);
+    TConsole.WriteLine;
+    for var VerName in VersionOrder do
+    begin
+      var DispName: string;
+      if not VersionNames.TryGetValue(VerName, DispName) then
+        DispName := VerName;
+      TConsole.WriteLine(Format('  %-20s %s', [VerName, DispName]));
+    end;
+    TConsole.WriteLine;
+    Exit;
+  end;
+
   if TProduct.Products.Count = 0 then
   begin
     TConsole.WriteWarning('No Delphi versions found in the registry.');
@@ -292,7 +301,7 @@ begin
   TConsole.WriteLine('Installed Delphi versions:', clWhite);
   TConsole.WriteLine;
   for var P in TProduct.Products do
-    TConsole.WriteLine(Format('  %-20s %s', [P.VersionName, P.DisplayName]));
+    TConsole.WriteLine(Format('  %-20s %-15s %s', [P.VersionName, P.RegistryKey, P.DisplayName]));
   TConsole.WriteLine;
 end;
 
@@ -302,10 +311,14 @@ begin
   TConsole.WriteLine('Lists all Delphi installations detected in the Windows registry.');
   TConsole.WriteLine('Use the version name shown here as the /product argument for other commands.');
   TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' listproducts', clWhite);
+  TConsole.WriteLine('Usage: ' + AppExeName + ' listproducts [options]', clWhite);
   TConsole.WriteLine;
-  TConsole.WriteLine('Example:', clWhite);
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/all', 'Show all supported Delphi versions instead of installed ones.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' listproducts');
+  TConsole.WriteLine('  ' + AppExeName + ' listproducts /all');
   TConsole.WriteLine;
 end;
 
@@ -315,9 +328,9 @@ procedure TInitCommand.Execute;
 begin
   inherited;
   ShowBanner('', '');
-  TWorkspace.Initialize(GetCurrentDir);
-  TConsole.WriteLine('Initialising workspace: ' + TWorkspace.WorkDir, clWhite);
+  TConsole.WriteLine('Initialising workspace: ' + GetCurrentDir, clWhite);
   TConsole.WriteLine;
+  TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey);
   TConsole.WriteLine('Workspace initialised.', clGreen);
   TConsole.WriteLine;
   Exit;
@@ -326,12 +339,20 @@ end;
 procedure TInitCommand.ShowHelp;
 begin
   TConsole.WriteLine;
-  TConsole.WriteLine('Creates the .blocks\ directory in the current folder and downloads');
-  TConsole.WriteLine('the remote package repository. Run this once before using install.');
+  TConsole.WriteLine('Creates the .blocks\ directory in the current folder, selects the target');
+  TConsole.WriteLine('Delphi version, and downloads the remote package repository.');
+  TConsole.WriteLine('Run this once per workspace before using install.');
   TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' init', clWhite);
+  TConsole.WriteLine('Usage: ' + AppExeName + ' init [options]', clWhite);
   TConsole.WriteLine;
-  TConsole.WriteLine('Example:', clWhite);
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/product <version>', 'Target Delphi version (e.g. delphi12, delphi13).');
+  WriteOption('', 'If omitted you will be prompted to choose.');
+  WriteOption('', 'Run "' + AppExeName + ' listproducts" to see valid values.');
+  WriteOption('/registrykey <key>', 'Registry profile key (default: BDS).');
+  WriteOption('', 'Use this when Delphi is started with -r <key>.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' init');
   TConsole.WriteLine;
 end;
@@ -355,7 +376,7 @@ begin
   end;
   ShowBanner('', '');
   TestDelphiRunning;
-  TWorkspace.Install(LPackageName, LVersionConstraint, FProduct, FOverwrite, FBuildOnly, FSilent, FForce);
+  TWorkspace.Install(LPackageName, LVersionConstraint, FOverwrite, FBuildOnly, FSilent, FForce);
 end;
 
 procedure TInstallCommand.ShowHelp;
@@ -372,8 +393,6 @@ begin
   WriteOption('', 'owner.pkg@^1.2.0, owner.pkg@>=1.0.0).');
   TConsole.WriteLine;
   TConsole.WriteLine('Options:', clWhite);
-  WriteOption('/product <version>', 'Target Delphi version (e.g. delphi12, delphi13).');
-  WriteOption('', 'If omitted you will be prompted to choose.');
   WriteOption('/overwrite', 'Overwrite the project directory if it already exists.');
   WriteOption('/buildonly', 'Skip download; compile the already-extracted project.');
   WriteOption('/silent', 'Skip non-critical interactive prompts (use defaults).');
@@ -385,8 +404,8 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package@1.2.0');
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package@^1.2.0 /force');
   TConsole.WriteLine('  ' + AppExeName + ' install C:\repos\mylib.json /overwrite');
-  TConsole.WriteLine('  ' + AppExeName + ' install owner.package /product delphi12 /silent');
-  TConsole.WriteLine('  ' + AppExeName + ' install owner.package /buildonly /product delphi13');
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package /silent');
+  TConsole.WriteLine('  ' + AppExeName + ' install owner.package /buildonly');
   TConsole.WriteLine;
 end;
 
@@ -398,7 +417,7 @@ begin
   CheckWorkspace;
   ShowBanner('', '');
   TestDelphiRunning;
-  TWorkspace.Uninstall(FPackageName, FProduct);
+  TWorkspace.Uninstall(FPackageName);
 end;
 
 procedure TUninstallCommand.ShowHelp;
@@ -412,13 +431,8 @@ begin
   TConsole.WriteLine('Arguments:', clWhite);
   WriteOption('<id>', 'Package identifier (e.g. owner.package).');
   TConsole.WriteLine;
-  TConsole.WriteLine('Options:', clWhite);
-  WriteOption('/product <version>', 'Target Delphi version (e.g. delphi12, delphi13).');
-  WriteOption('', 'If omitted you will be prompted to choose.');
-  TConsole.WriteLine;
-  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('Example:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package');
-  TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package /product delphi12');
   TConsole.WriteLine;
 end;
 
@@ -437,7 +451,7 @@ begin
     var Confirm := TConsole.ReadLine;
     if not SameText(Trim(Confirm), 'Y') then
       raise Exception.Create('Operation cancelled. Run "blocks -Init" to initialise the workspace first.');
-    TWorkspace.Initialize(TWorkspace.WorkDir);
+    TWorkspace.Initialize(TWorkspace.WorkDir, '', '');
     TConsole.WriteLine;
   end;
 end;
@@ -509,7 +523,12 @@ begin
   inherited;
   if Length(FConfigs) = 0 then
   begin
-    ShowHelp;
+    if FSystem then
+    begin
+      TConsole.WriteWarning('Not supported.');
+      Exit;
+    end;
+    TConsole.WriteLine(TWorkspace.Config.ToJson);
     Exit;
   end;
 
@@ -570,6 +589,8 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('Workspace keys:', clWhite);
   WriteOption('sources', 'Comma-separated list of repository URLs used by "init".');
+  WriteOption('product', 'Target Delphi version name (e.g. delphi12, delphi13).');
+  WriteOption('registrykey', 'Registry profile key for the target Delphi IDE (default: BDS).');
   TConsole.WriteLine;
   TConsole.WriteLine('System keys:', clWhite);
   WriteOption('InstallPath', 'Specifies the directory containing the blocks.exe to launch');
@@ -578,9 +599,12 @@ begin
   WriteOption('', 'and requires the launcher to function.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' config');
   TConsole.WriteLine('  ' + AppExeName + ' config sources');
   TConsole.WriteLine('  ' + AppExeName + ' config sources=https://github.com/owner/my-repo');
   TConsole.WriteLine('  ' + AppExeName + ' config /add sources=https://github.com/owner/other-repo');
+  TConsole.WriteLine('  ' + AppExeName + ' config product');
+  TConsole.WriteLine('  ' + AppExeName + ' config registrykey=myprofile');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath=C:\Tools\Blocks');
   TConsole.WriteLine;
