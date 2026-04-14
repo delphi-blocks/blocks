@@ -129,6 +129,12 @@ type
     procedure ShowHelp; override;
   end;
 
+  TVersionCommand = class(TBaseCommand)
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
   TSystemConfig = class(TObject)
   public
     const InstallPath = 'Software\Blocks';
@@ -145,7 +151,8 @@ uses
   Blocks.Database,
   Blocks.Manifest,
   Blocks.Workspace,
-  Blocks.JSON;
+  Blocks.JSON,
+  Blocks.Types;
 
 const
   OptionLength = 26;
@@ -207,6 +214,7 @@ begin
   WriteOption('listproducts', 'List detected Delphi installations.');
   WriteOption('config', 'Read or write workspace or system configuration values.');
   WriteOption('view <id@version>', 'Show details of a package from the repository.');
+  WriteOption('version', 'Print the version of the blocks executable.');
   WriteOption('help [command]', 'Show this message, or detailed help for a specific command.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
@@ -773,6 +781,27 @@ begin
   TConsole.WriteLine;
 end;
 
+{ TVersionCommand }
+
+procedure TVersionCommand.Execute;
+begin
+  inherited;
+  var LVersion := TAppVersion.GetCurrentVersion;
+  TConsole.WriteLine(AppExeName + ' ' + LVersion, clWhite);
+end;
+
+procedure TVersionCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Prints the version number of the blocks executable.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' version', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Example:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' version');
+  TConsole.WriteLine;
+end;
+
 { TSystemConfig }
 
 class procedure TSystemConfig.Add(const AKey, AValue: string);
@@ -829,5 +858,6 @@ TCommand.RegisterCommand('install', TInstallCommand);
 TCommand.RegisterCommand('uninstall', TUninstallCommand);
 TCommand.RegisterCommand('config', TConfigCommand);
 TCommand.RegisterCommand('view', TViewCommand);
+TCommand.RegisterCommand('version', TVersionCommand);
 
 end.
