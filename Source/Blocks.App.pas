@@ -20,6 +20,7 @@ uses
   System.Generics.Collections,
 
   Winapi.Windows,
+  System.Win.Registry,
 
   Blocks.Product,
   Blocks.Command;
@@ -105,6 +106,8 @@ type
   private
     [Param('add')]
     FAdd: Boolean;
+    [Param('system')]
+    FSystem: Boolean;
     [Param]
     FConfigs: TArray<string>;
   public
@@ -123,6 +126,14 @@ type
   public
     procedure Execute; override;
     procedure ShowHelp; override;
+  end;
+
+  TSystemConfig = class(TObject)
+  public
+    const InstallPath = 'Software\Blocks';
+    class function Get(const AKey: string): string; static;
+    class procedure &Set(const AKey, AValue: string); static;
+    class procedure Add(const AKey, AValue: string); static;
   end;
 
 implementation
@@ -193,7 +204,7 @@ begin
   WriteOption('init', 'Initialise the workspace and download the package repository.');
   WriteOption('list', 'List packages installed in the current workspace.');
   WriteOption('listproducts', 'List detected Delphi installations.');
-  WriteOption('config', 'Read or write workspace configuration values.');
+  WriteOption('config', 'Read or write workspace or system configuration values.');
   WriteOption('view <id@version>', 'Show details of a package from the repository.');
   WriteOption('help [command]', 'Show this message, or detailed help for a specific command.');
   TConsole.WriteLine;
@@ -507,18 +518,35 @@ begin
     var LEqualPos := Pos('=', LConfig);
     if LEqualPos < 1 then
     begin
-      var LValue := TWorkspace.Config.Get(LConfig);
+      var LValue := '';
+      if FSystem then
+        LValue := TSystemConfig.Get(LConfig)
+      else
+        LValue := TWorkspace.Config.Get(LConfig);
+
       TConsole.WriteLine(Format('%s: %s', [LConfig, LValue]));
     end
     else
     begin
       var LKey := Copy(LConfig, 1, LEqualPos - 1);
       var LValue := Copy(LConfig, LEqualPos + 1, Length(LConfig));
-      if FAdd then
-        TWorkspace.Config.Add(LKey, LValue)
+
+      if FSystem then
+      begin
+        if FAdd then
+          TSystemConfig.Add(LKey, LValue)
+        else
+          TSystemConfig.Set(LKey, LValue);
+        TWorkspace.Config.Save;
+      end
       else
-        TWorkspace.Config.&Set(LKey, LValue);
-      TWorkspace.Config.Save;
+      begin
+        if FAdd then
+          TWorkspace.Config.Add(LKey, LValue)
+        else
+          TWorkspace.Config.&Set(LKey, LValue);
+        TWorkspace.Config.Save;
+      end;
       TConsole.WriteLine('Config applyed');
     end;
   end;
@@ -527,9 +555,9 @@ end;
 procedure TConfigCommand.ShowHelp;
 begin
   TConsole.WriteLine;
-  TConsole.WriteLine('Reads or writes workspace configuration values.');
+  TConsole.WriteLine('Reads or writes workspace or system configuration values.');
   TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' config [/add] [<key>[=<value>] ...]', clWhite);
+  TConsole.WriteLine('Usage: ' + AppExeName + ' config [/add] [/system] [<key>[=<value>] ...]', clWhite);
   TConsole.WriteLine;
   TConsole.WriteLine('Arguments:', clWhite);
   WriteOption('<key>', 'Print the current value of the given key.');
@@ -537,14 +565,24 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('Options:', clWhite);
   WriteOption('/add', 'Append the value instead of replacing it (for list keys).');
+  WriteOption('/system', 'Read or write system-level config (Windows registry) instead of');
+  WriteOption('', 'workspace config.');
   TConsole.WriteLine;
-  TConsole.WriteLine('Keys:', clWhite);
+  TConsole.WriteLine('Workspace keys:', clWhite);
   WriteOption('sources', 'Comma-separated list of repository URLs used by "init".');
+  TConsole.WriteLine;
+  TConsole.WriteLine('System keys:', clWhite);
+  WriteOption('InstallPath', 'Specifies the directory containing the blocks.exe to launch');
+  WriteOption('', 'when multiple installations are present. This key is only ');
+  WriteOption('', 'available when Blocks was installed using the setup package');
+  WriteOption('', 'and requires the launcher to function.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' config sources');
   TConsole.WriteLine('  ' + AppExeName + ' config sources=https://github.com/owner/my-repo');
   TConsole.WriteLine('  ' + AppExeName + ' config /add sources=https://github.com/owner/other-repo');
+  TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath');
+  TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath=C:\Tools\Blocks');
   TConsole.WriteLine;
 end;
 
@@ -709,6 +747,52 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' view owner.package@1.2.0 /raw');
   TConsole.WriteLine('  ' + AppExeName + ' view owner.package /versions');
   TConsole.WriteLine;
+end;
+
+{ TSystemConfig }
+
+class procedure TSystemConfig.Add(const AKey, AValue: string);
+begin
+  raise Exception.Create('Not yet implemented');
+end;
+
+class function TSystemConfig.Get(const AKey: string): string;
+begin
+  if SameText(AKey, 'InstallPath') then
+  begin
+    var LReg := TRegistry.Create;
+    try
+      if not LReg.KeyExists(InstallPath) then
+        raise Exception.Create('Blocks launcher not installed');
+      LReg.OpenKey(InstallPath, False);
+      Result := LReg.ReadString('InstallPath');
+    finally
+      LReg.Free;
+    end;
+  end
+  else
+    raise Exception.CreateFmt('System config "%s" not found', [AKey]);
+
+end;
+
+class procedure TSystemConfig.&Set(const AKey, AValue: string);
+begin
+  if SameText(AKey, 'InstallPath') then
+  begin
+    if not FileExists(TPath.Combine(AValue, 'blocks.exe')) then
+      raise Exception.Create('Blocks not found in the specified path');
+    var LReg := TRegistry.Create;
+    try
+      if not LReg.KeyExists(InstallPath) then
+        raise Exception.Create('Blocks launcher not installed');
+      LReg.OpenKey(InstallPath, False);
+      LReg.WriteString('InstallPath', AValue);
+    finally
+      LReg.Free;
+    end;
+  end
+  else
+    raise Exception.CreateFmt('System config "%s" not found', [AKey]);
 end;
 
 initialization
