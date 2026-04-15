@@ -20,6 +20,7 @@ uses
   System.Generics.Collections,
 
   Winapi.Windows,
+  Winapi.ShellAPI,
   System.Win.Registry,
 
   Blocks.Product,
@@ -135,6 +136,17 @@ type
     procedure ShowHelp; override;
   end;
 
+  TUpgradeCommand = class(TBaseCommand)
+  private
+    [Param('check')]
+    FCheck: Boolean;
+    [Param('force')]
+    FForce: Boolean;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
   TSystemConfig = class(TObject)
   public
     const InstallPath = 'Software\Blocks';
@@ -152,7 +164,9 @@ uses
   Blocks.Manifest,
   Blocks.Workspace,
   Blocks.JSON,
-  Blocks.Types;
+  Blocks.Http,
+  Blocks.Types,
+  Blocks.GitHub;
 
 const
   OptionLength = 26;
@@ -215,6 +229,7 @@ begin
   WriteOption('config', 'Read or write workspace or system configuration values.');
   WriteOption('view <id@version>', 'Show details of a package from the repository.');
   WriteOption('version', 'Print the version of the blocks executable.');
+  WriteOption('upgrade', 'Check for a newer release and download the setup if available.');
   WriteOption('help [command]', 'Show this message, or detailed help for a specific command.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
@@ -848,6 +863,83 @@ begin
     raise Exception.CreateFmt('System config "%s" not found', [AKey]);
 end;
 
+{ TUpgradeCommand }
+
+procedure TUpgradeCommand.Execute;
+begin
+  inherited;
+  var LCurrentVersion := TAppVersion.GetCurrentVersion;
+  ShowBanner('', '');
+
+  TConsole.WriteLine('Checking for the latest release on GitHub...');
+  var LReleases := TGitHub.GetGitHubReleases('delphi-blocks', 'blocks');
+  try
+    if LReleases.Count = 0 then
+      raise Exception.Create('No releases found on GitHub');
+
+    var LGitHubVersion := TSemVer.Parse(ExtractVersionNumber(LReleases[0].Name));
+
+    TConsole.WriteLine;
+    TConsole.WriteLine('Current version: ' + LCurrentVersion.ToString);
+    TConsole.WriteLine('Latest version:  ' + LGitHubVersion.ToString);
+
+    if LGitHubVersion.CompareTo(LCurrentVersion) <= 0 then
+    begin
+      TConsole.WriteLine('Your version is up to date', clGreen);
+      if not FForce then
+        Exit;
+    end;
+
+    if FCheck then
+    begin
+      Exit;
+    end;
+
+    if LReleases[0].Assets.Count <= 0 then
+    begin
+      TConsole.WriteError('Setup package not found in release assets');
+      Exit;
+    end;
+
+    TConsole.WriteLine;
+    TConsole.Write('Do you want to upgrade? [Y/N] (default: Y): ');
+    var Confirm := TConsole.ReadLine;
+    if SameText(Trim(Confirm), 'N') then
+      raise Exception.Create('Operation cancelled.');
+
+    var LBrowserDownloadUrl := LReleases[0].Assets[0].BrowserDownloadUrl;
+    var LDestinationPath := TPath.Combine(TPath.GetTempPath, '.blocks', THttpUtils.ExtractFileName(LBrowserDownloadUrl));
+    TConsole.WriteLine('Downloading to: ' + LDestinationPath);
+    ForceDirectories(ExtractFilePath(LDestinationPath));
+
+    THttpUtils.DownloadFile(LBrowserDownloadUrl, LDestinationPath);
+    ShellExecute(0, 'open', PChar(LDestinationPath), '', '', SW_SHOWDEFAULT);
+
+  finally
+    LReleases.Free;
+  end;
+
+end;
+
+procedure TUpgradeCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Checks GitHub for a newer release of blocks and, if one is found,');
+  TConsole.WriteLine('downloads and launches the setup package.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' upgrade [options]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/check', 'Only check whether a newer version is available; do not download.');
+  WriteOption('/force', 'Download and install even if the current version is already up to date.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' upgrade');
+  TConsole.WriteLine('  ' + AppExeName + ' upgrade /check');
+  TConsole.WriteLine('  ' + AppExeName + ' upgrade /force');
+  TConsole.WriteLine;
+end;
+
 initialization
 
 TCommand.RegisterCommand('help', THelpCommand, True);
@@ -859,5 +951,6 @@ TCommand.RegisterCommand('uninstall', TUninstallCommand);
 TCommand.RegisterCommand('config', TConfigCommand);
 TCommand.RegisterCommand('view', TViewCommand);
 TCommand.RegisterCommand('version', TVersionCommand);
+TCommand.RegisterCommand('upgrade', TUpgradeCommand);
 
 end.

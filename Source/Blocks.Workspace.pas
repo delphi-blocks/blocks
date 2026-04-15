@@ -118,7 +118,7 @@ uses
   Blocks.Console,
   Blocks.Http,
   Blocks.Manifest,
-  Blocks.Product;
+  Blocks.Product, Blocks.GitHub;
 
 const
   DefaultBlocksRepositoryUrl = 'https://github.com/lminuti/blocks-repository';
@@ -240,12 +240,12 @@ begin
     TDirectory.CreateDirectory(DownloadDir);
 
     TConsole.WriteLine(Format('Fetching repository info from "%s"...', [ASource]), clCyan);
-    var RepoInfo := THttpUtils.GetGitHubInfo(ASource);
+    var RepoInfo := TGitHub.GetGitHubInfo(ASource);
     TConsole.WriteLine('  Branch : ' + RepoInfo.DefaultBranch);
     TConsole.WriteLine('  Latest : ' + RepoInfo.LatestCommit);
     TConsole.WriteLine;
 
-    var ZipUrl := THttpUtils.GetGitHubZipUrl(RepoInfo.Owner, RepoInfo.Repo, RepoInfo.LatestCommit);
+    var ZipUrl := TGitHub.GetGitHubZipUrl(RepoInfo.Owner, RepoInfo.Repo, RepoInfo.LatestCommit);
 
     TConsole.WriteLine('Downloading repository...', clCyan);
     THttpUtils.DownloadFile(ZipUrl, ZipPath);
@@ -356,8 +356,8 @@ begin
       var LRepoParts := TrimRight(LManifest.Repository.Url, ['/']).Split(['/']);
       if Length(LRepoParts) < 7 then
         raise Exception.CreateFmt('Cannot parse repository URL: %s', [LManifest.Repository.Url]);
-      var LZipUrl := THttpUtils.GetGitHubZipUrl(LRepoParts[3], LRepoParts[4], LRepoParts[6]);
-      LProjectDir := THttpUtils.DownloadAndExtract(LZipUrl, WorkDir, LManifest.Name, AOverwrite, ASilent);
+      var LZipUrl := TGitHub.GetGitHubZipUrl(LRepoParts[3], LRepoParts[4], LRepoParts[6]);
+      LProjectDir := TGitHub.DownloadAndExtract(LZipUrl, WorkDir, LManifest.Name, AOverwrite, ASilent);
       TConsole.WriteLine('Project downloaded to: ' + LProjectDir, clGreen);
       TConsole.WriteLine;
     end

@@ -15,7 +15,8 @@ unit Blocks.Types;
 interface
 
 uses
-  System.Classes, System.SysUtils, System.Generics.Collections,
+  System.Classes, System.SysUtils, System.RegularExpressions,
+  System.Generics.Collections,
   Winapi.Windows;
 
 type
@@ -35,7 +36,8 @@ type
     /// <summary>Returns the highest version in AVersions that satisfies AConstraint.
     /// Returns False if no version matches.</summary>
     class function BestMatch(const AVersions: TArray<TSemVer>; const AConstraint: string; out ABest: TSemVer): Boolean; static;
-    class operator Implicit(const V: TSemVer): string;
+    class operator Implicit(const AVersion: TSemVer): string;
+    class operator Implicit(const AVersionStr: string): TSemVer;
     function CompareTo(const Other: TSemVer): Integer;
     function MatchesConstraint(const AConstraint: string): Boolean;
     function ToString: string;
@@ -47,7 +49,19 @@ type
     class function GetCurrentVersion: TSemVer; static;
   end;
 
+function ExtractVersionNumber(const S: string): string;
+
 implementation
+
+function ExtractVersionNumber(const S: string): string;
+var
+  Match: TMatch;
+begin
+  Result := '';
+  Match := TRegEx.Match(S, '\d+(\.\d+)*');
+  if Match.Success then
+    Result := Match.Value;
+end;
 
 { TSemVer }
 
@@ -86,9 +100,9 @@ begin
   end;
 end;
 
-class operator TSemVer.Implicit(const V: TSemVer): string;
+class operator TSemVer.Implicit(const AVersion: TSemVer): string;
 begin
-  Result := V.ToString;
+  Result := AVersion.ToString;
 end;
 
 function TSemVer.CompareTo(const Other: TSemVer): Integer;
@@ -96,6 +110,11 @@ begin
   if Major <> Other.Major then Exit(Major - Other.Major);
   if Minor <> Other.Minor then Exit(Minor - Other.Minor);
   Result := Patch - Other.Patch;
+end;
+
+class operator TSemVer.Implicit(const AVersionStr: string): TSemVer;
+begin
+  Result := TSemVer.Parse(AVersionStr);
 end;
 
 function TSemVer.MatchesConstraint(const AConstraint: string): Boolean;

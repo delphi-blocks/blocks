@@ -74,7 +74,7 @@
         <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProgramID=com.embarcadero.$(MSBuildProjectName);ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <Manifest_File>(None)</Manifest_File>
         <AppDPIAwarenessMode>none</AppDPIAwarenessMode>
-        <Debugger_RunParams> view delphi-blocks.wirl</Debugger_RunParams>
+        <Debugger_RunParams>upgrade</Debugger_RunParams>
         <Debugger_CWD>c:\Progetti\blocksws</Debugger_CWD>
     </PropertyGroup>
     <ItemGroup>
@@ -95,6 +95,7 @@
         <DCCReference Include="Blocks.JSON.pas"/>
         <DCCReference Include="Blocks.Command.pas"/>
         <DCCReference Include="Blocks.Types.pas"/>
+        <DCCReference Include="Blocks.GitHub.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

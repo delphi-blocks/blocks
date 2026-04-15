@@ -41,11 +41,6 @@ const
 var
   AppExeName: string;
 
-type
-  TGitHubInfo = record
-    Owner, Repo, DefaultBranch, LatestCommit: string;
-  end;
-
 // -- Version maps (populated in initialization) -------------------------------
 
 var

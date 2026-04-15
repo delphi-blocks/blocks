@@ -17,7 +17,8 @@ uses
   Blocks.Product in 'Blocks.Product.pas',
   Blocks.JSON in 'Blocks.JSON.pas',
   Blocks.Command in 'Blocks.Command.pas',
-  Blocks.Types in 'Blocks.Types.pas';
+  Blocks.Types in 'Blocks.Types.pas',
+  Blocks.GitHub in 'Blocks.GitHub.pas';
 
 begin
   try
