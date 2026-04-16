@@ -132,6 +132,9 @@ type
   end;
 
   TVersionCommand = class(TBaseCommand)
+  private
+    [Param('silent')]
+    FSilent: Boolean;
   public
     procedure Execute; override;
     procedure ShowHelp; override;
@@ -259,7 +262,10 @@ end;
 procedure TListCommand.ListBlocks(AProduct: TProduct);
 begin
   TConsole.WriteLine;
-  TConsole.WriteLine('  ' + AProduct.DisplayName, clCyan);
+  var LLabel := AProduct.DisplayName;
+  if AProduct.RegistryKey <> 'BDS' then
+    LLabel := LLabel + ' (' + AProduct.RegistryKey + ')';
+  TConsole.WriteLine('  ' + LLabel, clCyan);
   TConsole.WriteLine;
 
   var Entries := TWorkspace.Database.ListEntries;
@@ -509,7 +515,7 @@ begin
   var Running := TStringList.Create;
   try
     for var P in TProduct.Products do
-      if P.IsRunning then
+      if P.IsRunning and (P.RegistryKey = 'BDS') then
         Running.Add(P.DisplayName);
 
     if Running.Count = 0 then
@@ -803,7 +809,10 @@ procedure TVersionCommand.Execute;
 begin
   inherited;
   var LVersion := TAppVersion.GetCurrentVersion;
-  TConsole.WriteLine(AppExeName + ' ' + LVersion, clWhite);
+  if FSilent then
+    TConsole.WriteLine(LVersion)
+  else
+    TConsole.WriteLine(AppExeName + ' ' + LVersion, clWhite);
 end;
 
 procedure TVersionCommand.ShowHelp;
@@ -813,8 +822,12 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('Usage: ' + AppExeName + ' version', clWhite);
   TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/silent', 'Show only the version number.');
+  TConsole.WriteLine;
   TConsole.WriteLine('Example:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' version');
+  TConsole.WriteLine('  ' + AppExeName + ' version /silent');
   TConsole.WriteLine;
 end;
 

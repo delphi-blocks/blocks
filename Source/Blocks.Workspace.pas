@@ -121,7 +121,7 @@ uses
   Blocks.Product, Blocks.GitHub;
 
 const
-  DefaultBlocksRepositoryUrl = 'https://github.com/lminuti/blocks-repository';
+  DefaultBlocksRepositoryUrl = 'https://github.com/delphi-blocks/blocks-repository';
   WorkspaceSchemaUrl = 'https://delphi-blocks.dev/schema/workspace.v1.json';
 
 { TWorkspace }
@@ -255,7 +255,7 @@ begin
     TDirectory.CreateDirectory(ExtractDir);
     TZipFile.ExtractZipFile(ZipPath, ExtractDir);
 
-    // GitHub wraps content in a subdirectory (e.g. "lminuti-blocks-repository-abc1234")
+    // GitHub wraps content in a subdirectory (e.g. "my-blocks-repository-abc1234")
     var InnerDirs := TDirectory.GetDirectories(ExtractDir);
     if Length(InnerDirs) = 0 then
       raise Exception.Create('Unexpected zip structure: no subdirectory found.');

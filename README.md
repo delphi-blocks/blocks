@@ -6,10 +6,12 @@ A command-line package manager for Delphi / RAD Studio. DelphiBlocks automates d
 
 ## How it works
 
-1. Reads a JSON manifest from the [blocks-repository](https://github.com/lminuti/blocks-repository).
+1. Reads a JSON manifest from the [blocks-repository](https://github.com/delphi-blocks/blocks-repository).
 2. Downloads the package source as a ZIP from GitHub.
 3. Compiles it with MSBuild against the selected Delphi version.
 4. Registers the library paths in the Delphi registry and records the installation in a local database (`.blocks/`).
+5. Supports multiple Delphi IDE profiles via the `registrykey` workspace setting. Delphi allows launching with an alternative registry profile using the `-r` flag (e.g. `bds.exe -r MyProfile`).
+6. Supports custom package repositories. In addition to the default registry, you can add your own GitHub-hosted repositories as package sources.
 
 ## Requirements
 
@@ -20,40 +22,39 @@ A command-line package manager for Delphi / RAD Studio. DelphiBlocks automates d
 ## Usage
 
 ```
-blocks <command> [options]
-
 Commands:
-  install <id[@constraint]>   Download, compile and register a package
-  uninstall <id>              Remove a package from the workspace and database
-  init                        Initialise the workspace and download the repository
-  list                        List installed packages
-  listproducts                List detected Delphi installations
-  config [<key>[=<value>]]    Read or write workspace configuration
-  view <id[@version]>         Show package details from the repository
-  help [command]              Show help
+  install <source>       Install a package from a file path, URL, or registry ID.
+  uninstall <source>     Remove a package from the workspace and database.
+  init                   Initialise the workspace and download the package repository.
+  list                   List packages installed in the current workspace.
+  listproducts           List detected Delphi installations.
+  config                 Read or write workspace or system configuration values.
+  view <id@version>      Show details of a package from the repository.
+  version                Print the version of the blocks executable.
+  upgrade                Check for a newer release and download the setup if available.
+  help [command]         Show this message, or detailed help for a specific command.
 ```
 
 ### Quick start
 
 ```bat
-REM Initialise the workspace in the current directory
+REM Install DelphiBlocks
+winget install DelphiBlocks.Blocks
+
+REM Initialise the workspace in the current directory (prompts for Delphi version)
 blocks init
 
-REM Install a package (prompts for Delphi version)
+REM Install a package
 blocks install owner.package
 
 REM Install a specific version
 blocks install owner.package@1.2.0
-
-REM Target a specific Delphi version, skip prompts
-blocks install owner.package /product delphi13 /silent
 
 REM Uninstall
 blocks uninstall owner.package /product delphi13
 
 REM List installed packages
 blocks list
-blocks list /product delphi12
 
 REM View package info
 blocks view owner.package@1.2.0

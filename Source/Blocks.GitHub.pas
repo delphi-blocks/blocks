@@ -164,6 +164,7 @@ begin
     Json.Free;
   end;
 
+  TConsole.WriteLine('Fetching repository commits', clCyan);
   JsonStr := THttpUtils.GetAsString('https://api.github.com/repos/' + Owner + '/' + Repo + '/commits/' + DefaultBranch);
   Json := TJSONObject.ParseJSONValue(JsonStr) as TJSONObject;
   try

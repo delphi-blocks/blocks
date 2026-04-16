@@ -27,10 +27,10 @@ const
       'delphixe7',
       'delphixe8',
       'delphi10',
-      'delphiberlin',
-      'delphitokyo',
-      'delphirio',
-      'delphisydney',
+      'delphi101',
+      'delphi102',
+      'delphi103',
+      'delphi104',
       'delphi11',
       'delphi12',
       'delphi13'
@@ -86,10 +86,10 @@ initialization
   BdsToVersion.Add('15.0', 'delphixe7');
   BdsToVersion.Add('16.0', 'delphixe8');
   BdsToVersion.Add('17.0', 'delphi10');
-  BdsToVersion.Add('18.0', 'delphiberlin');
-  BdsToVersion.Add('19.0', 'delphitokyo');
-  BdsToVersion.Add('20.0', 'delphirio');
-  BdsToVersion.Add('21.0', 'delphisydney');
+  BdsToVersion.Add('18.0', 'delphi101');
+  BdsToVersion.Add('19.0', 'delphi102');
+  BdsToVersion.Add('20.0', 'delphi103');
+  BdsToVersion.Add('21.0', 'delphi104');
   BdsToVersion.Add('22.0', 'delphi11');
   BdsToVersion.Add('23.0', 'delphi12');
   BdsToVersion.Add('37.0', 'delphi13');
@@ -99,10 +99,10 @@ initialization
   VersionNames.Add('delphixe7', 'Delphi XE7');
   VersionNames.Add('delphixe8', 'Delphi XE8');
   VersionNames.Add('delphi10', 'Delphi 10 Seattle');
-  VersionNames.Add('delphiberlin', 'Delphi 10.1 Berlin');
-  VersionNames.Add('delphitokyo', 'Delphi 10.2 Tokyo');
-  VersionNames.Add('delphirio', 'Delphi 10.3 Rio');
-  VersionNames.Add('delphisydney', 'Delphi 10.4 Sydney');
+  VersionNames.Add('delphi101', 'Delphi 10.1 Berlin');
+  VersionNames.Add('delphi102', 'Delphi 10.2 Tokyo');
+  VersionNames.Add('delphi103', 'Delphi 10.3 Rio');
+  VersionNames.Add('delphi104', 'Delphi 10.4 Sydney');
   VersionNames.Add('delphi11', 'Delphi 11 Alexandria');
   VersionNames.Add('delphi12', 'Delphi 12 Athens');
   VersionNames.Add('delphi13', 'Delphi 13');
