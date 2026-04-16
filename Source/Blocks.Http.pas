@@ -26,6 +26,11 @@ uses
 
 /// <summary>Static HTTP helpers and GitHub API client.</summary>
 type
+  EHttpError = class(Exception)
+  public
+    constructor Create(AResponse: IHTTPResponse; const AUrl: string);
+  end;
+
   THttpUtils = class
   public
     /// <summary>Performs an HTTP GET request and returns the response body as a UTF-8 string.</summary>
@@ -71,7 +76,7 @@ begin
     var Response := Client.Get(Url);
     TConsole.WriteLine;
     if Response.StatusCode >= 400 then
-      raise Exception.CreateFmt('HTTP %d for %s', [Response.StatusCode, Url]);
+      raise EHttpError.Create(Response, Url);
     Result := Response.ContentAsString(TEncoding.UTF8);
   finally
     Client.Free;
@@ -91,7 +96,10 @@ begin
     Client.HandleRedirects := True;
     var FS := TFileStream.Create(DestPath, fmCreate);
     try
-      Client.Get(Url, FS);
+      var LHttpResponse := Client.Get(Url, FS);
+      if LHttpResponse.StatusCode >= 400 then
+        raise EHttpError.Create(LHttpResponse, Url);
+
       TConsole.WriteLine;
     finally
       FS.Free;
@@ -99,6 +107,13 @@ begin
   finally
     Client.Free;
   end;
+end;
+
+{ EHttpError }
+
+constructor EHttpError.Create(AResponse: IHTTPResponse; const AUrl: string);
+begin
+  inherited CreateFmt('HTTP %d for %s', [AResponse.StatusCode, AUrl]);
 end;
 
 end.

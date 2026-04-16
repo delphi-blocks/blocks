@@ -24,6 +24,7 @@ uses
   System.Win.Registry,
 
   Blocks.Product,
+  Blocks.GitHub,
   Blocks.Command;
 
 type
@@ -142,6 +143,7 @@ type
     FCheck: Boolean;
     [Param('force')]
     FForce: Boolean;
+    function SelectSetup(AAssets: TGitHubReleaseAssets): string;
   public
     procedure Execute; override;
     procedure ShowHelp; override;
@@ -165,8 +167,7 @@ uses
   Blocks.Workspace,
   Blocks.JSON,
   Blocks.Http,
-  Blocks.Types,
-  Blocks.GitHub;
+  Blocks.Types;
 
 const
   OptionLength = 26;
@@ -895,19 +896,16 @@ begin
       Exit;
     end;
 
-    if LReleases[0].Assets.Count <= 0 then
-    begin
-      TConsole.WriteError('Setup package not found in release assets');
-      Exit;
-    end;
-
     TConsole.WriteLine;
     TConsole.Write('Do you want to upgrade? [Y/N] (default: Y): ');
     var Confirm := TConsole.ReadLine;
     if SameText(Trim(Confirm), 'N') then
       raise Exception.Create('Operation cancelled.');
 
-    var LBrowserDownloadUrl := LReleases[0].Assets[0].BrowserDownloadUrl;
+    var LBrowserDownloadUrl := SelectSetup(LReleases[0].Assets);
+    if LBrowserDownloadUrl = '' then
+      Exit;
+
     var LDestinationPath := TPath.Combine(TPath.GetTempPath, '.blocks', THttpUtils.ExtractFileName(LBrowserDownloadUrl));
     TConsole.WriteLine('Downloading to: ' + LDestinationPath);
     ForceDirectories(ExtractFilePath(LDestinationPath));
@@ -918,6 +916,59 @@ begin
   finally
     LReleases.Free;
   end;
+
+end;
+
+function TUpgradeCommand.SelectSetup(AAssets: TGitHubReleaseAssets): string;
+begin
+  // If there are no assets, exit
+  if AAssets.Count <= 0 then
+  begin
+    TConsole.WriteError('Setup package not found in release assets');
+    Exit('');
+  end;
+
+  // If there is only one setup, exit
+  if AAssets.Count = 1 then
+  begin
+    Exit(AAssets[0].BrowserDownloadUrl);
+  end;
+
+  TConsole.WriteLine;
+
+  // If there is more than one setup, ask the user
+  var LBrowserDownloadUrlList: TArray<string> := [];
+  for var LAsset in AAssets do
+  begin
+    if LAsset.BrowserDownloadUrl.Contains('setup', True) then
+    begin
+      LBrowserDownloadUrlList := LBrowserDownloadUrlList + [LAsset.BrowserDownloadUrl];
+    end;
+  end;
+
+  if Length(LBrowserDownloadUrlList) = 0 then
+  begin
+    TConsole.WriteError('No setup package found in release assets');
+    Exit('');
+  end;
+
+  var I := 0;
+  TConsole.WriteLine('Available setups:', clGreen);
+  for var LBrowserDownloadUrl in LBrowserDownloadUrlList do
+  begin
+    TConsole.WriteLine(Format('  [%d] %s', [I + 1, THttpUtils.ExtractFileName(LBrowserDownloadUrl)]));
+    Inc(I);
+  end;
+  TConsole.WriteLine;
+
+  TConsole.Write(Format('Select setup [1-%d] (ENTER for none): ', [Length(LBrowserDownloadUrlList)]));
+  var InputStr := Trim(TConsole.ReadLine);
+  if InputStr = '' then
+    Exit;
+
+  var Index: Integer;
+  if TryStrToInt(InputStr, Index) and (Index >= 1) and (Index <= Length(LBrowserDownloadUrlList)) then
+    Exit(LBrowserDownloadUrlList[Index - 1]);
 
 end;
 
