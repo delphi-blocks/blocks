@@ -39,7 +39,8 @@ uses
   Blocks.Manifest in '..\Source\Blocks.Manifest.pas',
   Blocks.Product in '..\Source\Blocks.Product.pas',
   Blocks.Types in '..\Source\Blocks.Types.pas',
-  Blocks.Workspace in '..\Source\Blocks.Workspace.pas';
+  Blocks.Workspace in '..\Source\Blocks.Workspace.pas',
+  Blocks.Tests.JSON in 'Blocks.Tests.JSON.pas';
 
 var
   runner : ITestRunner;

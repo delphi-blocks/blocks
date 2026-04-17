@@ -4,7 +4,7 @@
         <ProjectVersion>20.4</ProjectVersion>
         <MainSource>Blocks.Tests.Framework.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Release</Config>
+        <Config Condition="'$(Config)'==''">Debug</Config>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>1</TargetedPlatforms>
         <AppType>Console</AppType>
@@ -144,6 +144,7 @@
         <DCCReference Include="..\Source\Blocks.Product.pas"/>
         <DCCReference Include="..\Source\Blocks.Types.pas"/>
         <DCCReference Include="..\Source\Blocks.Workspace.pas"/>
+        <DCCReference Include="Blocks.Tests.JSON.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
