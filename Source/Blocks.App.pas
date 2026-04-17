@@ -725,7 +725,7 @@ begin
     end;
 
     if LManifest.Keywords.Count > 0 then
-      LField('Keywords', string.Join(', ', LManifest.Keywords.ToArray));
+      LField('Keywords', string.Join(', ', LManifest.Keywords.ToStringArray));
 
     // Packages
     if LManifest.Packages.Count > 0 then
@@ -734,7 +734,7 @@ begin
       for var LPkg in LManifest.Packages do
       begin
         TConsole.Write('    ' + LPkg.Name.PadRight(30), clWhite);
-        TConsole.WriteLine(string.Join(', ', LPkg.&Type.ToArray), clDkGray);
+        TConsole.WriteLine(string.Join(', ', LPkg.&Type.ToStringArray), clDkGray);
       end;
     end;
 
@@ -746,11 +746,11 @@ begin
       begin
         TConsole.WriteLine('    ' + LPlat.Key, clCyan);
         if LPlat.Value.SourcePath.Count > 0 then
-          LField('      Source',   string.Join(', ', LPlat.Value.SourcePath.ToArray));
+          LField('      Source',   string.Join(', ', LPlat.Value.SourcePath.ToStringArray));
         if LPlat.Value.BrowsingPath.Count > 0 then
-          LField('      Browsing', string.Join(', ', LPlat.Value.BrowsingPath.ToArray));
+          LField('      Browsing', string.Join(', ', LPlat.Value.BrowsingPath.ToStringArray));
         if LPlat.Value.DebugDCUPath.Count > 0 then
-          LField('      Debug',    string.Join(', ', LPlat.Value.DebugDCUPath.ToArray));
+          LField('      Debug',    string.Join(', ', LPlat.Value.DebugDCUPath.ToStringArray));
       end;
     end;
 

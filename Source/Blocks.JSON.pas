@@ -75,6 +75,7 @@ type
     function WriteList(AObject: TObject; ADataType: PTypeInfo): TJSONArray;
     function WriteDictionary(AObject: TObject; ADataType: PTypeInfo): TJSONObject;
     function WriteDataMembers(AObject: TObject): TJSONObject;
+    function WriteStringListMembers(AObject: TStrings): TJSONArray;
   public
     function ObjectToJSON(AObject: TObject): TJSONValue;
   end;
@@ -85,6 +86,7 @@ type
     procedure ReadDataMembers(AObject: TObject; AType: TRttiType; AJSON: TJSONValue);
     procedure ReadDictionary(AObject: TObject; ADataType: PTypeInfo; AJSON: TJSONValue);
     procedure ReadList(AObject: TObject; ADataType: PTypeInfo; AJSON: TJSONValue);
+    procedure ReadStringList(AObject: TStrings; AJSON: TJSONArray);
   public
     procedure JSONToObject(AObject: TObject; AType: TRttiType; AJSON: TJSONValue);
   end;
@@ -137,7 +139,12 @@ class function TJsonHelper.JSONToObject(AType: TRttiType;
   AJSON: TJSONValue): TObject;
 begin
   Result := TRttiHelper.CreateInstance(AType);
-  JSONToObject(Result, AType, AJSON);
+  try
+    JSONToObject(Result, AType, AJSON);
+  except
+    Result.Free;
+    raise;
+  end;
 end;
 
 class procedure TJsonHelper.JSONToObject(AObject: TObject; AType: TRttiType;
@@ -326,18 +333,29 @@ begin
 
       tkClass:
       begin
+        var LPropInstance := LProp.GetValue(AObject).AsObject;
         if LProp.HasAttribute(JsonDictionaryAttribute) then
         begin
           var LAttr := LProp.GetAttribute<JsonDictionaryAttribute>;
-          ReadDictionary(LProp.GetValue(AObject).AsObject, LAttr.TypeInfo, AJSON.FindValue(LPropName));
+          ReadDictionary(LPropInstance, LAttr.TypeInfo, AJSON.FindValue(LPropName));
         end
         else if LProp.HasAttribute(JsonListAttribute) then
         begin
           var LAttr := LProp.GetAttribute<JsonListAttribute>;
-          ReadList(LProp.GetValue(AObject).AsObject, LAttr.TypeInfo, AJSON.FindValue(LPropName));
+          ReadList(LPropInstance, LAttr.TypeInfo, AJSON.FindValue(LPropName));
+        end
+        else if LPropInstance is TStrings then
+        begin
+          var LJSON := AJSON.FindValue(LPropName);
+          if Assigned(LJSON) then
+          begin
+            if LJSON is not TJSONArray then
+              raise EJSONDeserializerError.Create('TJSONArray expected');
+            ReadStringList(TStrings(LPropInstance), TJSONArray(LJSON));
+          end;
         end
         else
-          ReadDataMembers(LProp.GetValue(AObject).AsObject, LProp.DataType, AJSON.FindValue(LPropName));
+          ReadDataMembers(LPropInstance, LProp.DataType, AJSON.FindValue(LPropName));
       end;
       else
         raise EJSONDeserializerError.CreateFmt('ReadDataMembers: type "%s" unknown', [TRttiEnumerationType.GetName(LProp.PropertyType.TypeKind)]);
@@ -441,6 +459,17 @@ begin
 
 end;
 
+procedure TJsonDeserializer.ReadStringList(AObject: TStrings;
+  AJSON: TJSONArray);
+begin
+  for var LJSONItem in AJSON do
+  begin
+    if LJSONItem is not TJSONString then
+      raise EJSONDeserializerError.Create('String expected');
+    AObject.Add(LJSONItem.Value);
+  end;
+end;
+
 { JsonNameAttribute }
 
 constructor JsonNameAttribute.Create(const AName: string);
@@ -512,43 +541,53 @@ begin
     Exit(nil);
 
   Result := TJSONObject.Create;
-  var LType := TRttiHelper.Context.GetType(AObject.ClassType) as TRttiInstanceType;
+  try
+    var LType := TRttiHelper.Context.GetType(AObject.ClassType) as TRttiInstanceType;
 
-  for var LProp in LType.GetProperties do
-  begin
-    var LValue: TJSONValue;
-    var LPropName := GetJSONFieldName(LProp);
-    case LProp.PropertyType.TypeKind of
-      tkInt64:       LValue := TJSONNumber.Create(LProp.GetValue(AObject).AsInteger);
-      tkInteger:     LValue := TJSONNumber.Create(LProp.GetValue(AObject).AsInt64);
-      tkFloat:       LValue := TJSONNumber.Create(LProp.GetValue(AObject).AsExtended);
-      tkLString:     LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
-      tkWString:     LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
-      tkUString:     LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
-      tkString:      LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
+    for var LProp in LType.GetProperties do
+    begin
+      var LValue: TJSONValue;
+      var LPropName := GetJSONFieldName(LProp);
+      case LProp.PropertyType.TypeKind of
+        tkInt64:       LValue := TJSONNumber.Create(LProp.GetValue(AObject).AsInteger);
+        tkInteger:     LValue := TJSONNumber.Create(LProp.GetValue(AObject).AsInt64);
+        tkFloat:       LValue := TJSONNumber.Create(LProp.GetValue(AObject).AsExtended);
+        tkLString:     LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
+        tkWString:     LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
+        tkUString:     LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
+        tkString:      LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
 
-      tkClass:
-      begin
-        if LProp.HasAttribute(JsonDictionaryAttribute) then
+        tkClass:
         begin
-          var LAttr := LProp.GetAttribute<JsonDictionaryAttribute>;
-          LValue := WriteDictionary(LProp.GetValue(AObject).AsObject, LAttr.TypeInfo);
-        end
-        else if LProp.HasAttribute(JsonListAttribute) then
-        begin
-          var LAttr := LProp.GetAttribute<JsonListAttribute>;
-          LValue := WriteList(LProp.GetValue(AObject).AsObject, LAttr.TypeInfo);
-        end
-        else
-        begin
-          LValue := WriteDataMembers(LProp.GetValue(AObject).AsObject);
+          var LPropInstance := LProp.GetValue(AObject).AsObject;
+          if LProp.HasAttribute(JsonDictionaryAttribute) then
+          begin
+            var LAttr := LProp.GetAttribute<JsonDictionaryAttribute>;
+            LValue := WriteDictionary(LPropInstance, LAttr.TypeInfo);
+          end
+          else if LProp.HasAttribute(JsonListAttribute) then
+          begin
+            var LAttr := LProp.GetAttribute<JsonListAttribute>;
+            LValue := WriteList(LPropInstance, LAttr.TypeInfo);
+          end
+          else if LPropInstance is TStrings then
+          begin
+            LValue := WriteStringListMembers(TStrings(LPropInstance));
+          end
+          else
+          begin
+            LValue := WriteDataMembers(LPropInstance);
+          end;
         end;
+        else
+          raise EJSONSerializerError.CreateFmt('WriteDataMembers: type "%s" unknown', [TRttiEnumerationType.GetName(LProp.PropertyType.TypeKind)]);
       end;
-      else
-        raise EJSONSerializerError.CreateFmt('WriteDataMembers: type "%s" unknown', [TRttiEnumerationType.GetName(LProp.PropertyType.TypeKind)]);
+      if Assigned(LValue) then
+        Result.AddPair(LPropName, LValue);
     end;
-    if Assigned(LValue) then
-      Result.AddPair(LPropName, LValue);
+  except
+    Result.Free;
+    raise;
   end;
 end;
 
@@ -558,71 +597,76 @@ begin
     Exit(nil);
 
   Result := TJSONObject.Create;
+  try
 
-  if not Assigned(AObject) then
-    Exit(nil);
+    if not Assigned(AObject) then
+      Exit(nil);
 
-  var LListType := TRttiHelper.Context.GetType(AObject.ClassType);
-  var LMethodGetEnumerator := LListType.GetMethod('GetEnumerator');
-  if not Assigned(LMethodGetEnumerator) or
-     (LMethodGetEnumerator.MethodKind <> mkFunction) or
-     (LMethodGetEnumerator.ReturnType.Handle.Kind <> tkClass)
-  then
-    Exit;
+    var LListType := TRttiHelper.Context.GetType(AObject.ClassType);
+    var LMethodGetEnumerator := LListType.GetMethod('GetEnumerator');
+    if not Assigned(LMethodGetEnumerator) or
+       (LMethodGetEnumerator.MethodKind <> mkFunction) or
+       (LMethodGetEnumerator.ReturnType.Handle.Kind <> tkClass)
+    then
+      Exit;
 
-  // Get the enumerator instance
-  var LEnumInstance := LMethodGetEnumerator.Invoke(AObject, []).AsObject;
-  if not Assigned(LEnumInstance) then
-    Exit;
+    // Get the enumerator instance
+    var LEnumInstance := LMethodGetEnumerator.Invoke(AObject, []).AsObject;
+    if not Assigned(LEnumInstance) then
+      Exit;
 
-  var LEnumType := TRttiHelper.Context.GetType(LEnumInstance.ClassType);
+    var LEnumType := TRttiHelper.Context.GetType(LEnumInstance.ClassType);
 
-  var LCurrentProp := LEnumType.GetProperty('Current');
-  if not Assigned(LCurrentProp) then
-    Exit;
+    var LCurrentProp := LEnumType.GetProperty('Current');
+    if not Assigned(LCurrentProp) then
+      Exit;
 
-  var LPairKeyField := TRttiInstanceType(LCurrentProp.PropertyType).GetField('Key');
-  if not Assigned(LPairKeyField) then
-    Exit;
+    var LPairKeyField := TRttiInstanceType(LCurrentProp.PropertyType).GetField('Key');
+    if not Assigned(LPairKeyField) then
+      Exit;
 
-  var LPairValueField := TRttiInstanceType(LCurrentProp.PropertyType).GetField('Value');
-  if not Assigned(LPairValueField) then
-    Exit;
+    var LPairValueField := TRttiInstanceType(LCurrentProp.PropertyType).GetField('Value');
+    if not Assigned(LPairValueField) then
+      Exit;
 
-  var LMethodMoveNext := LEnumType.GetMethod('MoveNext');
-  if not Assigned(LMethodMoveNext) or
-     (Length(LMethodMoveNext.GetParameters) <> 0) or
-     (LMethodMoveNext.MethodKind <> mkFunction) or
-     (LMethodMoveNext.ReturnType.Handle <> TypeInfo(Boolean))
-  then
-    Exit;
+    var LMethodMoveNext := LEnumType.GetMethod('MoveNext');
+    if not Assigned(LMethodMoveNext) or
+       (Length(LMethodMoveNext.GetParameters) <> 0) or
+       (LMethodMoveNext.MethodKind <> mkFunction) or
+       (LMethodMoveNext.ReturnType.Handle <> TypeInfo(Boolean))
+    then
+      Exit;
 
-  while LMethodMoveNext.Invoke(LEnumInstance, []).AsBoolean do
-  begin
-    var LValue: TJSONValue;
-    var LCurrent := LCurrentProp.GetValue(LEnumInstance).GetReferenceToRawData;
-    var LPairKey :=  LPairKeyField.GetValue(LCurrent).AsString;
-    var LPairValue := LPairValueField.GetValue(LCurrent);
-    case LPairValue.Kind of
-      tkClass: LValue := WriteDataMembers(LPairValue.AsObject);
+    while LMethodMoveNext.Invoke(LEnumInstance, []).AsBoolean do
+    begin
+      var LValue: TJSONValue;
+      var LCurrent := LCurrentProp.GetValue(LEnumInstance).GetReferenceToRawData;
+      var LPairKey :=  LPairKeyField.GetValue(LCurrent).AsString;
+      var LPairValue := LPairValueField.GetValue(LCurrent);
+      case LPairValue.Kind of
+        tkClass: LValue := WriteDataMembers(LPairValue.AsObject);
 
-      tkInteger: LValue := TJSONNumber.Create(LPairValue.AsInteger);
-      tkInt64: LValue := TJSONNumber.Create(LPairValue.AsInt64);
-      tkUString: LValue := TJSONString.Create(LPairValue.AsString);
-      tkLString: LValue := TJSONString.Create(LPairValue.AsString);
-      tkWString: LValue := TJSONString.Create(LPairValue.AsString);
-      tkString: LValue := TJSONString.Create(LPairValue.AsString);
-      tkFloat: LValue := TJSONNumber.Create(LPairValue.AsExtended);
-      else
-        raise EJSONSerializerError.CreateFmt('WriteDictionary: type "%s" unknown', [TRttiEnumerationType.GetName(LPairValue.Kind)]);
+        tkInteger: LValue := TJSONNumber.Create(LPairValue.AsInteger);
+        tkInt64: LValue := TJSONNumber.Create(LPairValue.AsInt64);
+        tkUString: LValue := TJSONString.Create(LPairValue.AsString);
+        tkLString: LValue := TJSONString.Create(LPairValue.AsString);
+        tkWString: LValue := TJSONString.Create(LPairValue.AsString);
+        tkString: LValue := TJSONString.Create(LPairValue.AsString);
+        tkFloat: LValue := TJSONNumber.Create(LPairValue.AsExtended);
+        else
+          raise EJSONSerializerError.CreateFmt('WriteDictionary: type "%s" unknown', [TRttiEnumerationType.GetName(LPairValue.Kind)]);
+      end;
+      if Assigned(LValue) then
+        Result.AddPair(LPairKey, LValue)
     end;
-    if Assigned(LValue) then
-      Result.AddPair(LPairKey, LValue)
+
+    if Assigned(LEnumInstance) then
+      LEnumInstance.Free;
+
+  except
+    Result.Free;
+    raise;
   end;
-
-  if Assigned(LEnumInstance) then
-    LEnumInstance.Free;
-
 end;
 
 function TJsonSerializer.WriteList(AObject: TObject; ADataType: PTypeInfo): TJSONArray;
@@ -631,65 +675,84 @@ begin
     Exit(nil);
 
   Result := TJSONArray.Create;
+  try
 
-  if not Assigned(AObject) then
-    Exit(nil);
+    if not Assigned(AObject) then
+      Exit(nil);
 
-  var LListType := TRttiHelper.Context.GetType(AObject.ClassType);
+    var LListType := TRttiHelper.Context.GetType(AObject.ClassType);
 
-  var LMethodGetEnumerator := LListType.GetMethod('GetEnumerator');
-  if not Assigned(LMethodGetEnumerator) or
-     (LMethodGetEnumerator.MethodKind <> mkFunction) or
-     (LMethodGetEnumerator.ReturnType.Handle.Kind <> tkClass)
-  then
-    Exit;
+    var LMethodGetEnumerator := LListType.GetMethod('GetEnumerator');
+    if not Assigned(LMethodGetEnumerator) or
+       (LMethodGetEnumerator.MethodKind <> mkFunction) or
+       (LMethodGetEnumerator.ReturnType.Handle.Kind <> tkClass)
+    then
+      Exit;
 
-  // Get the enumerator instance
-  var LEnumInstance := LMethodGetEnumerator.Invoke(AObject, []).AsObject;
-  if not Assigned(LEnumInstance) then
-    Exit;
+    // Get the enumerator instance
+    var LEnumInstance := LMethodGetEnumerator.Invoke(AObject, []).AsObject;
+    if not Assigned(LEnumInstance) then
+      Exit;
 
-  var LEnumType := TRttiHelper.Context.GetType(LEnumInstance.ClassType);
+    var LEnumType := TRttiHelper.Context.GetType(LEnumInstance.ClassType);
 
-  var LCurrentProp := LEnumType.GetProperty('Current');
-  if not Assigned(LCurrentProp) then
-    Exit;
+    var LCurrentProp := LEnumType.GetProperty('Current');
+    if not Assigned(LCurrentProp) then
+      Exit;
 
-  var LMethodMoveNext := LEnumType.GetMethod('MoveNext');
-  if not Assigned(LMethodMoveNext) or
-     (Length(LMethodMoveNext.GetParameters) <> 0) or
-     (LMethodMoveNext.MethodKind <> mkFunction) or
-     (LMethodMoveNext.ReturnType.Handle <> TypeInfo(Boolean))
-  then
-    Exit;
+    var LMethodMoveNext := LEnumType.GetMethod('MoveNext');
+    if not Assigned(LMethodMoveNext) or
+       (Length(LMethodMoveNext.GetParameters) <> 0) or
+       (LMethodMoveNext.MethodKind <> mkFunction) or
+       (LMethodMoveNext.ReturnType.Handle <> TypeInfo(Boolean))
+    then
+      Exit;
 
-  while LMethodMoveNext.Invoke(LEnumInstance, []).AsBoolean do
-  begin
-    var LValue: TJSONValue;
-    var LCurrent := LCurrentProp.GetValue(LEnumInstance);
-    case LCurrent.Kind of
-      tkClass:
-      begin
-        LValue := WriteDataMembers(LCurrent.AsObject);
+    while LMethodMoveNext.Invoke(LEnumInstance, []).AsBoolean do
+    begin
+      var LValue: TJSONValue;
+      var LCurrent := LCurrentProp.GetValue(LEnumInstance);
+      case LCurrent.Kind of
+        tkClass:
+        begin
+          LValue := WriteDataMembers(LCurrent.AsObject);
+        end;
+
+        tkInteger: LValue := TJSONNumber.Create(LCurrent.AsInteger);
+        tkInt64: LValue := TJSONNumber.Create(LCurrent.AsInt64);
+        tkUString: LValue := TJSONString.Create(LCurrent.AsString);
+        tkWString: LValue := TJSONString.Create(LCurrent.AsString);
+        tkLString: LValue := TJSONString.Create(LCurrent.AsString);
+        tkString: LValue := TJSONString.Create(LCurrent.AsString);
+        tkFloat: LValue := TJSONNumber.Create(LCurrent.AsExtended);
+        else
+          raise EJSONSerializerError.CreateFmt('WriteList: type "%s" unknown', [TRttiEnumerationType.GetName(LCurrent.Kind)]);
       end;
-
-      tkInteger: LValue := TJSONNumber.Create(LCurrent.AsInteger);
-      tkInt64: LValue := TJSONNumber.Create(LCurrent.AsInt64);
-      tkUString: LValue := TJSONString.Create(LCurrent.AsString);
-      tkWString: LValue := TJSONString.Create(LCurrent.AsString);
-      tkLString: LValue := TJSONString.Create(LCurrent.AsString);
-      tkString: LValue := TJSONString.Create(LCurrent.AsString);
-      tkFloat: LValue := TJSONNumber.Create(LCurrent.AsExtended);
-      else
-        raise EJSONSerializerError.CreateFmt('WriteList: type "%s" unknown', [TRttiEnumerationType.GetName(LCurrent.Kind)]);
+      if Assigned(LValue) then
+        Result.AddElement(LValue);
     end;
-    if Assigned(LValue) then
-      Result.AddElement(LValue);
+
+    if Assigned(LEnumInstance) then
+      LEnumInstance.Free;
+  except
+    Result.Free;
+    raise;
   end;
 
-  if Assigned(LEnumInstance) then
-    LEnumInstance.Free;
+end;
 
+function TJsonSerializer.WriteStringListMembers(AObject: TStrings): TJSONArray;
+begin
+  Result := TJSONArray.Create;
+  try
+    for var LStr in AObject do
+    begin
+      Result.Add(LStr);
+    end;
+  except
+    Result.Free;
+    raise;
+  end;
 end;
 
 end.

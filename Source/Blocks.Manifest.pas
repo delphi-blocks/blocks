@@ -47,19 +47,16 @@ type
   // -----------------------------------------------------------------------
   TManifestPlatform = class
   private
-    FSourcePath: TJsonStringList;
-    FBrowsingPath: TJsonStringList;
-    FDebugDCUPath: TJsonStringList;
+    FSourcePath: TStringList;
+    FBrowsingPath: TStringList;
+    FDebugDCUPath: TStringList;
   public
     constructor Create;
     destructor Destroy; override;
 
-    [JsonList(System.TypeInfo(string))]
-    property SourcePath: TJsonStringList read FSourcePath;
-    [JsonList(System.TypeInfo(string))]
-    property BrowsingPath: TJsonStringList read FBrowsingPath;
-    [JsonList(System.TypeInfo(string))]
-    property DebugDCUPath: TJsonStringList read FDebugDCUPath;
+    property SourcePath: TStringList read FSourcePath;
+    property BrowsingPath: TStringList read FBrowsingPath;
+    property DebugDCUPath: TStringList read FDebugDCUPath;
   end;
 
   // -----------------------------------------------------------------------
@@ -82,14 +79,13 @@ type
   TManifestPackage = class
   private
     FName: string;
-    FType: TJsonStringList;
+    FType: TStringList;
   public
     constructor Create;
     destructor Destroy; override;
 
     property Name: string read FName write FName;
-    [JsonList(System.TypeInfo(string))]
-    property &Type: TJsonStringList read FType;
+    property &Type: TStringList read FType;
   end;
 
   // -----------------------------------------------------------------------
@@ -151,7 +147,7 @@ type
     FDescription: string;
     FHomepage: string;
     FAuthor: string;
-    FKeywords: TJSONStringList;
+    FKeywords: TStringList;
   public
     class function GetManifest(const APackageName, APackageVersion: string): TManifest;
     /// <summary>Returns all available versions of a package, sorted ascending.</summary>
@@ -169,8 +165,7 @@ type
     property Homepage: string read FHomepage write FHomepage;
     property Repository: TManifestRepository read FRepository;
     property Author: string read FAuthor write FAuthor;
-    [JsonList(System.TypeInfo(string))]
-    property Keywords: TJSONStringList read FKeywords;
+    property Keywords: TStringList read FKeywords;
 
     [JsonDictionary(System.TypeInfo(TManifestPlatform))]
     property Platforms: TSupportedPlatforms read FPlatforms;
@@ -197,9 +192,9 @@ const
 constructor TManifestPlatform.Create;
 begin
   inherited Create;
-  FSourcePath   := TJsonStringList.Create;
-  FBrowsingPath := TJsonStringList.Create;
-  FDebugDCUPath := TJsonStringList.Create;
+  FSourcePath   := TStringList.Create;
+  FBrowsingPath := TStringList.Create;
+  FDebugDCUPath := TStringList.Create;
 end;
 
 destructor TManifestPlatform.Destroy;
@@ -222,7 +217,7 @@ end;
 constructor TManifestPackage.Create;
 begin
   inherited Create;
-  FType := TJsonStringList.Create;
+  FType := TStringList.Create;
 end;
 
 destructor TManifestPackage.Destroy;
@@ -258,7 +253,7 @@ constructor TManifest.Create;
 begin
   inherited Create;
   FRepository := TManifestRepository.Create;
-  FKeywords := TJSONStringList.Create;
+  FKeywords := TStringList.Create;
   FPlatforms := TSupportedPlatforms.Create;
   FPackages := TManifestPackageList.Create;
   FPackageOptions := TManifestPackageOptions.Create;

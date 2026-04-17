@@ -86,13 +86,12 @@ type
 
   TConfig = class(TObject)
   private
-    FSources: TJSONStringList;
+    FSources: TStringList;
     FProduct: string;
     FRegistryKey: string;
     function ConfigPath: string;
   public
-    [JsonList(System.TypeInfo(string))]
-    property Sources: TJSONStringList read FSources;
+    property Sources: TStringList read FSources;
 
     property Product: string read FProduct write FProduct;
     property RegistryKey: string read FRegistryKey write FRegistryKey;
@@ -478,7 +477,7 @@ end;
 constructor TConfig.Create;
 begin
   inherited;
-  FSources := TJSONStringList.Create;
+  FSources := TStringList.Create;
   FSources.Add(DefaultBlocksRepositoryUrl);
   FRegistryKey := 'BDS';
 end;
@@ -492,7 +491,7 @@ end;
 function TConfig.Get(const AKey: string): string;
 begin
   if SameText(AKey, 'sources') then
-    Result := string.Join(',', FSources.ToArray)
+    Result := string.Join(',', FSources.ToStringArray)
   else if SameText(AKey, 'product') then
     Result := FProduct
   else if SameText(AKey, 'registrykey') then

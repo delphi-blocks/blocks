@@ -3,6 +3,7 @@ unit Blocks.Tests.JSON;
 interface
 
 uses
+  System.Classes,
   System.SysUtils,
   System.Generics.Collections,
   DUnitX.TestFramework,
@@ -21,6 +22,8 @@ type
   end;
 
   // ----- string list -----
+  TJSONStringList = class(TList<string>)
+  end;
 
   TTaggedObj = class(TObject)
   private
@@ -33,6 +36,20 @@ type
     property Name: string read FName write FName;
     [JsonList(System.TypeInfo(string))]
     property Tags: TJSONStringList read FTags;
+  end;
+
+  // ----- classic string list -----
+
+  TFlagObj = class(TObject)
+  private
+    FName: string;
+    FFlags: TStringList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    property Name: string read FName write FName;
+    property Flags: TStringList read FFlags;
   end;
 
   // ----- object list -----
@@ -121,6 +138,10 @@ type
     [Test]
     procedure TestDeserialization_StringList;
     [Test]
+    procedure TestSerialization_ClassicStringList;
+    [Test]
+    procedure TestDeserialization_ClassicStringList;
+    [Test]
     procedure TestSerialization_ObjectList;
     [Test]
     procedure TestDeserialization_ObjectList;
@@ -132,6 +153,26 @@ type
     procedure TestSerialization_ObjectDictionary;
     [Test]
     procedure TestDeserialization_ObjectDictionary;
+    [Test]
+    procedure TestDeserialization_StringList_Empty;
+    [Test]
+    procedure TestDeserialization_ClassicStringList_Empty;
+    [Test]
+    procedure TestDeserialization_ObjectList_Empty;
+    [Test]
+    procedure TestDeserialization_StringDictionary_Empty;
+    [Test]
+    procedure TestDeserialization_ObjectDictionary_Empty;
+    [Test]
+    procedure TestDeserialization_StringList_Missing;
+    [Test]
+    procedure TestDeserialization_ClassicStringList_Missing;
+    [Test]
+    procedure TestDeserialization_ObjectList_Missing;
+    [Test]
+    procedure TestDeserialization_StringDictionary_Missing;
+    [Test]
+    procedure TestDeserialization_ObjectDictionary_Missing;
   end;
 
 const
@@ -148,6 +189,14 @@ const
     {
       "name": "TestName",
       "tags": ["alpha", "beta", "gamma"]
+    }
+    ''';
+
+  FlaggedObjJSON =
+    '''
+    {
+      "name": "TestName",
+      "flags": ["alpha", "beta", "gamma"]
     }
     ''';
 
@@ -181,6 +230,81 @@ const
         "child1": { "value": "v1", "count": 10 },
         "child2": { "value": "v2", "count": 20 }
       }
+    }
+    ''';
+
+  TaggedObjEmptyJSON =
+    '''
+    {
+      "name": "TestName",
+      "tags": []
+    }
+    ''';
+
+  FlaggedObjEmptyJSON =
+    '''
+    {
+      "name": "TestName",
+      "flags": []
+    }
+    ''';
+
+  ListObjEmptyJSON =
+    '''
+    {
+      "title": "MyList",
+      "items": []
+    }
+    ''';
+
+  StrDictObjEmptyJSON =
+    '''
+    {
+      "name": "TestLabel",
+      "props": {}
+    }
+    ''';
+
+  ObjDictObjEmptyJSON =
+    '''
+    {
+      "name": "DictLabel",
+      "children": {}
+    }
+    ''';
+
+  TaggedObjMissingJSON =
+    '''
+    {
+      "name": "TestName"
+    }
+    ''';
+
+  FlaggedObjMissingJSON =
+    '''
+    {
+      "name": "TestName"
+    }
+    ''';
+
+  ListObjMissingJSON =
+    '''
+    {
+      "title": "MyList"
+    }
+    ''';
+
+  StrDictObjMissingJSON =
+    '''
+    {
+      "name": "TestLabel"
+    }
+    ''';
+
+  ObjDictObjMissingJSON =
+    '''
+    {
+      "name": "DictLabel"
     }
     ''';
 
@@ -284,12 +408,51 @@ begin
   end;
 end;
 
+procedure TJSONTest.TestSerialization_ClassicStringList;
+begin
+  var LObj := TFlagObj.Create;
+  try
+    LObj.Name := 'TestName';
+    LObj.Flags.Add('alpha');
+    LObj.Flags.Add('beta');
+    LObj.Flags.Add('gamma');
+    var LJSON := TJsonHelper.ObjectToJSON(LObj);
+    try
+      Assert.AreEqual('TestName', LJSON.GetValue<string>('name'), 'name');
+      var LTags := LJSON.FindValue('flags') as TJSONArray;
+      Assert.IsNotNull(LTags, 'flags array present');
+      Assert.AreEqual(3, LTags.Count, 'flags count');
+      Assert.AreEqual('alpha', LTags.Items[0].Value, 'flags[0]');
+      Assert.AreEqual('beta', LTags.Items[1].Value, 'flags[1]');
+      Assert.AreEqual('gamma', LTags.Items[2].Value, 'flags[2]');
+    finally
+      LJSON.Free;
+    end;
+  finally
+    LObj.Free;
+  end;
+end;
+
 procedure TJSONTest.TestDeserialization_BasicProperties;
 begin
   var LObj := TJsonHelper.JSONToObject<TMyTestObj>(MyTestJSON);
   try
     Assert.AreEqual('TestValue', LObj.StrProp, 'strProp');
     Assert.AreEqual(43, LObj.IntProp, 'intProp');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_ClassicStringList;
+begin
+  var LObj := TJsonHelper.JSONToObject<TFlagObj>(FlaggedObjJSON);
+  try
+    Assert.AreEqual('TestName', LObj.Name, 'name');
+    Assert.AreEqual(3, LObj.Flags.Count, 'tags count');
+    Assert.AreEqual('alpha', LObj.Flags[0], 'tags[0]');
+    Assert.AreEqual('beta', LObj.Flags[1], 'tags[1]');
+    Assert.AreEqual('gamma', LObj.Flags[2], 'tags[2]');
   finally
     LObj.Free;
   end;
@@ -458,6 +621,131 @@ begin
   finally
     LObj.Free;
   end;
+end;
+
+procedure TJSONTest.TestDeserialization_StringList_Empty;
+begin
+  var LObj := TJsonHelper.JSONToObject<TTaggedObj>(TaggedObjEmptyJSON);
+  try
+    Assert.AreEqual('TestName', LObj.Name, 'name');
+    Assert.AreEqual(0, LObj.Tags.Count, 'tags count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_ClassicStringList_Empty;
+begin
+  var LObj := TJsonHelper.JSONToObject<TFlagObj>(FlaggedObjEmptyJSON);
+  try
+    Assert.AreEqual('TestName', LObj.Name, 'name');
+    Assert.AreEqual(0, LObj.Flags.Count, 'flags count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_ObjectList_Empty;
+begin
+  var LObj := TJsonHelper.JSONToObject<TListObj>(ListObjEmptyJSON);
+  try
+    Assert.AreEqual('MyList', LObj.Title, 'title');
+    Assert.AreEqual(0, LObj.Items.Count, 'items count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_StringDictionary_Empty;
+begin
+  var LObj := TJsonHelper.JSONToObject<TStrDictObj>(StrDictObjEmptyJSON);
+  try
+    Assert.AreEqual('TestLabel', LObj.Name, 'name');
+    Assert.AreEqual(0, LObj.Props.Count, 'props count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_ObjectDictionary_Empty;
+begin
+  var LObj := TJsonHelper.JSONToObject<TObjDictObj>(ObjDictObjEmptyJSON);
+  try
+    Assert.AreEqual('DictLabel', LObj.Name, 'name');
+    Assert.AreEqual(0, LObj.Children.Count, 'children count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_StringList_Missing;
+begin
+  var LObj := TJsonHelper.JSONToObject<TTaggedObj>(TaggedObjMissingJSON);
+  try
+    Assert.AreEqual('TestName', LObj.Name, 'name');
+    Assert.AreEqual(0, LObj.Tags.Count, 'tags count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_ClassicStringList_Missing;
+begin
+  var LObj := TJsonHelper.JSONToObject<TFlagObj>(FlaggedObjMissingJSON);
+  try
+    Assert.AreEqual('TestName', LObj.Name, 'name');
+    Assert.AreEqual(0, LObj.Flags.Count, 'flags count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_ObjectList_Missing;
+begin
+  var LObj := TJsonHelper.JSONToObject<TListObj>(ListObjMissingJSON);
+  try
+    Assert.AreEqual('MyList', LObj.Title, 'title');
+    Assert.AreEqual(0, LObj.Items.Count, 'items count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_StringDictionary_Missing;
+begin
+  var LObj := TJsonHelper.JSONToObject<TStrDictObj>(StrDictObjMissingJSON);
+  try
+    Assert.AreEqual('TestLabel', LObj.Name, 'name');
+    Assert.AreEqual(0, LObj.Props.Count, 'props count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_ObjectDictionary_Missing;
+begin
+  var LObj := TJsonHelper.JSONToObject<TObjDictObj>(ObjDictObjMissingJSON);
+  try
+    Assert.AreEqual('DictLabel', LObj.Name, 'name');
+    Assert.AreEqual(0, LObj.Children.Count, 'children count');
+  finally
+    LObj.Free;
+  end;
+end;
+
+{ TFlagObj }
+
+{ TFlagObj }
+
+constructor TFlagObj.Create;
+begin
+  FFlags := TStringList.Create;
+end;
+
+destructor TFlagObj.Destroy;
+begin
+  FFlags.Free;
+  inherited;
 end;
 
 initialization

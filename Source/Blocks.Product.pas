@@ -570,7 +570,7 @@ var
   Added: TStringList;
   NewPath: string;
 
-  procedure AppendPaths(APaths: TList<string>; const ARegValue: string);
+  procedure AppendPaths(APaths: TStrings; const ARegValue: string);
   begin
     if APaths.IsEmpty then
       Exit;
@@ -690,7 +690,7 @@ begin
     for var Pkg in APackages do
     begin
       var PkgName := Pkg.Name;
-      var TypeStr := string.Join(', ', Pkg.&Type.ToArray);
+      var TypeStr := string.Join(', ', Pkg.&Type.ToStringArray);
 
       var DprojPath := TPath.Combine(PackagesPath, PkgName + '.dproj');
       if not TFile.Exists(DprojPath) then

@@ -20,9 +20,6 @@ uses
   Winapi.Windows;
 
 type
-  TJSONStringList = class(TList<string>)
-  end;
-
   // -----------------------------------------------------------------------
   // Semantic version (major.minor.patch)
   // -----------------------------------------------------------------------
