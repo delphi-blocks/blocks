@@ -15,7 +15,9 @@ unit Blocks.Product;
 interface
 
 uses
-  System.Generics.Collections,
+  System.Classes, System.SysUtils, System.IOUtils, System.StrUtils, System.JSON,
+  System.Generics.Collections, System.Generics.Defaults,
+
   Blocks.Database,
   Blocks.Manifest;
 
@@ -107,6 +109,9 @@ type
     /// </remarks>
     procedure UpdateSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform);
 
+    /// <summary>Delete source, browsing, and debug DCU paths from the Delphi library registry.</summary>
+    procedure DeleteSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform);
+
     /// <summary>All installed Delphi/RAD Studio products, sorted newest-first.</summary>
     class property Products: TObjectList<TProduct> read FProducts;
     /// <summary>All installed Delphi/RAD Studio products by name.</summary>
@@ -127,15 +132,10 @@ type
 implementation
 
 uses
-  System.SysUtils,
-  System.Classes,
-  System.IOUtils,
-  System.StrUtils,
-  System.JSON,
-  System.Generics.Defaults,
   System.Win.Registry,
   Winapi.Windows,
   Winapi.TlHelp32,
+
   Blocks.Consts,
   Blocks.Console,
   Blocks.Http,
@@ -278,6 +278,57 @@ class constructor TProduct.Create;
 begin
   FProducts := TObjectList<TProduct>.Create({AOwnsObjects=} True);
   LoadProducts;
+end;
+
+procedure TProduct.DeleteSearchPaths(const APlatform, AProjectDir: string;
+  const APlatformConfig: TManifestPlatform);
+
+  procedure RemovePaths(AReg: TRegistry; APaths: TStrings; const ARegValue: string);
+  begin
+    if APaths.IsEmpty then
+      Exit;
+
+    // Get the path list
+    var LExisting := if AReg.ValueExists(ARegValue) then
+      AReg.ReadString(ARegValue)
+    else
+      '';
+
+    // Build the new path list from the old one skipping the manifest path
+    var LExistingList := LExisting.Split([';']);
+    var LNewList: TArray<string> := [];
+    for var LFullPath in LExistingList do
+    begin
+      if LFullPath.StartsWith(AProjectDir, True) then
+      begin
+        if APaths.Contains(Copy(LFullPath, Length(AProjectDir) + 2, Length(LFullPath))) then
+        begin
+          // Skip manifest path
+          Continue;
+        end;
+      end;
+      LNewList := LNewList + [LFullPath];
+    end;
+    AReg.WriteString(ARegValue, string.Join(';', LNewList));
+  end;
+
+begin
+  var RegPath := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\Library\' + APlatform;
+
+  var Reg := TRegistry.Create(KEY_READ or KEY_WRITE);
+  try
+    Reg.RootKey := HKEY_CURRENT_USER;
+    if not Reg.OpenKey(RegPath, False) then
+      Exit;
+
+    RemovePaths(Reg, APlatformConfig.SourcePath, 'Search Path');
+    RemovePaths(Reg, APlatformConfig.BrowsingPath, 'Browsing Path');
+    RemovePaths(Reg, APlatformConfig.DebugDCUPath, 'Debug DCU Path');
+
+    Reg.CloseKey;
+  finally
+    Reg.Free;
+  end;
 end;
 
 class destructor TProduct.Destroy;
@@ -562,70 +613,43 @@ begin
 end;
 
 procedure TProduct.UpdateSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform);
-var
-  Reg: TRegistry;
-  RegPath: string;
-  Existing: string;
-  ExistingList: TStringList;
-  Added: TStringList;
-  NewPath: string;
 
-  procedure AppendPaths(APaths: TStrings; const ARegValue: string);
+  procedure AppendPaths(AReg: TRegistry; APaths: TStrings; const ARegValue: string);
   begin
     if APaths.IsEmpty then
       Exit;
 
-    if Reg.ValueExists(ARegValue) then
-      Existing := Reg.ReadString(ARegValue)
+    var LExisting := if AReg.ValueExists(ARegValue) then
+      AReg.ReadString(ARegValue)
     else
-      Existing := '';
+      '';
 
-    ExistingList := TStringList.Create;
-    Added := TStringList.Create;
-    try
-      ExistingList.StrictDelimiter := True;
-      ExistingList.Delimiter := ';';
-      ExistingList.DelimitedText := Existing;
+    var LExistingList := LExisting.Split([';']);
+    var LNewPaths := LExistingList;
 
-      // Remove empty entries left by trailing semicolons
-      for var J := ExistingList.Count - 1 downto 0 do
-        if ExistingList[J] = '' then
-          ExistingList.Delete(J);
-
-      for var LPath in APaths do
+    for var LPath in APaths do
+    begin
+      var LNewPath := TPath.Combine(AProjectDir, LPath);
+      if not TArray.Contains<string>(LNewPaths, LNewPath, TIStringComparer.Ordinal) then
       begin
-        NewPath := TPath.Combine(AProjectDir, LPath);
-        if ExistingList.IndexOf(NewPath) < 0 then
-        begin
-          ExistingList.Add(NewPath);
-          Added.Add(NewPath);
-        end;
+        LNewPaths := LNewPaths + [LNewPath];
       end;
-
-      if Added.Count > 0 then
-      begin
-        Reg.WriteString(ARegValue, ExistingList.DelimitedText);
-        for var J := 0 to Added.Count - 1 do
-          TConsole.WriteLine(Format('    + [%s] %s', [ARegValue, Added[J]]), clDkGray);
-      end;
-    finally
-      Added.Free;
-      ExistingList.Free;
     end;
+    AReg.WriteString(ARegValue, String.Join(';', LNewPaths));
   end;
 
 begin
-  RegPath := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\Library\' + APlatform;
+  var RegPath := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\Library\' + APlatform;
 
-  Reg := TRegistry.Create(KEY_READ or KEY_WRITE);
+  var Reg := TRegistry.Create(KEY_READ or KEY_WRITE);
   try
     Reg.RootKey := HKEY_CURRENT_USER;
     if not Reg.OpenKey(RegPath, False) then
       Exit;
 
-    AppendPaths(APlatformConfig.SourcePath, 'Search Path');
-    AppendPaths(APlatformConfig.BrowsingPath, 'Browsing Path');
-    AppendPaths(APlatformConfig.DebugDCUPath, 'Debug DCU Path');
+    AppendPaths(Reg, APlatformConfig.SourcePath, 'Search Path');
+    AppendPaths(Reg, APlatformConfig.BrowsingPath, 'Browsing Path');
+    AppendPaths(Reg, APlatformConfig.DebugDCUPath, 'Debug DCU Path');
 
     Reg.CloseKey;
   finally

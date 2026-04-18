@@ -428,7 +428,13 @@ begin
     else
       TConsole.WriteLine('Directory not found: ' + LProjectDir, clYellow);
 
-    // Step 6 — Remove from database
+    // Step 6 - Remove search paths from every platform
+    for var LPlatform in LManifest.Platforms do
+    begin
+      LSelectedProduct.DeleteSearchPaths(LPlatform.Key, LProjectDir, LPlatform.Value);
+    end;
+
+    // Step 7 — Remove from database
     Database.RemoveEntry(LManifest.Id);
 
     TConsole.WriteLine;
