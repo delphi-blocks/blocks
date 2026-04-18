@@ -462,6 +462,7 @@ end;
 procedure TJsonDeserializer.ReadStringList(AObject: TStrings;
   AJSON: TJSONArray);
 begin
+  AObject.Clear;
   for var LJSONItem in AJSON do
   begin
     if LJSONItem is not TJSONString then

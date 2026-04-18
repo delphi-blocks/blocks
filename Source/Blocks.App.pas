@@ -358,12 +358,22 @@ procedure TInitCommand.Execute;
 begin
   inherited;
   ShowBanner('', '');
-  TConsole.WriteLine('Initialising workspace: ' + GetCurrentDir, clWhite);
-  TConsole.WriteLine;
-  TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey);
-  TConsole.WriteLine('Workspace initialised.', clGreen);
-  TConsole.WriteLine;
-  Exit;
+  if TDirectory.Exists(TWorkspace.BlocksDir) then
+  begin
+    TConsole.Write('Workspace already initialised. Update package list? [Y/N] (default: Y): ');
+    var Confirm := TConsole.ReadLine;
+    if SameText(Trim(Confirm), 'N') then
+      raise Exception.Create('Operation cancelled.');
+    TWorkspace.Update(GetCurrentDir);
+  end
+  else
+  begin
+    TConsole.WriteLine('Initialising workspace: ' + GetCurrentDir, clWhite);
+    TConsole.WriteLine;
+    TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey);
+    TConsole.WriteLine('Workspace initialised.', clGreen);
+    TConsole.WriteLine;
+  end;
 end;
 
 procedure TInitCommand.ShowHelp;
@@ -480,7 +490,7 @@ begin
     TConsole.Write('Initialise workspace now? [Y/N] (default: N): ');
     var Confirm := TConsole.ReadLine;
     if not SameText(Trim(Confirm), 'Y') then
-      raise Exception.Create('Operation cancelled. Run "blocks -Init" to initialise the workspace first.');
+      raise Exception.Create('Operation cancelled. Run "blocks Init" to initialise the workspace first.');
     TWorkspace.Initialize(TWorkspace.WorkDir, '', '');
     TConsole.WriteLine;
   end;

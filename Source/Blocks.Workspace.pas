@@ -59,6 +59,9 @@ type
     /// </remarks>
     class procedure Initialize(const AWorkDir, AProduct, ARegistryKey: string); static;
 
+    /// <summary>Update the workspace by downloading the package list.</summary>
+    class procedure Update(const AWorkDir: string); static;
+
     /// <summary>Downloads, compiles and registers a package in the workspace.</summary>
     /// <param name="APackageName">Package identifier (without version suffix).</param>
     /// <param name="AVersionConstraint">Version constraint string (e.g. <c>1.2.0</c>, <c>>=1.0.0</c>); empty for any version.</param>
@@ -459,6 +462,19 @@ begin
   finally
     LManifest.Free;
   end;
+end;
+
+class procedure TWorkspace.Update(const AWorkDir: string);
+begin
+  var RepoDir := TPath.Combine(GetBlocksDir, 'repository');
+  if not TDirectory.Exists(RepoDir) then
+    raise Exception.Create('Repository not found.');
+
+  if TDirectory.Exists(RepoDir) then
+  TDirectory.Delete(RepoDir, True);
+
+  for var LSource in Config.Sources do
+    InitializeFromSource(LSource);
 end;
 
 { TConfig }
