@@ -284,7 +284,7 @@ end;
 
 class function TJsonHelper.PrettyPrint(AJSON: TJSONValue): string;
 begin
-
+  Result := TJsonHelper.PrettyPrint(AJSON.ToJSON);
 end;
 
 class function TJsonHelper.JSONToObject<T>(AJson: TJSONValue): T;

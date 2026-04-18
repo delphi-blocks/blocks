@@ -97,7 +97,7 @@ begin
   var LJSON := TJsonHelper.ObjectToJSON(Self) as TJSONObject;
   try
     LJSON.AddPair('$schema', DatabaseSchemaUrl);
-    TFile.WriteAllText(FDatabasePath, LJSON.ToJSON);
+    TFile.WriteAllText(FDatabasePath, TJsonHelper.PrettyPrint(LJSON));
   finally
     LJSON.Free;
   end;

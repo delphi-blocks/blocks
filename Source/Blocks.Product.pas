@@ -21,13 +21,38 @@ uses
   Blocks.Database,
   Blocks.Manifest;
 
-/// <summary>Represents a single Delphi/RAD Studio installation.</summary>
-/// <remarks>
-///   The class constructor populates <see cref="Products"/> with one TProduct
-///   per installed IDE found in the Windows registry, sorted newest-first.
-///   The list lives for the lifetime of the process.
-/// </remarks>
 type
+  // -----------------------------------------------------------------------
+  // Reads compiler directives from a Delphi .dpk package source file.
+  // Directives are stored as NAME=VALUE in Directives (names uppercased).
+  // Flag-only directives (e.g. {$DESIGNONLY}) are stored with an empty value.
+  // -----------------------------------------------------------------------
+  TDelphiPackage = class
+  private
+    FDirectives: TStringList;
+    FFileName: string;
+    function GetDirectiveValue(const AName: string): string;
+    function GetIsDebug: Boolean;
+    function GetDescription: string;
+    function GetLibSuffix: string;
+    function GetIsDesignOnly: Boolean;
+    function GetImplicitBuild: string;
+    function GetName: string;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    class function LoadFromFile(const AFileName: string): TDelphiPackage;
+    property FileName: string read FFileName;
+    property Name: string read GetName;
+    property Directives: TStringList read FDirectives;
+    property IsDebug: Boolean read GetIsDebug;
+    property Description: string read GetDescription;
+    property LibSuffix: string read GetLibSuffix;
+    property IsDesignOnly: Boolean read GetIsDesignOnly;
+    property ImplicitBuild: string read GetImplicitBuild;
+  end;
+
+  /// <summary>Represents a single Delphi/RAD Studio installation.</summary>
   TProduct = class
   private
     FBdsVersion: string;
@@ -35,12 +60,18 @@ type
     FDisplayName: string;
     FRootDir: string;
     FRegistryKey: string;
+    FPackageVersion: string;
 
     class var
       FProducts: TObjectList<TProduct>;
 
-    class procedure LoadProducts;
     function GetRank: Integer;
+    function ExpandEnvironment(const AValue: string): string;
+    function GetDefaultBPLOutputDirectory(const APlatform: string): string;
+    function GetKnownPackageRegKey(const APlatform: string): string;
+    function GetBPLFileName(APackage: TDelphiPackage; const APlatform: string): string;
+
+    class procedure LoadProducts;
     class function GetProductNames: TArray<string>; static;
 
   public
@@ -111,6 +142,12 @@ type
 
     /// <summary>Delete source, browsing, and debug DCU paths from the Delphi library registry.</summary>
     procedure DeleteSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform);
+
+    /// <summary>Register package inside the Delphi IDE.</summary>
+    procedure InstallPackage(APackage: TManifestPackage; const ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
+
+    /// <summary>Unregister package from the Delphi IDE.</summary>
+    procedure UninstallPackage(APackage: TManifestPackage; const ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
 
     /// <summary>All installed Delphi/RAD Studio products, sorted newest-first.</summary>
     class property Products: TObjectList<TProduct> read FProducts;
@@ -262,6 +299,105 @@ begin
   CloseHandle(hRead);
 end;
 
+// -- TDelphiPackage ------------------------------------------------------------
+
+constructor TDelphiPackage.Create;
+begin
+  inherited Create;
+  FDirectives := TStringList.Create;
+end;
+
+destructor TDelphiPackage.Destroy;
+begin
+  FDirectives.Free;
+  inherited;
+end;
+
+class function TDelphiPackage.LoadFromFile(const AFileName: string): TDelphiPackage;
+var
+  LContent: string;
+  LPos, LEnd: Integer;
+  LDirective, LName, LValue: string;
+  LSepPos: Integer;
+begin
+  Result := TDelphiPackage.Create;
+  try
+    Result.FFileName := AFileName;
+    LContent := TFile.ReadAllText(AFileName);
+    LPos := 0;
+    while LPos < LContent.Length do
+    begin
+      LPos := LContent.IndexOf('{$', LPos);
+      if LPos < 0 then
+        Break;
+      LEnd := LContent.IndexOf('}', LPos + 2);
+      if LEnd < 0 then
+        Break;
+      LDirective := LContent.Substring(LPos + 2, LEnd - LPos - 2).Trim;
+      LSepPos := LDirective.IndexOf(' ');
+      if LSepPos < 0 then
+      begin
+        LName  := LDirective;
+        LValue := '';
+      end
+      else
+      begin
+        LName  := LDirective.Substring(0, LSepPos);
+        LValue := LDirective.Substring(LSepPos + 1).Trim;
+        if (LValue.Length >= 2) and (LValue.Chars[0] = '''') and
+            (LValue.Chars[LValue.Length - 1] = '''') then
+          LValue := LValue.Substring(1, LValue.Length - 2);
+      end;
+      Result.FDirectives.Add(LName.ToUpper + '=' + LValue);
+      LPos := LEnd + 1;
+    end;
+  except
+    Result.Free;
+    raise;
+  end;
+end;
+
+function TDelphiPackage.GetDirectiveValue(const AName: string): string;
+begin
+  Result := FDirectives.Values[AName.ToUpper];
+end;
+
+function TDelphiPackage.GetIsDebug: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to FDirectives.Count - 1 do
+    if SameText(FDirectives.Names[I], 'DEFINE') and
+        SameText(FDirectives.ValueFromIndex[I], 'DEBUG') then
+      Exit(True);
+end;
+
+function TDelphiPackage.GetDescription: string;
+begin
+  Result := GetDirectiveValue('DESCRIPTION');
+end;
+
+function TDelphiPackage.GetLibSuffix: string;
+begin
+  Result := GetDirectiveValue('LIBSUFFIX');
+end;
+
+function TDelphiPackage.GetName: string;
+begin
+  Result := ExtractFileName(ChangeFileExt(FFileName, ''));
+end;
+
+function TDelphiPackage.GetIsDesignOnly: Boolean;
+begin
+  Result := FDirectives.IndexOfName('DESIGNONLY') >= 0;
+end;
+
+function TDelphiPackage.GetImplicitBuild: string;
+begin
+  Result := GetDirectiveValue('IMPLICITBUILD');
+end;
+
 // -- TProduct ------------------------------------------------------------------
 
 constructor TProduct.Create(const ABdsVersion, AVersionName, ADisplayName, ARootDir, ARegistryKey: string);
@@ -272,6 +408,8 @@ begin
   FDisplayName := ADisplayName;
   FRootDir := ARootDir;
   FRegistryKey := ARegistryKey;
+  if not PackageVersion.TryGetValue(FVersionName, FPackageVersion) then
+    FPackageVersion := StringReplace(FBdsVersion, '.', '', [rfReplaceAll]);
 end;
 
 class constructor TProduct.Create;
@@ -334,6 +472,12 @@ end;
 class destructor TProduct.Destroy;
 begin
   FProducts.Free;
+end;
+
+function TProduct.ExpandEnvironment(const AValue: string): string;
+begin
+  Result := AValue;
+  Result := StringReplace(Result, '$(BDSCOMMONDIR)', TPath.Combine([TPath.GetSharedDocumentsPath, 'Embarcadero', 'Studio', FBdsVersion]), [rfReplaceAll, rfIgnoreCase]);
 end;
 
 function TProduct.GetRank: Integer;
@@ -496,6 +640,40 @@ begin
   Result := FProducts[0];
 end;
 
+procedure TProduct.InstallPackage(APackage: TManifestPackage;
+  const ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
+begin
+  if not APackage.IsDesignTime then
+    Exit;
+
+  var LPackage := TDelphiPackage.LoadFromFile(ChangeFileExt(ADprojPath, '.dpk'));
+  try
+    var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
+    try
+      LReg.RootKey := HKEY_CURRENT_USER;
+
+      var LKnowPackageRegPath := GetKnownPackageRegKey(APlatformPair.Key);
+      if LKnowPackageRegPath = '' then
+        Exit;
+
+      if not LReg.OpenKey(LKnowPackageRegPath, False) then
+        raise Exception.CreateFmt('Cannot open registry key "%s"', [LKnowPackageRegPath]);
+
+      var LPackagePath := GetBPLFileName(LPackage, APlatformPair.Key);
+      if not FileExists(LPackagePath) then
+        raise Exception.CreateFmt('Package bpl not found "%s"', [LPackagePath]);
+
+      LReg.WriteString(LPackagePath, LPackage.Description);
+
+      LReg.CloseKey;
+    finally
+      LReg.Free;
+    end;
+  finally
+    LPackage.Free;
+  end;
+end;
+
 function TProduct.IsRunning: Boolean;
 var
   Snapshot: THandle;
@@ -540,6 +718,53 @@ begin
   finally
     CloseHandle(Snapshot);
   end;
+end;
+
+function TProduct.GetBPLFileName(APackage: TDelphiPackage; const APlatform: string): string;
+begin
+  var LPackageNameSuffix := APackage.LibSuffix;
+  if SameText(LPackageNameSuffix, 'AUTO') then
+    LPackageNameSuffix := FPackageVersion;
+
+  var LDefaultBplOutputDirectory := GetDefaultBPLOutputDirectory(APlatform);
+  var LPackageFileName := APackage.Name + LPackageNameSuffix + '.bpl';
+  Result := ExpandEnvironment(TPath.Combine(LDefaultBplOutputDirectory, LPackageFileName));
+end;
+
+function TProduct.GetDefaultBPLOutputDirectory(const APlatform: string): string;
+begin
+  var LBplOutputRegKey := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\library\' + APlatform;
+
+  var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
+  try
+    LReg.RootKey := HKEY_CURRENT_USER;
+
+    if not LReg.OpenKey(LBplOutputRegKey, False) then
+      raise Exception.CreateFmt('Cannot open registry key "%s"', [LBplOutputRegKey]);
+    Result := LReg.ReadString('Package DPL Output');
+
+    LReg.CloseKey;
+  finally
+    LReg.Free;
+  end;
+end;
+
+function TProduct.GetKnownPackageRegKey(const APlatform: string): string;
+begin
+  // Delphi supports two registry keys for design-time packages
+  // 'Known Packages': for the 32-bit IDE
+  // 'Known Packages x64': for the 64-bit IDE
+  // Other platforms are not supported at the moment
+  var LPlatformRegKey := '';
+  if SameText(APlatform, 'Win32') then
+    LPlatformRegKey := 'Known Packages'
+  else if SameText(APlatform, 'Win64') then
+    LPlatformRegKey := 'Known Packages x64'
+  else
+    // Manifest is misconfigured. Should I raise an exception?
+    Exit('');
+
+  Result := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\' + LPlatformRegKey;
 end;
 
 function TProduct.GetPackageFolder(APackageFolders: TDictionary<string, string>): string;
@@ -609,6 +834,40 @@ begin
     end;
   finally
     Reg.Free;
+  end;
+end;
+
+procedure TProduct.UninstallPackage(APackage: TManifestPackage;
+  const ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
+begin
+  if not APackage.IsDesignTime then
+    Exit;
+
+  var LPackage := TDelphiPackage.LoadFromFile(ChangeFileExt(ADprojPath, '.dpk'));
+  try
+    var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
+    try
+      LReg.RootKey := HKEY_CURRENT_USER;
+
+      var LKnowPackageRegPath := GetKnownPackageRegKey(APlatformPair.Key);
+      if LKnowPackageRegPath = '' then
+        Exit;
+
+      if not LReg.OpenKey(LKnowPackageRegPath, False) then
+        raise Exception.CreateFmt('Cannot open registry key "%s"', [LKnowPackageRegPath]);
+
+      var LPackagePath := GetBPLFileName(LPackage, APlatformPair.Key);
+      if not FileExists(LPackagePath) then
+        raise Exception.CreateFmt('Package bpl not found "%s"', [LPackagePath]);
+
+      LReg.DeleteValue(LPackagePath);
+
+      LReg.CloseKey;
+    finally
+      LReg.Free;
+    end;
+  finally
+    LPackage.Free;
   end;
 end;
 
@@ -707,14 +966,14 @@ begin
 
   for var LPlatformPair in APlatforms do
   begin
-    var Plat := LPlatformPair.Value;
+    var LPlatform := LPlatformPair.Value;
 
     TConsole.WriteLine('  [' + LPlatformPair.Key + ']', clDkCyan);
 
-    for var Pkg in APackages do
+    for var LPackage in APackages do
     begin
-      var PkgName := Pkg.Name;
-      var TypeStr := string.Join(', ', Pkg.&Type.ToStringArray);
+      var PkgName := LPackage.Name;
+      var TypeStr := string.Join(', ', LPackage.&Type.ToStringArray);
 
       var DprojPath := TPath.Combine(PackagesPath, PkgName + '.dproj');
       if not TFile.Exists(DprojPath) then
@@ -742,9 +1001,10 @@ begin
             TConsole.WriteLine('      ' + Line, clRed);
         raise Exception.CreateFmt('Compilation failed on package "%s" for platform "%s".', [PkgName, LPlatformPair.Key]);
       end;
+      InstallPackage(LPackage, DprojPath, LPlatformPair);
     end;
 
-    UpdateSearchPaths(LPlatformPair.Key, AProjectDir, Plat);
+    UpdateSearchPaths(LPlatformPair.Key, AProjectDir, LPlatform);
   end;
 
   TConsole.WriteLine;

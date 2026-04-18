@@ -84,6 +84,9 @@ type
     constructor Create;
     destructor Destroy; override;
 
+    function IsDesignTime: Boolean;
+    function IsRuntime: Boolean;
+
     property Name: string read FName write FName;
     property &Type: TStringList read FType;
   end;
@@ -224,6 +227,16 @@ destructor TManifestPackage.Destroy;
 begin
   FType.Free;
   inherited;
+end;
+
+function TManifestPackage.IsDesignTime: Boolean;
+begin
+  Result := &Type.Contains('designtime');
+end;
+
+function TManifestPackage.IsRuntime: Boolean;
+begin
+  Result := &Type.Contains('runtime');
 end;
 
 { TManifestPackageList }

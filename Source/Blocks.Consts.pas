@@ -46,6 +46,7 @@ var
 var
   BdsToVersion: TDictionary<string, string>;
   VersionNames: TDictionary<string, string>;
+  PackageVersion: TDictionary<string, string>;
 
 // -- Utility ------------------------------------------------------------------
 
@@ -106,11 +107,26 @@ initialization
   VersionNames.Add('delphi11', 'Delphi 11 Alexandria');
   VersionNames.Add('delphi12', 'Delphi 12 Athens');
   VersionNames.Add('delphi13', 'Delphi 13');
+  VersionNames := TDictionary<string, string>.Create;
+
+  PackageVersion := TDictionary<string, string>.Create;
+  PackageVersion.Add('delphixe6', '200');
+  PackageVersion.Add('delphixe7', '210');
+  PackageVersion.Add('delphixe8', '220');
+  PackageVersion.Add('delphi10', '230');
+  PackageVersion.Add('delphi101', '240');
+  PackageVersion.Add('delphi102', '250');
+  PackageVersion.Add('delphi103', '260');
+  PackageVersion.Add('delphi104', '270');
+  PackageVersion.Add('delphi11', '280');
+  PackageVersion.Add('delphi12', '290');
+  PackageVersion.Add('delphi13', '370');
 
   AppExeName := ExtractFileName(ChangeFileExt(ParamStr(0), ''));
 
 finalization
   BdsToVersion.Free;
   VersionNames.Free;
+  PackageVersion.Free;
 
 end.

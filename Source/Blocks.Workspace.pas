@@ -400,7 +400,7 @@ begin
   var LProduct := Config.Product;
   if LProduct = '' then
     raise Exception.Create(
-        'No Delphi version configured. Run "blocks init -product <version>" first.');
+        'No Delphi version configured. Run "blocks init /product <version>" first.');
   var LSelectedProduct := TProduct.FindByNameAndKey(LProduct, Config.RegistryKey);
   TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
   if not SameText(LSelectedProduct.RegistryKey, 'BDS') then
@@ -418,8 +418,24 @@ begin
 
   var LManifest := TManifest.GetManifest(APackageName, LInstalledVer);
   try
-    // Step 5 — Remove project directory
     var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
+
+    // Step 5 - Unregister all packages
+    for var LPackage in LManifest.Packages do
+    begin
+      if LPackage.IsDesignTime then
+      begin
+        for var LPlatform in LManifest.Platforms do
+        begin
+          var LPackageFolder := LSelectedProduct.GetPackageFolder(LManifest.PackageOptions.Folders);
+          var PackagesPath := TPath.Combine(TPath.Combine(LProjectDir, 'packages'), LPackageFolder);
+          var DprojPath := TPath.Combine(PackagesPath, LPackage.Name + '.dproj');
+          LSelectedProduct.UninstallPackage(LPackage, DprojPath, LPlatform);
+        end;
+      end;
+    end;
+
+    // Step 6 — Remove project directory
     if TDirectory.Exists(LProjectDir) then
     begin
       TDirectory.Delete(LProjectDir, True);
@@ -527,7 +543,7 @@ begin
   var LJSON := TJsonHelper.ObjectToJSON(Self) as TJSONObject;
   try
     LJSON.AddPair('$schema', WorkspaceSchemaUrl);
-    TFile.WriteAllText(ConfigPath, LJSON.ToJSON);
+    TFile.WriteAllText(ConfigPath, TJsonHelper.PrettyPrint(LJSON));
   finally
     LJSON.Free;
   end;
