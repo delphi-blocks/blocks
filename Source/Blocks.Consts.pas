@@ -107,7 +107,6 @@ initialization
   VersionNames.Add('delphi11', 'Delphi 11 Alexandria');
   VersionNames.Add('delphi12', 'Delphi 12 Athens');
   VersionNames.Add('delphi13', 'Delphi 13');
-  VersionNames := TDictionary<string, string>.Create;
 
   PackageVersion := TDictionary<string, string>.Create;
   PackageVersion.Add('delphixe6', '200');

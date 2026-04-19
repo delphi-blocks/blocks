@@ -21,6 +21,9 @@ uses
   Blocks.GitHub in 'Blocks.GitHub.pas';
 
 begin
+  {$IFDEF DEBUG}
+  ReportMemoryLeaksOnShutdown := True;
+  {$ENDIF}
   try
     TApp.RunBlocks;
   except
