@@ -346,36 +346,57 @@ begin
 end;
 
 procedure TConsoleWriter.WriteProgress(const ACount, ASize: Int64);
+const
+  CFilled: Char = #$2588; // full block
+  CEmpty: Char = #$2591;  // light shade
 var
-  Progress: Integer;
-  Filled: Integer;
+  LProgress: Integer;
+  LFilled: Integer;
+  LHeight: Integer;
+  LCount: Int64;
 begin
   if ACount < 1 then
   begin
-    var Height: Integer;
-    GetScreenBufferSize(FBarWidth, Height);
-    FBarWidth := FBarWidth - 10;
+    FBarWidth := 0;
     FLastProgress := 0;
     Exit;
   end;
 
-  if ACount > ASize then
+  if FBarWidth = 0 then
+  begin
+    GetScreenBufferSize(FBarWidth, LHeight);
+    FBarWidth := FBarWidth - 30;
+    if FBarWidth < 10 then
+      FBarWidth := 10;
+  end;
+
+  if ASize <= 0 then
+  begin
+    // Indeterminate: server didn't send Content-Length (e.g. chunked transfer)
+    if ACount - FLastProgress < 4096 then
+      Exit;
+    FLastProgress := ACount;
+    Write(#13);
+    Write(Format('%d KB received', [ACount div 1024]), clCyan);
+    Exit;
+  end;
+
+  LCount := ACount;
+  if LCount > ASize then
+    LCount := ASize;
+
+  LProgress := Trunc((LCount / ASize) * 100);
+  if LProgress <= FLastProgress then
     Exit;
 
-  Progress := Trunc((ACount / ASize) * 100);
-  if Progress <= FLastProgress then
-    Exit;
+  FLastProgress := LProgress;
 
-  FLastProgress := Progress;
+  LFilled := Trunc(LProgress / 100 * FBarWidth);
 
-  Filled := Trunc(Progress / 100 * FBarWidth);
-
-  Write(#13'[' +
-    StringOfChar('#', Filled) +
-    StringOfChar(' ', FBarWidth - Filled) +
-    '] ' +
-    Format('%3d%%', [Round(Progress)])
-  );
+  Write(#13 + '[');
+  Write(StringOfChar(CFilled, LFilled), clGreen);
+  Write(StringOfChar(CEmpty, FBarWidth - LFilled), clDkGray);
+  Write(Format('] %3d%%  %d KB', [LProgress, LCount div 1024]));
 end;
 
 { TStdOutConsole }
