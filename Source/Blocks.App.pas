@@ -74,6 +74,8 @@ type
     FProduct: string;
     [Param('registrykey')]
     FRegistryKey: string;
+    [Param('canonical')]
+    FCanonical: Boolean;
   public
     procedure Execute; override;
     procedure ShowHelp; override;
@@ -370,7 +372,7 @@ begin
   begin
     TConsole.WriteLine('Initialising workspace: ' + GetCurrentDir, clWhite);
     TConsole.WriteLine;
-    TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey);
+    TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey, FCanonical);
     TConsole.WriteLine('Workspace initialised.', clGreen);
     TConsole.WriteLine;
   end;
@@ -387,10 +389,11 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('Options:', clWhite);
   WriteOption('/product <version>', 'Target Delphi version (e.g. delphi12, delphi13).');
-  WriteOption('', 'If omitted you will be prompted to choose.');
+  WriteOption('', 'If omitted, you will be prompted to choose.');
   WriteOption('', 'Run "' + AppExeName + ' listproducts" to see valid values.');
   WriteOption('/registrykey <key>', 'Registry profile key (default: BDS).');
   WriteOption('', 'Use this when Delphi is started with -r <key>.');
+  WriteOption('/canonical', 'Use canonical BPL output structure without prompting.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' init');
@@ -491,7 +494,7 @@ begin
     var Confirm := TConsole.ReadLine;
     if not SameText(Trim(Confirm), 'Y') then
       raise Exception.Create('Operation cancelled. Run "blocks Init" to initialise the workspace first.');
-    TWorkspace.Initialize(TWorkspace.WorkDir, '', '');
+    TWorkspace.Initialize(TWorkspace.WorkDir, '', '', False);
     TConsole.WriteLine;
   end;
 end;
@@ -606,7 +609,7 @@ begin
           TWorkspace.Config.&Set(LKey, LValue);
         TWorkspace.Config.Save;
       end;
-      TConsole.WriteLine('Config applyed');
+      TConsole.WriteLine('Config applied');
     end;
   end;
 end;
@@ -756,11 +759,11 @@ begin
       begin
         TConsole.WriteLine('    ' + LPlat.Key, clCyan);
         if LPlat.Value.SourcePath.Count > 0 then
-          LField('      Source',   string.Join(', ', LPlat.Value.SourcePath.ToStringArray));
-        if LPlat.Value.BrowsingPath.Count > 0 then
-          LField('      Browsing', string.Join(', ', LPlat.Value.BrowsingPath.ToStringArray));
+          LField('      Source', string.Join(', ', LPlat.Value.SourcePath.ToStringArray));
+        if LPlat.Value.ReleaseDCUPath.Count > 0 then
+          LField('      Release DCUs', string.Join(', ', LPlat.Value.ReleaseDCUPath.ToStringArray));
         if LPlat.Value.DebugDCUPath.Count > 0 then
-          LField('      Debug',    string.Join(', ', LPlat.Value.DebugDCUPath.ToStringArray));
+          LField('      Debug DCUs', string.Join(', ', LPlat.Value.DebugDCUPath.ToStringArray));
       end;
     end;
 
@@ -845,7 +848,7 @@ end;
 
 class procedure TSystemConfig.Add(const AKey, AValue: string);
 begin
-  raise Exception.Create('Not yet implemented');
+  raise Exception.CreateFmt('System config key "%s" does not support multiple values.', [AKey]);
 end;
 
 class function TSystemConfig.Get(const AKey: string): string;

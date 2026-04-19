@@ -57,7 +57,7 @@ type
     ///   4. Extracts the archive and installs <c>repository\</c> under <see cref="BlocksDir"/>.
     ///   Prompts the user before overwriting an existing repository folder.
     /// </remarks>
-    class procedure Initialize(const AWorkDir, AProduct, ARegistryKey: string); static;
+    class procedure Initialize(const AWorkDir, AProduct, ARegistryKey: string; ACanonical: Boolean); static;
 
     /// <summary>Update the workspace by downloading the package list.</summary>
     class procedure Update(const AWorkDir: string); static;
@@ -92,9 +92,11 @@ type
     FSources: TStringList;
     FProduct: string;
     FRegistryKey: string;
+    FCanonical: Boolean;
     function ConfigPath: string;
   public
     property Sources: TStringList read FSources;
+    property Canonical: Boolean read FCanonical write FCanonical;
 
     property Product: string read FProduct write FProduct;
     property RegistryKey: string read FRegistryKey write FRegistryKey;
@@ -178,7 +180,7 @@ begin
   FWorkDir := ExcludeTrailingPathDelimiter(AValue);
 end;
 
-class procedure TWorkspace.Initialize(const AWorkDir, AProduct, ARegistryKey: string);
+class procedure TWorkspace.Initialize(const AWorkDir, AProduct, ARegistryKey: string; ACanonical: Boolean);
 begin
   SetWorkDir(AWorkDir);
 
@@ -186,6 +188,20 @@ begin
   begin
     TDirectory.CreateDirectory(GetBlocksDir);
     TConsole.WriteLine('Created: ' + GetBlocksDir, clGreen);
+  end;
+
+  Config.Canonical := ACanonical;
+  if not ACanonical then
+  begin
+    TConsole.WriteLine('DelphiBlocks supports canonical form. If you choose to use it', clGreen);
+    TConsole.WriteLine('you can install multiple versions of the same package across', clGreen);
+    TConsole.WriteLine('different Delphi versions and registry keys without conflict', clGreen);
+    TConsole.Write('Do you want to use canonical structure? [Y/N] (default: Y): ');
+    var Confirm := TConsole.ReadLine;
+    if not SameText(Trim(Confirm), 'N') then
+    begin
+      Config.Canonical := True;
+    end;
   end;
 
   // Select Delphi version and persist both version name and registry key
@@ -373,7 +389,7 @@ begin
     end;
 
     // Step 8 — Compile
-    LSelectedProduct.BuildPackages(LProjectDir, LPackageFolder, LManifest.Packages, LManifest.Platforms);
+    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LPackageFolder, LManifest.Packages, LManifest.Platforms, Config.Canonical);
 
     // Step 9 — Update database
     if not ABuildOnly then
@@ -433,7 +449,7 @@ begin
           var LPackageFolder := LSelectedProduct.GetPackageFolder(LManifest.PackageOptions.Folders);
           var PackagesPath := TPath.Combine(TPath.Combine(LProjectDir, 'packages'), LPackageFolder);
           var DprojPath := TPath.Combine(PackagesPath, LPackage.Name + '.dproj');
-          LSelectedProduct.UninstallPackage(LPackage, DprojPath, LPlatform);
+          LSelectedProduct.UninstallPackage(LPackage, WorkDir, DprojPath, LPlatform, Config.Canonical);
         end;
       end;
     end;
@@ -447,13 +463,13 @@ begin
     else
       TConsole.WriteLine('Directory not found: ' + LProjectDir, clYellow);
 
-    // Step 6 - Remove search paths from every platform
+    // Step 7 - Remove search paths from every platform
     for var LPlatform in LManifest.Platforms do
     begin
-      LSelectedProduct.DeleteSearchPaths(LPlatform.Key, LProjectDir, LPlatform.Value);
+      LSelectedProduct.DeleteSearchPaths(LPlatform.Key, LProjectDir, LPlatform.Value, Config.Canonical);
     end;
 
-    // Step 7 — Remove from database
+    // Step 8 — Remove from database
     Database.RemoveEntry(LManifest.Id);
 
     TConsole.WriteLine;
@@ -469,9 +485,6 @@ begin
   var RepoDir := TPath.Combine(GetBlocksDir, 'repository');
   if not TDirectory.Exists(RepoDir) then
     raise Exception.Create('Repository not found.');
-
-  if TDirectory.Exists(RepoDir) then
-  TDirectory.Delete(RepoDir, True);
 
   for var LSource in Config.Sources do
     InitializeFromSource(LSource);
@@ -492,6 +505,8 @@ begin
     FProduct := AValue
   else if SameText(AKey, 'registrykey') then
     FRegistryKey := AValue
+  else if SameText(AKey, 'canonical') then
+    FCanonical := StrToBool(AValue)
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;
@@ -501,7 +516,7 @@ begin
   if SameText(AKey, 'sources') then
     FSources.Add(AValue)
   else
-    raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
+    raise Exception.CreateFmt('Config "%s" does not exists or doesn''t support /ADD', [AKey]);
 end;
 
 function TConfig.ConfigPath: string;
@@ -534,6 +549,8 @@ begin
     Result := FProduct
   else if SameText(AKey, 'registrykey') then
     Result := FRegistryKey
+  else if SameText(AKey, 'canonical') then
+    Result := BoolToStr(FCanonical, True)
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;

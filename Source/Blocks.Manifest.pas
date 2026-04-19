@@ -48,14 +48,14 @@ type
   TManifestPlatform = class
   private
     FSourcePath: TStringList;
-    FBrowsingPath: TStringList;
+    FReleaseDCUPath: TStringList;
     FDebugDCUPath: TStringList;
   public
     constructor Create;
     destructor Destroy; override;
 
     property SourcePath: TStringList read FSourcePath;
-    property BrowsingPath: TStringList read FBrowsingPath;
+    property ReleaseDCUPath: TStringList read FReleaseDCUPath;
     property DebugDCUPath: TStringList read FDebugDCUPath;
   end;
 
@@ -196,14 +196,14 @@ constructor TManifestPlatform.Create;
 begin
   inherited Create;
   FSourcePath   := TStringList.Create;
-  FBrowsingPath := TStringList.Create;
+  FReleaseDCUPath := TStringList.Create;
   FDebugDCUPath := TStringList.Create;
 end;
 
 destructor TManifestPlatform.Destroy;
 begin
   FSourcePath.Free;
-  FBrowsingPath.Free;
+  FReleaseDCUPath.Free;
   FDebugDCUPath.Free;
   inherited;
 end;

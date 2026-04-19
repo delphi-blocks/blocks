@@ -69,7 +69,7 @@ type
     function ExpandEnvironment(const AValue: string): string;
     function GetDefaultBPLOutputDirectory(const APlatform: string): string;
     function GetKnownPackageRegKey(const APlatform: string): string;
-    function GetBPLFileName(APackage: TDelphiPackage; const APlatform: string): string;
+    function GetBPLFileName(const AWorkspaceDir: string; APackage: TDelphiPackage; const APlatform: string; ACanonical: Boolean): string;
 
     class procedure LoadProducts;
     class function GetProductNames: TArray<string>; static;
@@ -125,9 +125,10 @@ type
     /// <param name="APlatforms">Target platform configurations from the manifest.</param>
     /// <exception cref="Exception">Raised when a platform is not installed or a package fails to compile.</exception>
     procedure BuildPackages(
-        const AProjectDir, APackageFolder: string;
+        const AWorkspaceDir, AProjectDir, APackageFolder: string;
         const APackages: TManifestPackageList;
-        const APlatforms: TSupportedPlatforms
+        const APlatforms: TSupportedPlatforms;
+        ACanonical: Boolean
     );
 
     /// <summary>Appends source, browsing, and debug DCU paths to the Delphi library registry.</summary>
@@ -138,16 +139,16 @@ type
     ///   Already-present entries are skipped. Writes to
     ///   <c>HKCU\Software\Embarcadero\BDS\&lt;BdsVersion&gt;\Library\&lt;Platform&gt;</c>.
     /// </remarks>
-    procedure UpdateSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform);
+    procedure UpdateSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform; ACanonical: Boolean);
 
     /// <summary>Delete source, browsing, and debug DCU paths from the Delphi library registry.</summary>
-    procedure DeleteSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform);
+    procedure DeleteSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform; ACanonical: Boolean);
 
     /// <summary>Register package inside the Delphi IDE.</summary>
-    procedure InstallPackage(APackage: TManifestPackage; const ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
+    procedure InstallPackage(APackage: TManifestPackage; const AWorkspaceDir, ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>; ACanonical: Boolean);
 
     /// <summary>Unregister package from the Delphi IDE.</summary>
-    procedure UninstallPackage(APackage: TManifestPackage; const ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
+    procedure UninstallPackage(APackage: TManifestPackage; const AWorkspaceDir, ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>; ACanonical: Boolean);
 
     /// <summary>All installed Delphi/RAD Studio products, sorted newest-first.</summary>
     class property Products: TObjectList<TProduct> read FProducts;
@@ -175,8 +176,7 @@ uses
 
   Blocks.Consts,
   Blocks.Console,
-  Blocks.Http,
-  Blocks.Workspace;
+  Blocks.Http;
 
 // -- WinAPI declarations missing from older Delphi headers --------------------
 
@@ -419,7 +419,7 @@ begin
 end;
 
 procedure TProduct.DeleteSearchPaths(const APlatform, AProjectDir: string;
-  const APlatformConfig: TManifestPlatform);
+  const APlatformConfig: TManifestPlatform; ACanonical: Boolean);
 
   procedure RemovePaths(AReg: TRegistry; APaths: TStrings; const ARegValue: string);
   begin
@@ -459,9 +459,25 @@ begin
     if not Reg.OpenKey(RegPath, False) then
       Exit;
 
-    RemovePaths(Reg, APlatformConfig.SourcePath, 'Search Path');
-    RemovePaths(Reg, APlatformConfig.BrowsingPath, 'Browsing Path');
-    RemovePaths(Reg, APlatformConfig.DebugDCUPath, 'Debug DCU Path');
+    if ACanonical then
+    begin
+      var LPath := TStringList.Create;
+      try
+        LPath.Text := TPath.Combine('lib', APlatform);
+        RemovePaths(Reg, LPath, 'Search Path');
+        LPath.Text := TPath.Combine('lib', APlatform, 'debug');
+        RemovePaths(Reg, LPath, 'Debug DCU Path');
+      finally
+        LPath.Free;
+      end;
+      RemovePaths(Reg, APlatformConfig.SourcePath, 'Browsing Path');
+    end
+    else
+    begin
+      RemovePaths(Reg, APlatformConfig.ReleaseDCUPath, 'Search Path');
+      RemovePaths(Reg, APlatformConfig.SourcePath, 'Browsing Path');
+      RemovePaths(Reg, APlatformConfig.DebugDCUPath, 'Debug DCU Path');
+    end;
 
     Reg.CloseKey;
   finally
@@ -641,7 +657,8 @@ begin
 end;
 
 procedure TProduct.InstallPackage(APackage: TManifestPackage;
-  const ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
+  const AWorkspaceDir, ADprojPath: string;
+  APlatformPair: TPair<string, TManifestPlatform>; ACanonical: Boolean);
 begin
   if not APackage.IsDesignTime then
     Exit;
@@ -659,7 +676,7 @@ begin
       if not LReg.OpenKey(LKnowPackageRegPath, False) then
         raise Exception.CreateFmt('Cannot open registry key "%s"', [LKnowPackageRegPath]);
 
-      var LPackagePath := GetBPLFileName(LPackage, APlatformPair.Key);
+      var LPackagePath := GetBPLFileName(AWorkspaceDir, LPackage, APlatformPair.Key, ACanonical);
       if not FileExists(LPackagePath) then
         raise Exception.CreateFmt('Package bpl not found "%s"', [LPackagePath]);
 
@@ -720,13 +737,18 @@ begin
   end;
 end;
 
-function TProduct.GetBPLFileName(APackage: TDelphiPackage; const APlatform: string): string;
+function TProduct.GetBPLFileName(const AWorkspaceDir: string; APackage: TDelphiPackage; const APlatform: string; ACanonical: Boolean): string;
 begin
   var LPackageNameSuffix := APackage.LibSuffix;
   if SameText(LPackageNameSuffix, 'AUTO') then
     LPackageNameSuffix := FPackageVersion;
 
-  var LDefaultBplOutputDirectory := GetDefaultBPLOutputDirectory(APlatform);
+  var LDefaultBplOutputDirectory: string;
+  if ACanonical then
+    LDefaultBplOutputDirectory := TPath.Combine(AWorkspaceDir, '.blocks', 'bpl')
+  else
+   LDefaultBplOutputDirectory := GetDefaultBPLOutputDirectory(APlatform);
+
   var LPackageFileName := APackage.Name + LPackageNameSuffix + '.bpl';
   Result := ExpandEnvironment(TPath.Combine(LDefaultBplOutputDirectory, LPackageFileName));
 end;
@@ -838,7 +860,8 @@ begin
 end;
 
 procedure TProduct.UninstallPackage(APackage: TManifestPackage;
-  const ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
+  const AWorkspaceDir, ADprojPath: string;
+  APlatformPair: TPair<string, TManifestPlatform>; ACanonical: Boolean);
 begin
   if not APackage.IsDesignTime then
     Exit;
@@ -856,11 +879,21 @@ begin
       if not LReg.OpenKey(LKnowPackageRegPath, False) then
         raise Exception.CreateFmt('Cannot open registry key "%s"', [LKnowPackageRegPath]);
 
-      var LPackagePath := GetBPLFileName(LPackage, APlatformPair.Key);
+      var LPackagePath := GetBPLFileName(AWorkspaceDir, LPackage, APlatformPair.Key, ACanonical);
       if not FileExists(LPackagePath) then
-        raise Exception.CreateFmt('Package bpl not found "%s"', [LPackagePath]);
+      begin
+        TConsole.WriteWarning(Format('Package BPL not found, skipping registry removal: "%s"', [LPackagePath]));
+        Exit;
+      end;
 
-      LReg.DeleteValue(LPackagePath);
+      if LReg.ValueExists(LPackagePath) then
+      begin
+        LReg.DeleteValue(LPackagePath);
+      end
+      else
+      begin
+        TConsole.WriteWarning(Format('Value "%s" not found in registry', [LPackagePath]));
+      end;
 
       LReg.CloseKey;
     finally
@@ -871,7 +904,7 @@ begin
   end;
 end;
 
-procedure TProduct.UpdateSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform);
+procedure TProduct.UpdateSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform; ACanonical: Boolean);
 
   procedure AppendPaths(AReg: TRegistry; APaths: TStrings; const ARegValue: string);
   begin
@@ -906,9 +939,25 @@ begin
     if not Reg.OpenKey(RegPath, False) then
       Exit;
 
-    AppendPaths(Reg, APlatformConfig.SourcePath, 'Search Path');
-    AppendPaths(Reg, APlatformConfig.BrowsingPath, 'Browsing Path');
-    AppendPaths(Reg, APlatformConfig.DebugDCUPath, 'Debug DCU Path');
+    if ACanonical then
+    begin
+      var LPath := TStringList.Create;
+      try
+        LPath.Text := TPath.Combine(AProjectDir, 'lib', APlatform);
+        AppendPaths(Reg, LPath, 'Search Path');
+        LPath.Text := TPath.Combine(AProjectDir, 'lib', APlatform, 'debug');
+        AppendPaths(Reg, LPath, 'Debug DCU Path');
+      finally
+        LPath.Free;
+      end;
+      AppendPaths(Reg, APlatformConfig.SourcePath, 'Browsing Path');
+    end
+    else
+    begin
+      AppendPaths(Reg, APlatformConfig.ReleaseDCUPath, 'Search Path');
+      AppendPaths(Reg, APlatformConfig.SourcePath, 'Browsing Path');
+      AppendPaths(Reg, APlatformConfig.DebugDCUPath, 'Debug DCU Path');
+    end;
 
     Reg.CloseKey;
   finally
@@ -917,11 +966,14 @@ begin
 end;
 
 procedure TProduct.BuildPackages(
-    const AProjectDir, APackageFolder: string;
+    const AWorkspaceDir, AProjectDir, APackageFolder: string;
     const APackages: TManifestPackageList;
-    const APlatforms: TSupportedPlatforms
+    const APlatforms: TSupportedPlatforms;
+    ACanonical: Boolean
 );
 begin
+  var BuildConfigs := ['debug', 'release'];
+  var BlocksDir := TPath.Combine(AWorkspaceDir, '.blocks');
   var BdsDir := FRootDir;
   var BdsCommonDir :=
       TPath.Combine(GetEnvironmentVariable('PUBLIC'), TPath.Combine('Documents\Embarcadero\Studio', FBdsVersion));
@@ -979,32 +1031,47 @@ begin
       if not TFile.Exists(DprojPath) then
         raise Exception.CreateFmt('Package not found: %s', [DprojPath]);
 
-      TConsole.Write(Format('    Building %s [%s]...', [PkgName, TypeStr]));
-
-      var CmdLine :=
-          Format(
-              '"%s" "%s" /t:Make /p:config=Release /p:platform=%s /nologo /v:quiet',
-              [MsBuild, DprojPath, LPlatformPair.Key]
-          );
-
-      var Output: string;
-      var ExitCode := RunProcessWithOutput(CmdLine, Output);
-
-      if ExitCode = 0 then
-        TConsole.WriteLine(' OK', clGreen)
-      else
+      for var LBuildConfig in BuildConfigs do
       begin
-        TConsole.WriteLine(' FAILED', clRed);
-        var Lines := Output.Split([sLineBreak, #13, #10], TStringSplitOptions.ExcludeEmpty);
-        for var Line in Lines do
-          if ContainsText(Line, 'error') then
-            TConsole.WriteLine('      ' + Line, clRed);
-        raise Exception.CreateFmt('Compilation failed on package "%s" for platform "%s".', [PkgName, LPlatformPair.Key]);
+        TConsole.Write(Format('    Building %s [%s/%s]...', [PkgName, TypeStr, LBuildConfig]));
+
+        var LMSBuildParams := '';
+        if ACanonical then
+        begin
+          var LDcuSuffix := if SameText(LBuildConfig, 'Debug')  then 'debug' else '';
+                            
+          LMSBuildParams :=
+            ' /p:DCC_DcuOutput="' + TPath.Combine(AProjectDir, 'lib', LPlatformPair.Key, LDcuSuffix) + '"' +
+            ' /p:DCC_BplOutput="' + TPath.Combine(BlocksDir, 'bpl') + '"' +
+            ' /p:DCC_DcpOutput="' + TPath.Combine(BlocksDir, 'dcp') + '"';
+        end;
+
+        var CmdLine :=
+            Format(
+                '"%s" "%s" /t:Make /p:config=%s /p:platform=%s %s /nologo /v:quiet',
+                [MsBuild, DprojPath, LBuildConfig, LPlatformPair.Key, LMSBuildParams]
+            );
+
+        var Output: string;
+        var ExitCode := RunProcessWithOutput(CmdLine, Output);
+
+        if ExitCode = 0 then
+          TConsole.WriteLine(' OK', clGreen)
+        else
+        begin
+          TConsole.WriteLine(' FAILED', clRed);
+          var Lines := Output.Split([sLineBreak, #13, #10], TStringSplitOptions.ExcludeEmpty);
+          for var Line in Lines do
+            if ContainsText(Line, 'error') then
+              TConsole.WriteLine('      ' + Line, clRed);
+          raise Exception.CreateFmt('Compilation failed on package "%s" for platform "%s".', [PkgName, LPlatformPair.Key]);
+        end;
       end;
-      InstallPackage(LPackage, DprojPath, LPlatformPair);
+
+      InstallPackage(LPackage, AWorkspaceDir, DprojPath, LPlatformPair, ACanonical);
     end;
 
-    UpdateSearchPaths(LPlatformPair.Key, AProjectDir, LPlatform);
+    UpdateSearchPaths(LPlatformPair.Key, AProjectDir, LPlatform, ACanonical);
   end;
 
   TConsole.WriteLine;

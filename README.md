@@ -51,7 +51,7 @@ REM Install a specific version
 blocks install owner.package@1.2.0
 
 REM Uninstall
-blocks uninstall owner.package /product delphi13
+blocks uninstall owner.package
 
 REM List installed packages
 blocks list
@@ -79,20 +79,114 @@ Append `@<constraint>` to a package ID to pin or restrict the version:
 
 > **Note:** In `cmd.exe` the `^` character must be escaped as `^^` (e.g. `owner.package@^^1.2.0`). In PowerShell no escaping is needed.
 
-## Building from source
+## Canonical mode
 
-All source files are under `Source/`. Open a command prompt there and run:
+When you run `blocks init` you are asked whether to use **canonical mode**. This setting is stored in the workspace configuration and applied to every subsequent `install` and `uninstall` in that workspace.
+
+### The problem canonical mode solves
+
+A Delphi package project (`.dproj`) declares its own output directories for `.dcu`, `.bpl`, and `.dcp` files. Those paths are usually relative, version-specific, or even hardcoded by the package author, and they vary widely across third-party libraries. When the same Delphi installation is used under different IDE registry profiles (created with `bds.exe -r <key>`), compiled artefacts from different profiles can collide or overwrite each other.
+
+### What canonical mode does
+
+In canonical mode **Blocks ignores the output paths declared inside the `.dproj`** and instead redirects all compiler output to a well-known directory tree under the workspace's `.blocks/` folder, regardless of what the package author has written:
+
+| Artefact | Output path |
+|----------|-------------|
+| Release DCUs | `<project>\lib\<Platform>\` |
+| Debug DCUs | `<project>\lib\<Platform>\debug\` |
+| BPL files | `.blocks\bpl\` |
+| DCP files | `.blocks\dcp\` |
+
+These paths are passed to MSBuild via `/p:DCC_DcuOutput`, `/p:DCC_BplOutput`, and `/p:DCC_DcpOutput`, so the package source itself never needs to be modified.
+
+Both the **debug** and **release** configurations are compiled for every package; the Delphi library registry entries point at the canonical paths above rather than at whatever the `.dproj` specifies.
+
+### When to use it
+
+Canonical mode (the default) makes the compiled output of every package homogeneous and predictable, regardless of how each package author configured the `.dproj`. This is especially useful when you need to install the same package — possibly in different versions — against the same Delphi installation but under different IDE registry profiles (created with `bds.exe -r <key>`): because each profile gets its own `.blocks\bpl\` and `.blocks\dcp\` trees, the artefacts do not collide.
+
+To enable or disable canonical mode after initialisation:
 
 ```bat
-REM Debug Win32 (default)
-DelphiBlocks.Build.130.bat
-
-REM Release Win32
-DelphiBlocks.Build.130.bat Make Release Win32
+blocks config canonical=True
+blocks config canonical=False
 ```
 
-Requires Delphi 13 Florence (`BDS=C:\Program Files (x86)\Embarcadero\Studio\37.0`).  
-The compiled executable (`Blocks.exe`) is placed in the project root.
+> **Warning:** changing this setting in a workspace that already has packages installed is dangerous: Blocks uses the flag to locate BPL/DCU files and registry paths during uninstall. Uninstall all packages before toggling it.
+
+## Package manifest
+
+Each package in the repository is described by a JSON manifest file (`<vendor>.<name>.manifest.json`). Below is an annotated example.
+
+```jsonc
+{
+  "$schema": "https://delphi-blocks.dev/schema/package.v1.json",
+  "id": "delphi-blocks.wirl",       // vendor.name identifier
+  "name": "WiRL",                    // human-readable name
+  "version": "4.6.0",
+  "description": "RESTful Library for Delphi",
+  "license": "Apache-2.0",
+  "homepage": "https://wirl.delphi-blocks.dev",
+  "author": "Paolo Rossi, Luca Minuti <info@lucaminuti.it>",
+  "keywords": ["rest", "http", "api"],
+
+  "repository": {
+    "type": "github",
+    "url": "https://github.com/delphi-blocks/WiRL/tree/v4.6.0"
+  },
+
+  // Platforms declare the source paths to add to the Delphi library search paths.
+  // In canonical mode the DCU output paths are ignored and overridden by Blocks.
+  "platforms": {
+    "Win32": {
+      "sourcePath":     ["Source\\Core", "Source\\Client"],
+      "releaseDCUPath": ["lib\\Win32\\release"],
+      "debugDCUPath":   ["lib\\Win32\\debug"]
+    }
+  },
+
+  // Each entry maps to a .dproj file under packages\<folder>\
+  "packages": [
+    { "name": "WiRL",       "type": ["runtime"] },
+    { "name": "WiRLDesign", "type": ["designtime"] }
+  ],
+
+  // Maps Delphi version names to the subfolder under packages\ that contains
+  // the .dproj files for that version. A trailing + means "this version or newer".
+  "packageOptions": {
+    "folders": {
+      "delphi11":  "11.0Alexandria",
+      "delphi12+": "12.0Athens"
+    }
+  },
+
+  // version constraints follow semver syntax (@^x.y.z, @>=x.y.z, etc.)
+  "dependencies": {
+    "paolo-rossi.delphi-neon": "^3.1.0"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `id` | Unique package identifier in `vendor.name` form. |
+| `repository.url` | GitHub tree URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. |
+| `platforms` | Per-platform source and DCU paths added to the Delphi library registry. |
+| `packages` | List of `.dproj` files to compile; type can be `runtime`, `designtime`, or both. |
+| `packageOptions.folders` | Maps Delphi version keys to the subfolder under `packages\` containing the `.dproj` files. A `+` suffix means "this version or newer". |
+| `dependencies` | Other packages that must be installed first, with their version constraints. |
+
+## Application manifest
+
+The executable embeds `Source\blocks.manifest`, which declares:
+
+- **Execution level** — `asInvoker` (no UAC elevation required).
+- **Supported OS** — Windows 10 and Windows 11.
+
+## Building from source
+
+All source files are under `Source/`. The project has no external dependencies: open `Source\Blocks.dproj` in Delphi / RAD Studio and compile. The compiled executable (`Blocks.exe`) is placed in the project root.
 
 ## License
 

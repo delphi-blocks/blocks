@@ -74,8 +74,8 @@
         <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProgramID=com.embarcadero.$(MSBuildProjectName);ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <Manifest_File>(None)</Manifest_File>
         <AppDPIAwarenessMode>none</AppDPIAwarenessMode>
-        <Debugger_RunParams>install delphi-blocks.wirl</Debugger_RunParams>
-        <Debugger_CWD>c:\Progetti\blocksws</Debugger_CWD>
+        <Debugger_RunParams> uninstall paolo-rossi.delphi-jose-jwt</Debugger_RunParams>
+        <Debugger_CWD>c:\Progetti\blocksws12</Debugger_CWD>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">

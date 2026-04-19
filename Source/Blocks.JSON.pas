@@ -330,6 +330,7 @@ begin
       tkWString:     LValue := AJSON.GetValue<string>(LPropName, '');
       tkUString:     LValue := AJSON.GetValue<string>(LPropName, '');
       tkString:      LValue := AJSON.GetValue<string>(LPropName, '');
+      tkEnumeration: LValue := AJSON.GetValue<Boolean>(LPropName, False);
 
       tkClass:
       begin
@@ -557,7 +558,13 @@ begin
         tkWString:     LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
         tkUString:     LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
         tkString:      LValue := TJSONString.Create(LProp.GetValue(AObject).AsString);
+        tkEnumeration:
+        begin
+          if not LProp.GetValue(AObject).IsType<Boolean> then
+            raise EJSONSerializerError.Create('Only boolean enum supported');
 
+          LValue := TJSONBool.Create(LProp.GetValue(AObject).AsBoolean);
+        end;
         tkClass:
         begin
           var LPropInstance := LProp.GetValue(AObject).AsObject;
