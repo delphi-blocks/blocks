@@ -115,7 +115,6 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    [JsonDictionary(System.TypeInfo(string))]
     property Folders: TManifestPackageFolders read FFolders;
   end;
 
@@ -170,13 +169,10 @@ type
     property Author: string read FAuthor write FAuthor;
     property Keywords: TStringList read FKeywords;
 
-    [JsonDictionary(System.TypeInfo(TManifestPlatform))]
     property Platforms: TSupportedPlatforms read FPlatforms;
-    [JsonList(System.TypeInfo(TManifestPackage))]
     property Packages: TManifestPackageList read FPackages;
     [JsonName('packageOptions')]
     property PackageOptions: TManifestPackageOptions read FPackageOptions;
-    [JsonDictionary(System.TypeInfo(string))]
     property Dependencies: TDependencyMap read FDependencies;
   end;
 

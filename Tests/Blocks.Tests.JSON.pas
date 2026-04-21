@@ -22,20 +22,16 @@ type
   end;
 
   // ----- string list -----
-  TJSONStringList = class(TList<string>)
-  end;
-
   TTaggedObj = class(TObject)
   private
     FName: string;
-    FTags: TJSONStringList;
+    FTags: TStringList;
   public
     constructor Create;
     destructor Destroy; override;
 
     property Name: string read FName write FName;
-    [JsonList(System.TypeInfo(string))]
-    property Tags: TJSONStringList read FTags;
+    property Tags: TStringList read FTags;
   end;
 
   // ----- classic string list -----
@@ -77,7 +73,6 @@ type
     destructor Destroy; override;
 
     property Title: string read FTitle write FTitle;
-    [JsonList(System.TypeInfo(TItemObj))]
     property Items: TItemList read FItems;
   end;
 
@@ -95,7 +90,6 @@ type
     destructor Destroy; override;
 
     property Name: string read FName write FName;
-    [JsonDictionary(System.TypeInfo(string))]
     property Props: TStrDict read FProps;
   end;
 
@@ -115,7 +109,6 @@ type
     destructor Destroy; override;
 
     property Name: string read FName write FName;
-    [JsonDictionary(System.TypeInfo(TItemObj))]
     property Children: TItemDict read FChildren;
   end;
 
@@ -318,7 +311,7 @@ uses
 constructor TTaggedObj.Create;
 begin
   inherited Create;
-  FTags := TJSONStringList.Create;
+  FTags := TStringList.Create;
 end;
 
 destructor TTaggedObj.Destroy;

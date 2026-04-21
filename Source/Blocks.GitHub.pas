@@ -34,7 +34,6 @@ type
     property Id: string read FId write FId;
     property Url: string read FUrl write FUrl;
     property Name: string read FName write FName;
-    [JsonList(System.TypeInfo(TGitHubReleaseAsset))]
     property Assets: TGitHubReleaseAssets read FAssets;
 
     constructor Create;

@@ -32,7 +32,6 @@ type
     FPackages: TDictionary<string, string>;
     FDatabasePath: string;
   public
-    [JsonDictionary(System.TypeInfo(string))]
     property Packages: TDictionary<string, string> read FPackages;
 
     /// <summary>Removes the database entry for a package.</summary>
