@@ -10,7 +10,7 @@
 {  Licensed under the Apache-2.0 license                                       }
 {                                                                              }
 {******************************************************************************}
-unit Blocks.Manifest;
+unit Blocks.Model.Manifest;
 
 interface
 
@@ -22,7 +22,7 @@ uses
   System.Generics.Collections,
   System.Generics.Defaults,
 
-  Blocks.Types,
+  Blocks.Core,
   Blocks.JSON;
 
 type
@@ -185,7 +185,7 @@ implementation
 uses
   Blocks.Console,
   Blocks.Http,
-  Blocks.Workspace;
+  Blocks.Service.Workspace;
 
 const
   ManifestSchemaUrl = 'https://delphi-blocks.dev/schema/package.v1.json';

@@ -8,7 +8,7 @@ uses
   System.Generics.Collections,
   DUnitX.TestFramework,
 
-  Blocks.Types,
+  Blocks.Core,
   Blocks.JSON;
 
 type

@@ -10,7 +10,7 @@
 {  Licensed under the Apache-2.0 license                                       }
 {                                                                              }
 {******************************************************************************}
-unit Blocks.Product;
+unit Blocks.Service.Product;
 
 interface
 
@@ -18,8 +18,8 @@ uses
   System.Classes, System.SysUtils, System.IOUtils, System.StrUtils, System.JSON,
   System.Generics.Collections, System.Generics.Defaults,
 
-  Blocks.Database,
-  Blocks.Manifest;
+  Blocks.Model.Database,
+  Blocks.Model.Manifest;
 
 type
   // -----------------------------------------------------------------------
@@ -174,7 +174,7 @@ uses
   Winapi.Windows,
   Winapi.TlHelp32,
 
-  Blocks.Consts,
+  Blocks.Core,
   Blocks.Console,
   Blocks.Http;
 

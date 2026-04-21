@@ -10,7 +10,7 @@
 {  Licensed under the Apache-2.0 license                                       }
 {                                                                              }
 {******************************************************************************}
-unit Blocks.Workspace;
+unit Blocks.Service.Workspace;
 
 interface
 
@@ -18,13 +18,12 @@ uses
   System.Classes, System.SysUtils, System.IOUtils, System.Generics.Collections,
   System.Types, System.Zip,
 
-  Blocks.Database,
+  Blocks.Model.Database,
+  Blocks.Model.Config,
   Blocks.JSON,
-  Blocks.Types;
+  Blocks.Core;
 
 type
-  TConfig = class;
-
   TWorkspace = class
   private
     class var
@@ -85,32 +84,8 @@ type
 
     /// <summary>Path to the Blocks settings directory (<c>WorkDir\.blocks</c>).</summary>
     class property BlocksDir: string read GetBlocksDir;
-  end;
 
-  TConfig = class(TObject)
-  private
-    FSources: TStringList;
-    FProduct: string;
-    FRegistryKey: string;
-    FCanonical: Boolean;
-    function ConfigPath: string;
-  public
-    property Sources: TStringList read FSources;
-    property Canonical: Boolean read FCanonical write FCanonical;
-
-    property Product: string read FProduct write FProduct;
-    property RegistryKey: string read FRegistryKey write FRegistryKey;
-
-    procedure Load;
-    procedure Save;
-    function ToJson: string;
-
-    function Get(const AKey: string): string;
-    procedure &Set(const AKey, AValue: string);
-    procedure Add(const AKey, AValue: string);
-
-    constructor Create;
-    destructor Destroy; override;
+    class function Exists: Boolean;
   end;
 
 implementation
@@ -118,15 +93,11 @@ implementation
 uses
   System.JSON,
 
-  Blocks.Consts,
   Blocks.Console,
   Blocks.Http,
-  Blocks.Manifest,
-  Blocks.Product, Blocks.GitHub;
-
-const
-  DefaultBlocksRepositoryUrl = 'https://github.com/delphi-blocks/blocks-repository';
-  WorkspaceSchemaUrl = 'https://delphi-blocks.dev/schema/workspace.v1.json';
+  Blocks.Model.Manifest,
+  Blocks.Service.Product,
+  Blocks.GitHub;
 
 { TWorkspace }
 
@@ -134,7 +105,7 @@ class function TWorkspace.GetConfig: TConfig;
 begin
   if not Assigned(FConfig) then
   begin
-    FConfig := TConfig.Create;
+    FConfig := TConfig.Create(WorkDir);
     FConfig.Load;
   end;
   Result := FConfig;
@@ -170,6 +141,11 @@ begin
   FDatabase.Free;
 end;
 
+class function TWorkspace.Exists: Boolean;
+begin
+  Result := TDirectory.Exists(TWorkspace.BlocksDir) and TFile.Exists(TPath.Combine(TWorkspace.BlocksDir, 'workspace.json'));
+end;
+
 class function TWorkspace.GetBlocksDir: string;
 begin
   Result := TPath.Combine(GetWorkDir, '.blocks');
@@ -193,6 +169,7 @@ begin
   Config.Canonical := ACanonical;
   if not ACanonical then
   begin
+    TConsole.WriteLine;
     TConsole.WriteLine('DelphiBlocks supports canonical form. If you choose to use it', clGreen);
     TConsole.WriteLine('you can install multiple versions of the same package across', clGreen);
     TConsole.WriteLine('different Delphi versions and registry keys without conflict', clGreen);
@@ -313,7 +290,7 @@ begin
     var LProduct := Config.Product;
     if LProduct = '' then
       raise Exception.Create(
-          'No Delphi version configured. Run "blocks init -product <version>" first.');
+          'No Delphi version configured. Run "blocks init /product <version>" first.');
     var LSelectedProduct := TProduct.FindByNameAndKey(LProduct, Config.RegistryKey);
     TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
     if not SameText(LSelectedProduct.RegistryKey, 'BDS') then
@@ -488,109 +465,6 @@ begin
 
   for var LSource in Config.Sources do
     InitializeFromSource(LSource);
-end;
-
-{ TConfig }
-
-procedure TConfig.&Set(const AKey, AValue: string);
-begin
-  if SameText(AKey, 'sources') then
-  begin
-    var LSources := AValue.Split([',']);
-    FSources.Clear;
-    for var S in LSources do
-      FSources.Add(S);
-  end
-  else if SameText(AKey, 'product') then
-    FProduct := AValue
-  else if SameText(AKey, 'registrykey') then
-    FRegistryKey := AValue
-  else if SameText(AKey, 'canonical') then
-    FCanonical := StrToBool(AValue)
-  else
-    raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
-end;
-
-procedure TConfig.Add(const AKey, AValue: string);
-begin
-  if SameText(AKey, 'sources') then
-    FSources.Add(AValue)
-  else
-    raise Exception.CreateFmt('Config "%s" does not exists or doesn''t support /ADD', [AKey]);
-end;
-
-function TConfig.ConfigPath: string;
-begin
-  var LWorkDir := TWorkspace.BlocksDir;
-  ForceDirectories(LWorkDir);
-  Result := TPath.Combine(LWorkDir, 'workspace.json');
-end;
-
-
-constructor TConfig.Create;
-begin
-  inherited;
-  FSources := TStringList.Create;
-  FSources.Add(DefaultBlocksRepositoryUrl);
-  FRegistryKey := 'BDS';
-end;
-
-destructor TConfig.Destroy;
-begin
-  FSources.Free;
-  inherited;
-end;
-
-function TConfig.Get(const AKey: string): string;
-begin
-  if SameText(AKey, 'sources') then
-    Result := string.Join(',', FSources.ToStringArray)
-  else if SameText(AKey, 'product') then
-    Result := FProduct
-  else if SameText(AKey, 'registrykey') then
-    Result := FRegistryKey
-  else if SameText(AKey, 'canonical') then
-    Result := BoolToStr(FCanonical, True)
-  else
-    raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
-end;
-
-procedure TConfig.Load;
-begin
-  if FileExists(ConfigPath) then
-  begin
-    var LJSON := TJSONObject.ParseJSONValue(TFile.ReadAllText(ConfigPath), False, True);
-    try
-      TJsonHelper.CheckSchema(LJSON, WorkspaceSchemaUrl);
-      TJsonHelper.JSONToObject(Self, LJSON);
-    finally
-      LJSON.Free;
-    end;
-  end
-  else
-    Save;
-end;
-
-procedure TConfig.Save;
-begin
-  var LJSON := TJsonHelper.ObjectToJSON(Self) as TJSONObject;
-  try
-    LJSON.AddPair('$schema', WorkspaceSchemaUrl);
-    TFile.WriteAllText(ConfigPath, TJsonHelper.PrettyPrint(LJSON));
-  finally
-    LJSON.Free;
-  end;
-end;
-
-function TConfig.ToJson: string;
-begin
-  var LJSON := TJsonHelper.ObjectToJSON(Self) as TJSONObject;
-  try
-    LJSON.AddPair('$schema', WorkspaceSchemaUrl);
-    Result := TJsonHelper.PrettyPrint(LJSON.ToJSON);
-  finally
-    LJSON.Free;
-  end;
 end;
 
 end.

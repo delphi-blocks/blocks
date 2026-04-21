@@ -22,7 +22,7 @@ uses
   System.Generics.Collections,
   System.Net.HttpClient,
   System.Net.URLClient,
-  Blocks.Consts, Blocks.Types;
+  Blocks.Core;
 
 /// <summary>Static HTTP helpers and GitHub API client.</summary>
 type

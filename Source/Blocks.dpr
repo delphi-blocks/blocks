@@ -7,18 +7,19 @@ program Blocks;
 
 uses
   System.SysUtils,
-  Blocks.App in 'Blocks.App.pas',
-  Blocks.Consts in 'Blocks.Consts.pas',
+  Blocks.CLI.App in 'Blocks.CLI.App.pas',
   Blocks.Console in 'Blocks.Console.pas',
   Blocks.Http in 'Blocks.Http.pas',
-  Blocks.Database in 'Blocks.Database.pas',
-  Blocks.Manifest in 'Blocks.Manifest.pas',
-  Blocks.Workspace in 'Blocks.Workspace.pas',
-  Blocks.Product in 'Blocks.Product.pas',
+  Blocks.Model.Database in 'Blocks.Model.Database.pas',
+  Blocks.Model.Manifest in 'Blocks.Model.Manifest.pas',
+  Blocks.Service.Workspace in 'Blocks.Service.Workspace.pas',
+  Blocks.Service.Product in 'Blocks.Service.Product.pas',
   Blocks.JSON in 'Blocks.JSON.pas',
-  Blocks.Command in 'Blocks.Command.pas',
-  Blocks.Types in 'Blocks.Types.pas',
-  Blocks.GitHub in 'Blocks.GitHub.pas';
+  Blocks.CLI.Command in 'Blocks.CLI.Command.pas',
+  Blocks.GitHub in 'Blocks.GitHub.pas',
+  Blocks.Core in 'Blocks.Core.pas',
+  Blocks.Model.Config in 'Blocks.Model.Config.pas',
+  Blocks.Model.SysConfig in 'Blocks.Model.SysConfig.pas';
 
 begin
   {$IFDEF DEBUG}

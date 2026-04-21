@@ -63,7 +63,6 @@
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;Vcl;Vcl.Imaging;Vcl.Touch;Vcl.Samples;Vcl.Shell;$(DCC_Namespace)</DCC_Namespace>
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
         <UsingDelphiRTL>true</UsingDelphiRTL>
-        <DCC_UnitSearchPath>..\Source;..\Libs\Neon\Source;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <SanitizedProjectName>Blocks_Tests_Framework</SanitizedProjectName>
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
@@ -134,17 +133,11 @@
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
         <DCCReference Include="Blocks.Tests.SemVer.pas"/>
-        <DCCReference Include="..\Source\Blocks.Command.pas"/>
         <DCCReference Include="..\Source\Blocks.Console.pas"/>
-        <DCCReference Include="..\Source\Blocks.Consts.pas"/>
-        <DCCReference Include="..\Source\Blocks.Database.pas"/>
         <DCCReference Include="..\Source\Blocks.Http.pas"/>
         <DCCReference Include="..\Source\Blocks.JSON.pas"/>
-        <DCCReference Include="..\Source\Blocks.Manifest.pas"/>
-        <DCCReference Include="..\Source\Blocks.Product.pas"/>
-        <DCCReference Include="..\Source\Blocks.Types.pas"/>
-        <DCCReference Include="..\Source\Blocks.Workspace.pas"/>
         <DCCReference Include="Blocks.Tests.JSON.pas"/>
+        <DCCReference Include="..\Source\Blocks.Core.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
@@ -181,9 +174,9 @@
                 <DeployFile LocalName="$(BDS)\Redist\osx32\libcgsqlite3.dylib" Class="DependencyModule"/>
                 <DeployFile LocalName="$(BDS)\Redist\osx32\libcgunwind.1.0.dylib" Class="DependencyModule"/>
                 <DeployFile LocalName="$(BDS)\Redist\osx64\libcgsqlite3.dylib" Class="DependencyModule"/>
-                <DeployFile LocalName="Win32\Debug\Blocks_Tests_Framework.exe" Configuration="Debug" Class="ProjectOutput">
+                <DeployFile LocalName="Win32\Debug\Blocks.Tests.Framework.exe" Configuration="Debug" Class="ProjectOutput">
                     <Platform Name="Win32">
-                        <RemoteName>Blocks_Tests_Framework.exe</RemoteName>
+                        <RemoteName>Blocks.Tests.Framework.exe</RemoteName>
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>

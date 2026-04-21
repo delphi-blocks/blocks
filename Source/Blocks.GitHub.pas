@@ -87,7 +87,7 @@ uses
   Winapi.Windows,
   Blocks.Http,
   Blocks.Console,
-  Blocks.Consts;
+  Blocks.Core;
 
 class function TGitHub.DownloadAndExtract(const ZipUrl, DestinationDir,
   ProjectName: string; Overwrite, Silent: Boolean): string;

@@ -18,7 +18,7 @@ uses
   System.SysUtils,
   DUnitX.TestFramework,
 
-  Blocks.Types;
+  Blocks.Core;
 
 type
   [TestFixture]

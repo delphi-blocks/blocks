@@ -10,7 +10,7 @@
 {  Licensed under the Apache-2.0 license                                       }
 {                                                                              }
 {******************************************************************************}
-unit Blocks.Database;
+unit Blocks.Model.Database;
 
 interface
 
@@ -73,7 +73,7 @@ uses
   System.JSON,
 
   Blocks.Console,
-  Blocks.Workspace;
+  Blocks.Service.Workspace;
 
 const
   DatabaseSchemaUrl = 'https://delphi-blocks.dev/schema/database.v1.json';

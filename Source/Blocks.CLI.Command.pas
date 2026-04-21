@@ -10,7 +10,7 @@
 {  Licensed under the Apache-2.0 license                                       }
 {                                                                              }
 {******************************************************************************}
-unit Blocks.Command;
+unit Blocks.CLI.Command;
 
 interface
 

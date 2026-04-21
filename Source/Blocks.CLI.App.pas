@@ -10,7 +10,7 @@
 {  Licensed under the Apache-2.0 license                                       }
 {                                                                              }
 {******************************************************************************}
-unit Blocks.App;
+unit Blocks.CLI.App;
 
 interface
 
@@ -21,11 +21,10 @@ uses
 
   Winapi.Windows,
   Winapi.ShellAPI,
-  System.Win.Registry,
 
-  Blocks.Product,
+  Blocks.Service.Product,
   Blocks.GitHub,
-  Blocks.Command;
+  Blocks.CLI.Command;
 
 type
   TApp = class
@@ -115,6 +114,7 @@ type
     FSystem: Boolean;
     [Param]
     FConfigs: TArray<string>;
+    procedure WriteConfig(const AName, AValue: string);
   public
     procedure Execute; override;
     procedure ShowHelp; override;
@@ -154,25 +154,17 @@ type
     procedure ShowHelp; override;
   end;
 
-  TSystemConfig = class(TObject)
-  public
-    const InstallPath = 'Software\Blocks';
-    class function Get(const AKey: string): string; static;
-    class procedure &Set(const AKey, AValue: string); static;
-    class procedure Add(const AKey, AValue: string); static;
-  end;
-
 implementation
 
 uses
-  Blocks.Consts,
+  Blocks.Core,
   Blocks.Console,
-  Blocks.Database,
-  Blocks.Manifest,
-  Blocks.Workspace,
+  Blocks.Model.Database,
+  Blocks.Model.Manifest,
+  Blocks.Model.SysConfig,
+  Blocks.Service.Workspace,
   Blocks.JSON,
-  Blocks.Http,
-  Blocks.Types;
+  Blocks.Http;
 
 const
   OptionLength = 26;
@@ -360,7 +352,7 @@ procedure TInitCommand.Execute;
 begin
   inherited;
   ShowBanner('', '');
-  if TDirectory.Exists(TWorkspace.BlocksDir) then
+  if TWorkspace.Exists then
   begin
     TConsole.Write('Workspace already initialised. Update package list? [Y/N] (default: Y): ');
     var Confirm := TConsole.ReadLine;
@@ -568,7 +560,14 @@ begin
   begin
     if FSystem then
     begin
-      TConsole.WriteWarning('Not supported.');
+      var LSystemConfig := TStringList.Create;
+      try
+        TSystemConfig.GetAll(LSystemConfig);
+        for var LIndex := 0 to LSystemConfig.Count - 1 do
+          WriteConfig(LSystemConfig.Names[LIndex], LSystemConfig.ValueFromIndex[LIndex]);
+      finally
+        LSystemConfig.Free;
+      end;
       Exit;
     end;
     TConsole.WriteLine(TWorkspace.Config.ToJson);
@@ -586,7 +585,7 @@ begin
       else
         LValue := TWorkspace.Config.Get(LConfig);
 
-      TConsole.WriteLine(Format('%s: %s', [LConfig, LValue]));
+      WriteConfig(LConfig, LValue);
     end
     else
     begin
@@ -651,6 +650,13 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath=C:\Tools\Blocks');
   TConsole.WriteLine;
+end;
+
+procedure TConfigCommand.WriteConfig(const AName, AValue: string);
+begin
+  TConsole.Write(AName, clWhite);
+  TConsole.Write(': ');
+  TConsole.WriteLine(AValue, clCyan);
 end;
 
 { TViewCommand }
@@ -842,52 +848,6 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' version');
   TConsole.WriteLine('  ' + AppExeName + ' version /silent');
   TConsole.WriteLine;
-end;
-
-{ TSystemConfig }
-
-class procedure TSystemConfig.Add(const AKey, AValue: string);
-begin
-  raise Exception.CreateFmt('System config key "%s" does not support multiple values.', [AKey]);
-end;
-
-class function TSystemConfig.Get(const AKey: string): string;
-begin
-  if SameText(AKey, 'InstallPath') then
-  begin
-    var LReg := TRegistry.Create;
-    try
-      if not LReg.KeyExists(InstallPath) then
-        raise Exception.Create('Blocks launcher not installed');
-      LReg.OpenKey(InstallPath, False);
-      Result := LReg.ReadString('InstallPath');
-    finally
-      LReg.Free;
-    end;
-  end
-  else
-    raise Exception.CreateFmt('System config "%s" not found', [AKey]);
-
-end;
-
-class procedure TSystemConfig.&Set(const AKey, AValue: string);
-begin
-  if SameText(AKey, 'InstallPath') then
-  begin
-    if not FileExists(TPath.Combine(AValue, 'blocks.exe')) then
-      raise Exception.Create('Blocks not found in the specified path');
-    var LReg := TRegistry.Create;
-    try
-      if not LReg.KeyExists(InstallPath) then
-        raise Exception.Create('Blocks launcher not installed');
-      LReg.OpenKey(InstallPath, False);
-      LReg.WriteString('InstallPath', AValue);
-    finally
-      LReg.Free;
-    end;
-  end
-  else
-    raise Exception.CreateFmt('System config "%s" not found', [AKey]);
 end;
 
 { TUpgradeCommand }

@@ -74,7 +74,7 @@
         <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProgramID=com.embarcadero.$(MSBuildProjectName);ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <Manifest_File>(None)</Manifest_File>
         <AppDPIAwarenessMode>none</AppDPIAwarenessMode>
-        <Debugger_RunParams> uninstall paolo-rossi.delphi-jose-jwt</Debugger_RunParams>
+        <Debugger_RunParams>config</Debugger_RunParams>
         <Debugger_CWD>c:\Progetti\blocksws12</Debugger_CWD>
     </PropertyGroup>
     <ItemGroup>
@@ -84,18 +84,19 @@
         <RcCompile Include="blocks_version.rc">
             <Form>blocks_version.res</Form>
         </RcCompile>
-        <DCCReference Include="Blocks.App.pas"/>
-        <DCCReference Include="Blocks.Consts.pas"/>
+        <DCCReference Include="Blocks.CLI.App.pas"/>
         <DCCReference Include="Blocks.Console.pas"/>
         <DCCReference Include="Blocks.Http.pas"/>
-        <DCCReference Include="Blocks.Database.pas"/>
-        <DCCReference Include="Blocks.Manifest.pas"/>
-        <DCCReference Include="Blocks.Workspace.pas"/>
-        <DCCReference Include="Blocks.Product.pas"/>
+        <DCCReference Include="Blocks.Model.Database.pas"/>
+        <DCCReference Include="Blocks.Model.Manifest.pas"/>
+        <DCCReference Include="Blocks.Service.Workspace.pas"/>
+        <DCCReference Include="Blocks.Service.Product.pas"/>
         <DCCReference Include="Blocks.JSON.pas"/>
-        <DCCReference Include="Blocks.Command.pas"/>
-        <DCCReference Include="Blocks.Types.pas"/>
+        <DCCReference Include="Blocks.CLI.Command.pas"/>
         <DCCReference Include="Blocks.GitHub.pas"/>
+        <DCCReference Include="Blocks.Core.pas"/>
+        <DCCReference Include="Blocks.Model.Config.pas"/>
+        <DCCReference Include="Blocks.Model.SysConfig.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

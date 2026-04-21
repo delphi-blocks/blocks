@@ -30,17 +30,11 @@ uses
   DUnitX.Loggers.Xml.NUnit,
   DUnitX.TestFramework,
   Blocks.Tests.SemVer in 'Blocks.Tests.SemVer.pas',
-  Blocks.Command in '..\Source\Blocks.Command.pas',
   Blocks.Console in '..\Source\Blocks.Console.pas',
-  Blocks.Consts in '..\Source\Blocks.Consts.pas',
-  Blocks.Database in '..\Source\Blocks.Database.pas',
   Blocks.Http in '..\Source\Blocks.Http.pas',
   Blocks.JSON in '..\Source\Blocks.JSON.pas',
-  Blocks.Manifest in '..\Source\Blocks.Manifest.pas',
-  Blocks.Product in '..\Source\Blocks.Product.pas',
-  Blocks.Types in '..\Source\Blocks.Types.pas',
-  Blocks.Workspace in '..\Source\Blocks.Workspace.pas',
-  Blocks.Tests.JSON in 'Blocks.Tests.JSON.pas';
+  Blocks.Tests.JSON in 'Blocks.Tests.JSON.pas',
+  Blocks.Core in '..\Source\Blocks.Core.pas';
 
 var
   runner : ITestRunner;
