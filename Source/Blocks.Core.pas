@@ -87,6 +87,15 @@ function TrimRight(const S: string; const Chars: array of Char): string; overloa
 /// <summary>Extra version numer from a string assuming is in SemVer format.</summary>
 function ExtractVersionNumber(const S: string): string;
 
+type
+  TMatchEvaluatorFunc = reference to function(const AMatch: TMatch): string;
+
+/// <summary>Like <c>TRegEx.Replace</c> with an evaluator, but accepts an anonymous
+///   method/closure instead of an <c>of object</c> method pointer.</summary>
+/// <remarks>Wraps the closure in a temporary object so it can be passed where
+///   <c>TMatchEvaluator</c> is required.</remarks>
+function RegExReplace(const AInput, APattern: string; const AEvaluator: TMatchEvaluatorFunc): string;
+
 implementation
 
 function ExtractVersionNumber(const S: string): string;
@@ -97,6 +106,29 @@ begin
   Match := TRegEx.Match(S, '\d+(\.\d+)*');
   if Match.Success then
     Result := Match.Value;
+end;
+
+type
+  TMatchEvaluatorWrapper = class
+  private
+    FEvaluator: TMatchEvaluatorFunc;
+    function Evaluate(const AMatch: TMatch): string;
+  end;
+
+function TMatchEvaluatorWrapper.Evaluate(const AMatch: TMatch): string;
+begin
+  Result := FEvaluator(AMatch);
+end;
+
+function RegExReplace(const AInput, APattern: string; const AEvaluator: TMatchEvaluatorFunc): string;
+begin
+  var LWrapper := TMatchEvaluatorWrapper.Create;
+  try
+    LWrapper.FEvaluator := AEvaluator;
+    Result := TRegEx.Replace(AInput, APattern, LWrapper.Evaluate);
+  finally
+    LWrapper.Free;
+  end;
 end;
 
 function TrimRight(const S: string; const Chars: array of Char): string;

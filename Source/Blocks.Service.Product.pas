@@ -1,4 +1,4 @@
-{******************************************************************************}
+﻿{******************************************************************************}
 {                                                                              }
 {  DelphiBlock Installer                                                       }
 {                                                                              }
@@ -18,38 +18,15 @@ uses
   System.Classes, System.SysUtils, System.IOUtils, System.StrUtils, System.JSON,
   System.Generics.Collections, System.Generics.Defaults,
 
+  Blocks.Model.Package,
   Blocks.Model.Database,
   Blocks.Model.Manifest;
 
 type
-  // -----------------------------------------------------------------------
-  // Reads compiler directives from a Delphi .dpk package source file.
-  // Directives are stored as NAME=VALUE in Directives (names uppercased).
-  // Flag-only directives (e.g. {$DESIGNONLY}) are stored with an empty value.
-  // -----------------------------------------------------------------------
-  TDelphiPackage = class
-  private
-    FDirectives: TStringList;
-    FFileName: string;
-    function GetDirectiveValue(const AName: string): string;
-    function GetIsDebug: Boolean;
-    function GetDescription: string;
-    function GetLibSuffix: string;
-    function GetIsDesignOnly: Boolean;
-    function GetImplicitBuild: string;
-    function GetName: string;
-  public
-    constructor Create;
-    destructor Destroy; override;
-    class function LoadFromFile(const AFileName: string): TDelphiPackage;
-    property FileName: string read FFileName;
-    property Name: string read GetName;
-    property Directives: TStringList read FDirectives;
-    property IsDebug: Boolean read GetIsDebug;
-    property Description: string read GetDescription;
-    property LibSuffix: string read GetLibSuffix;
-    property IsDesignOnly: Boolean read GetIsDesignOnly;
-    property ImplicitBuild: string read GetImplicitBuild;
+  TPlatformPaths = record
+    ReleaseDCUPath: TArray<string>;
+    SourcePath: TArray<string>;
+    DebugDCUPath: TArray<string>;
   end;
 
   /// <summary>Represents a single Delphi/RAD Studio installation.</summary>
@@ -67,9 +44,8 @@ type
 
     function GetRank: Integer;
     function ExpandEnvironment(const AValue: string): string;
-    function GetDefaultBPLOutputDirectory(const APlatform: string): string;
     function GetKnownPackageRegKey(const APlatform: string): string;
-    function GetBPLFileName(const AWorkspaceDir: string; APackage: TDelphiPackage; const APlatform: string; ACanonical: Boolean): string;
+    function GetBPLFileName(const AWorkspaceDir: string; APackage: TPackageProject; const APlatform: string): string;
 
     class procedure LoadProducts;
     class function GetProductNames: TArray<string>; static;
@@ -127,28 +103,38 @@ type
     procedure BuildPackages(
         const AWorkspaceDir, AProjectDir, APackageFolder: string;
         const APackages: TManifestPackageList;
-        const APlatforms: TSupportedPlatforms;
-        ACanonical: Boolean
+        const APlatforms: TSupportedPlatforms
     );
 
     /// <summary>Appends source, browsing, and debug DCU paths to the Delphi library registry.</summary>
     /// <param name="APlatform">Target platform identifier, e.g. <c>Win32</c>.</param>
-    /// <param name="AProjectDir">Project root; manifest paths are resolved relative to this directory.</param>
-    /// <param name="APlatformConfig">Platform record from the manifest containing the path lists to register.</param>
+    /// <param name="AProjectDir">Project root; relative paths are resolved against this directory.</param>
+    /// <param name="APlatformPaths">Resolved path lists (source, release DCU, debug DCU) to register.</param>
     /// <remarks>
     ///   Already-present entries are skipped. Writes to
     ///   <c>HKCU\Software\Embarcadero\BDS\&lt;BdsVersion&gt;\Library\&lt;Platform&gt;</c>.
     /// </remarks>
-    procedure UpdateSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform; ACanonical: Boolean);
+    procedure UpdateSearchPaths(const APlatform, AProjectDir: string; APlatformPaths: TPlatformPaths);
 
     /// <summary>Delete source, browsing, and debug DCU paths from the Delphi library registry.</summary>
-    procedure DeleteSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform; ACanonical: Boolean);
+    procedure DeleteSearchPaths(const APlatform, AProjectDir: string; APlatformPaths: TPlatformPaths);
 
     /// <summary>Register package inside the Delphi IDE.</summary>
-    procedure InstallPackage(APackage: TManifestPackage; const AWorkspaceDir, ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>; ACanonical: Boolean);
+    procedure InstallPackage(APackage: TManifestPackage; const AWorkspaceDir, ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
 
     /// <summary>Unregister package from the Delphi IDE.</summary>
-    procedure UninstallPackage(APackage: TManifestPackage; const AWorkspaceDir, ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>; ACanonical: Boolean);
+    procedure UninstallPackage(APackage: TManifestPackage; const AWorkspaceDir, ADprojPath: string; APlatformPair: TPair<string, TManifestPlatform>);
+
+    /// <summary>Populates a Name=Value list with the Delphi environment variables
+    ///   needed to expand <c>$(...)</c> macros in <c>.dproj</c> paths.</summary>
+    /// <remarks>
+    ///   Sets <c>BDS</c> (install root) and <c>BDSBIN</c> (bin directory) from
+    ///   <c>HKLM\SOFTWARE\WOW6432Node\Embarcadero\BDS\&lt;BdsVersion&gt;</c>,
+    ///   <c>ProductVersion</c> from <see cref="BdsVersion"/>, and every value
+    ///   under <c>HKCU\Software\Embarcadero\&lt;RegistryKey&gt;\&lt;BdsVersion&gt;\Environment Variables</c>.
+    ///   Existing entries in <c>AEnvironmentVariable</c> are overwritten by name.
+    /// </remarks>
+    procedure FillEnvironmentVariables(AEnvironmentVariable: TStrings);
 
     /// <summary>All installed Delphi/RAD Studio products, sorted newest-first.</summary>
     class property Products: TObjectList<TProduct> read FProducts;
@@ -299,105 +285,6 @@ begin
   CloseHandle(hRead);
 end;
 
-// -- TDelphiPackage ------------------------------------------------------------
-
-constructor TDelphiPackage.Create;
-begin
-  inherited Create;
-  FDirectives := TStringList.Create;
-end;
-
-destructor TDelphiPackage.Destroy;
-begin
-  FDirectives.Free;
-  inherited;
-end;
-
-class function TDelphiPackage.LoadFromFile(const AFileName: string): TDelphiPackage;
-var
-  LContent: string;
-  LPos, LEnd: Integer;
-  LDirective, LName, LValue: string;
-  LSepPos: Integer;
-begin
-  Result := TDelphiPackage.Create;
-  try
-    Result.FFileName := AFileName;
-    LContent := TFile.ReadAllText(AFileName);
-    LPos := 0;
-    while LPos < LContent.Length do
-    begin
-      LPos := LContent.IndexOf('{$', LPos);
-      if LPos < 0 then
-        Break;
-      LEnd := LContent.IndexOf('}', LPos + 2);
-      if LEnd < 0 then
-        Break;
-      LDirective := LContent.Substring(LPos + 2, LEnd - LPos - 2).Trim;
-      LSepPos := LDirective.IndexOf(' ');
-      if LSepPos < 0 then
-      begin
-        LName  := LDirective;
-        LValue := '';
-      end
-      else
-      begin
-        LName  := LDirective.Substring(0, LSepPos);
-        LValue := LDirective.Substring(LSepPos + 1).Trim;
-        if (LValue.Length >= 2) and (LValue.Chars[0] = '''') and
-            (LValue.Chars[LValue.Length - 1] = '''') then
-          LValue := LValue.Substring(1, LValue.Length - 2);
-      end;
-      Result.FDirectives.Add(LName.ToUpper + '=' + LValue);
-      LPos := LEnd + 1;
-    end;
-  except
-    Result.Free;
-    raise;
-  end;
-end;
-
-function TDelphiPackage.GetDirectiveValue(const AName: string): string;
-begin
-  Result := FDirectives.Values[AName.ToUpper];
-end;
-
-function TDelphiPackage.GetIsDebug: Boolean;
-var
-  I: Integer;
-begin
-  Result := False;
-  for I := 0 to FDirectives.Count - 1 do
-    if SameText(FDirectives.Names[I], 'DEFINE') and
-        SameText(FDirectives.ValueFromIndex[I], 'DEBUG') then
-      Exit(True);
-end;
-
-function TDelphiPackage.GetDescription: string;
-begin
-  Result := GetDirectiveValue('DESCRIPTION');
-end;
-
-function TDelphiPackage.GetLibSuffix: string;
-begin
-  Result := GetDirectiveValue('LIBSUFFIX');
-end;
-
-function TDelphiPackage.GetName: string;
-begin
-  Result := ExtractFileName(ChangeFileExt(FFileName, ''));
-end;
-
-function TDelphiPackage.GetIsDesignOnly: Boolean;
-begin
-  Result := FDirectives.IndexOfName('DESIGNONLY') >= 0;
-end;
-
-function TDelphiPackage.GetImplicitBuild: string;
-begin
-  Result := GetDirectiveValue('IMPLICITBUILD');
-end;
-
 // -- TProduct ------------------------------------------------------------------
 
 constructor TProduct.Create(const ABdsVersion, AVersionName, ADisplayName, ARootDir, ARegistryKey: string);
@@ -419,34 +306,24 @@ begin
 end;
 
 procedure TProduct.DeleteSearchPaths(const APlatform, AProjectDir: string;
-  const APlatformConfig: TManifestPlatform; ACanonical: Boolean);
+  APlatformPaths: TPlatformPaths);
 
-  procedure RemovePaths(AReg: TRegistry; APaths: TStrings; const ARegValue: string);
+  procedure RemovePaths(AReg: TRegistry; APaths: TArray<string>; const ARegValue: string);
   begin
-    if APaths.IsEmpty then
+    if Length(APaths) < 1 then
       Exit;
 
-    // Get the path list
     var LExisting := if AReg.ValueExists(ARegValue) then
       AReg.ReadString(ARegValue)
     else
       '';
 
-    // Build the new path list from the old one skipping the manifest path
-    var LExistingList := LExisting.Split([';']);
+    // APaths and the registry entries are both absolute paths — match directly.
     var LNewList: TArray<string> := [];
-    for var LFullPath in LExistingList do
-    begin
-      if LFullPath.StartsWith(AProjectDir, True) then
-      begin
-        if APaths.Contains(Copy(LFullPath, Length(AProjectDir) + 2, Length(LFullPath))) then
-        begin
-          // Skip manifest path
-          Continue;
-        end;
-      end;
-      LNewList := LNewList + [LFullPath];
-    end;
+    for var LFullPath in LExisting.Split([';']) do
+      if not TArray.Contains<string>(APaths, LFullPath, TIStringComparer.Ordinal) then
+        LNewList := LNewList + [LFullPath];
+
     AReg.WriteString(ARegValue, string.Join(';', LNewList));
   end;
 
@@ -459,25 +336,9 @@ begin
     if not Reg.OpenKey(RegPath, False) then
       Exit;
 
-    if ACanonical then
-    begin
-      var LPath := TStringList.Create;
-      try
-        LPath.Text := TPath.Combine('lib', APlatform);
-        RemovePaths(Reg, LPath, 'Search Path');
-        LPath.Text := TPath.Combine('lib', APlatform, 'debug');
-        RemovePaths(Reg, LPath, 'Debug DCU Path');
-      finally
-        LPath.Free;
-      end;
-      RemovePaths(Reg, APlatformConfig.SourcePath, 'Browsing Path');
-    end
-    else
-    begin
-      RemovePaths(Reg, APlatformConfig.ReleaseDCUPath, 'Search Path');
-      RemovePaths(Reg, APlatformConfig.SourcePath, 'Browsing Path');
-      RemovePaths(Reg, APlatformConfig.DebugDCUPath, 'Debug DCU Path');
-    end;
+    RemovePaths(Reg, APlatformPaths.ReleaseDCUPath, 'Search Path');
+    RemovePaths(Reg, APlatformPaths.SourcePath, 'Browsing Path');
+    RemovePaths(Reg, APlatformPaths.DebugDCUPath, 'Debug DCU Path');
 
     Reg.CloseKey;
   finally
@@ -658,12 +519,12 @@ end;
 
 procedure TProduct.InstallPackage(APackage: TManifestPackage;
   const AWorkspaceDir, ADprojPath: string;
-  APlatformPair: TPair<string, TManifestPlatform>; ACanonical: Boolean);
+  APlatformPair: TPair<string, TManifestPlatform>);
 begin
   if not APackage.IsDesignTime then
     Exit;
 
-  var LPackage := TDelphiPackage.LoadFromFile(ChangeFileExt(ADprojPath, '.dpk'));
+  var LPackage := TPackageProject.LoadFromFile(ADprojPath);
   try
     var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
     try
@@ -676,7 +537,7 @@ begin
       if not LReg.OpenKey(LKnowPackageRegPath, False) then
         raise Exception.CreateFmt('Cannot open registry key "%s"', [LKnowPackageRegPath]);
 
-      var LPackagePath := GetBPLFileName(AWorkspaceDir, LPackage, APlatformPair.Key, ACanonical);
+      var LPackagePath := GetBPLFileName(AWorkspaceDir, LPackage, APlatformPair.Key);
       if not FileExists(LPackagePath) then
         raise Exception.CreateFmt('Package bpl not found "%s"', [LPackagePath]);
 
@@ -689,6 +550,7 @@ begin
   finally
     LPackage.Free;
   end;
+
 end;
 
 function TProduct.IsRunning: Boolean;
@@ -737,38 +599,16 @@ begin
   end;
 end;
 
-function TProduct.GetBPLFileName(const AWorkspaceDir: string; APackage: TDelphiPackage; const APlatform: string; ACanonical: Boolean): string;
+function TProduct.GetBPLFileName(const AWorkspaceDir: string; APackage: TPackageProject; const APlatform: string): string;
 begin
   var LPackageNameSuffix := APackage.LibSuffix;
-  if SameText(LPackageNameSuffix, 'AUTO') then
+  if SameText(LPackageNameSuffix, 'AUTO') or SameText(LPackageNameSuffix, '$(Auto)') then
     LPackageNameSuffix := FPackageVersion;
 
-  var LDefaultBplOutputDirectory: string;
-  if ACanonical then
-    LDefaultBplOutputDirectory := TPath.Combine(AWorkspaceDir, '.blocks', 'bpl')
-  else
-   LDefaultBplOutputDirectory := GetDefaultBPLOutputDirectory(APlatform);
+  var LDefaultBplOutputDirectory := TPath.Combine(AWorkspaceDir, '.blocks', 'bpl');
 
   var LPackageFileName := APackage.Name + LPackageNameSuffix + '.bpl';
   Result := ExpandEnvironment(TPath.Combine(LDefaultBplOutputDirectory, LPackageFileName));
-end;
-
-function TProduct.GetDefaultBPLOutputDirectory(const APlatform: string): string;
-begin
-  var LBplOutputRegKey := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\library\' + APlatform;
-
-  var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
-  try
-    LReg.RootKey := HKEY_CURRENT_USER;
-
-    if not LReg.OpenKey(LBplOutputRegKey, False) then
-      raise Exception.CreateFmt('Cannot open registry key "%s"', [LBplOutputRegKey]);
-    Result := LReg.ReadString('Package DPL Output');
-
-    LReg.CloseKey;
-  finally
-    LReg.Free;
-  end;
 end;
 
 function TProduct.GetKnownPackageRegKey(const APlatform: string): string;
@@ -861,12 +701,12 @@ end;
 
 procedure TProduct.UninstallPackage(APackage: TManifestPackage;
   const AWorkspaceDir, ADprojPath: string;
-  APlatformPair: TPair<string, TManifestPlatform>; ACanonical: Boolean);
+  APlatformPair: TPair<string, TManifestPlatform>);
 begin
   if not APackage.IsDesignTime then
     Exit;
 
-  var LPackage := TDelphiPackage.LoadFromFile(ChangeFileExt(ADprojPath, '.dpk'));
+  var LPackage := TPackageProject.LoadFromFile(ADprojPath);
   try
     var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
     try
@@ -879,7 +719,7 @@ begin
       if not LReg.OpenKey(LKnowPackageRegPath, False) then
         raise Exception.CreateFmt('Cannot open registry key "%s"', [LKnowPackageRegPath]);
 
-      var LPackagePath := GetBPLFileName(AWorkspaceDir, LPackage, APlatformPair.Key, ACanonical);
+      var LPackagePath := GetBPLFileName(AWorkspaceDir, LPackage, APlatformPair.Key);
       if not FileExists(LPackagePath) then
       begin
         TConsole.WriteWarning(Format('Package BPL not found, skipping registry removal: "%s"', [LPackagePath]));
@@ -904,11 +744,48 @@ begin
   end;
 end;
 
-procedure TProduct.UpdateSearchPaths(const APlatform, AProjectDir: string; const APlatformConfig: TManifestPlatform; ACanonical: Boolean);
+procedure TProduct.FillEnvironmentVariables(AEnvironmentVariable: TStrings);
+begin
+  AEnvironmentVariable.Values['ProductVersion'] := FBdsVersion;
+  AEnvironmentVariable.Values['PackageVersion'] := FPackageVersion;
 
-  procedure AppendPaths(AReg: TRegistry; APaths: TStrings; const ARegValue: string);
+  var LReg := TRegistry.Create(KEY_READ);
+  try
+    LReg.RootKey := HKEY_LOCAL_MACHINE;
+    if LReg.OpenKeyReadOnly('SOFTWARE\WOW6432Node\Embarcadero\BDS\' + FBdsVersion) then
+    begin
+      if LReg.ValueExists('RootDir') then
+        AEnvironmentVariable.Values['BDS'] :=
+            ExcludeTrailingPathDelimiter(LReg.ReadString('RootDir'));
+      if LReg.ValueExists('App') then
+        AEnvironmentVariable.Values['BDSBIN'] :=
+            ExcludeTrailingPathDelimiter(ExtractFilePath(LReg.ReadString('App')));
+      LReg.CloseKey;
+    end;
+
+    LReg.RootKey := HKEY_CURRENT_USER;
+    if LReg.OpenKeyReadOnly('Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\Environment Variables') then
+    begin
+      var LNames := TStringList.Create;
+      try
+        LReg.GetValueNames(LNames);
+        for var LName in LNames do
+          AEnvironmentVariable.Values[LName] := LReg.ReadString(LName);
+      finally
+        LNames.Free;
+      end;
+      LReg.CloseKey;
+    end;
+  finally
+    LReg.Free;
+  end;
+end;
+
+procedure TProduct.UpdateSearchPaths(const APlatform, AProjectDir: string; APlatformPaths: TPlatformPaths);
+
+  procedure AppendPaths(AReg: TRegistry; APaths: TArray<string>; const ARegValue: string);
   begin
-    if APaths.IsEmpty then
+    if Length(APaths) < 1 then
       Exit;
 
     var LExisting := if AReg.ValueExists(ARegValue) then
@@ -939,25 +816,9 @@ begin
     if not Reg.OpenKey(RegPath, False) then
       Exit;
 
-    if ACanonical then
-    begin
-      var LPath := TStringList.Create;
-      try
-        LPath.Text := TPath.Combine(AProjectDir, 'lib', APlatform);
-        AppendPaths(Reg, LPath, 'Search Path');
-        LPath.Text := TPath.Combine(AProjectDir, 'lib', APlatform, 'debug');
-        AppendPaths(Reg, LPath, 'Debug DCU Path');
-      finally
-        LPath.Free;
-      end;
-      AppendPaths(Reg, APlatformConfig.SourcePath, 'Browsing Path');
-    end
-    else
-    begin
-      AppendPaths(Reg, APlatformConfig.ReleaseDCUPath, 'Search Path');
-      AppendPaths(Reg, APlatformConfig.SourcePath, 'Browsing Path');
-      AppendPaths(Reg, APlatformConfig.DebugDCUPath, 'Debug DCU Path');
-    end;
+    AppendPaths(Reg, APlatformPaths.ReleaseDCUPath, 'Search Path');
+    AppendPaths(Reg, APlatformPaths.SourcePath, 'Browsing Path');
+    AppendPaths(Reg, APlatformPaths.DebugDCUPath, 'Debug DCU Path');
 
     Reg.CloseKey;
   finally
@@ -968,8 +829,7 @@ end;
 procedure TProduct.BuildPackages(
     const AWorkspaceDir, AProjectDir, APackageFolder: string;
     const APackages: TManifestPackageList;
-    const APlatforms: TSupportedPlatforms;
-    ACanonical: Boolean
+    const APlatforms: TSupportedPlatforms
 );
 begin
   var BuildConfigs := ['debug', 'release'];
@@ -1036,15 +896,11 @@ begin
         TConsole.Write(Format('    Building %s [%s/%s]...', [PkgName, TypeStr, LBuildConfig]));
 
         var LMSBuildParams := '';
-        if ACanonical then
-        begin
-          var LDcuSuffix := if SameText(LBuildConfig, 'Debug')  then 'debug' else '';
-                            
-          LMSBuildParams :=
-            ' /p:DCC_DcuOutput="' + TPath.Combine(AProjectDir, 'lib', LPlatformPair.Key, LDcuSuffix) + '"' +
-            ' /p:DCC_BplOutput="' + TPath.Combine(BlocksDir, 'bpl') + '"' +
-            ' /p:DCC_DcpOutput="' + TPath.Combine(BlocksDir, 'dcp') + '"';
-        end;
+        var LSuffix := if SameText(LBuildConfig, 'Debug')  then 'debug' else '';
+
+        LMSBuildParams :=
+          ' /p:DCC_BplOutput="' + TPath.Combine(BlocksDir, 'bpl', LSuffix) + '"' +
+          ' /p:DCC_DcpOutput="' + TPath.Combine(BlocksDir, 'dcp', LSuffix) + '"';
 
         var CmdLine :=
             Format(
@@ -1068,10 +924,9 @@ begin
         end;
       end;
 
-      InstallPackage(LPackage, AWorkspaceDir, DprojPath, LPlatformPair, ACanonical);
+      InstallPackage(LPackage, AWorkspaceDir, DprojPath, LPlatformPair);
     end;
 
-    UpdateSearchPaths(LPlatformPair.Key, AProjectDir, LPlatform, ACanonical);
   end;
 
   TConsole.WriteLine;

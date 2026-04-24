@@ -73,8 +73,6 @@ type
     FProduct: string;
     [Param('registrykey')]
     FRegistryKey: string;
-    [Param('canonical')]
-    FCanonical: Boolean;
   public
     procedure Execute; override;
     procedure ShowHelp; override;
@@ -364,7 +362,7 @@ begin
   begin
     TConsole.WriteLine('Initialising workspace: ' + GetCurrentDir, clWhite);
     TConsole.WriteLine;
-    TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey, FCanonical);
+    TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey);
     TConsole.WriteLine('Workspace initialised.', clGreen);
     TConsole.WriteLine;
   end;
@@ -385,7 +383,6 @@ begin
   WriteOption('', 'Run "' + AppExeName + ' listproducts" to see valid values.');
   WriteOption('/registrykey <key>', 'Registry profile key (default: BDS).');
   WriteOption('', 'Use this when Delphi is started with -r <key>.');
-  WriteOption('/canonical', 'Use canonical BPL output structure without prompting.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' init');
@@ -486,7 +483,7 @@ begin
     var Confirm := TConsole.ReadLine;
     if not SameText(Trim(Confirm), 'Y') then
       raise Exception.Create('Operation cancelled. Run "blocks Init" to initialise the workspace first.');
-    TWorkspace.Initialize(TWorkspace.WorkDir, '', '', False);
+    TWorkspace.Initialize(TWorkspace.WorkDir, '', '');
     TConsole.WriteLine;
   end;
 end;

@@ -11,12 +11,10 @@ type
     FSources: TStringList;
     FProduct: string;
     FRegistryKey: string;
-    FCanonical: Boolean;
     FWorkspaceDir: string;
     function ConfigPath: string;
   public
     property Sources: TStringList read FSources;
-    property Canonical: Boolean read FCanonical write FCanonical;
 
     property Product: string read FProduct write FProduct;
     property RegistryKey: string read FRegistryKey write FRegistryKey;
@@ -57,8 +55,6 @@ begin
     FProduct := AValue
   else if SameText(AKey, 'registrykey') then
     FRegistryKey := AValue
-  else if SameText(AKey, 'canonical') then
-    FCanonical := StrToBool(AValue)
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;
@@ -100,8 +96,6 @@ begin
     Result := FProduct
   else if SameText(AKey, 'registrykey') then
     Result := FRegistryKey
-  else if SameText(AKey, 'canonical') then
-    Result := BoolToStr(FCanonical, True)
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;

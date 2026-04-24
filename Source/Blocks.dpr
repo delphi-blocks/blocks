@@ -6,6 +6,7 @@ program Blocks;
 {$R 'blocks_version.res' 'blocks_version.rc'}
 
 uses
+  Winapi.ActiveX,
   System.SysUtils,
   Blocks.CLI.App in 'Blocks.CLI.App.pas',
   Blocks.Console in 'Blocks.Console.pas',
@@ -19,14 +20,20 @@ uses
   Blocks.GitHub in 'Blocks.GitHub.pas',
   Blocks.Core in 'Blocks.Core.pas',
   Blocks.Model.Config in 'Blocks.Model.Config.pas',
-  Blocks.Model.SysConfig in 'Blocks.Model.SysConfig.pas';
+  Blocks.Model.SysConfig in 'Blocks.Model.SysConfig.pas',
+  Blocks.Model.Package in 'Blocks.Model.Package.pas';
 
 begin
   {$IFDEF DEBUG}
   ReportMemoryLeaksOnShutdown := True;
   {$ENDIF}
   try
-    TApp.RunBlocks;
+    CoInitialize(nil);
+    try
+      TApp.RunBlocks;
+    finally
+      CoUninitialize;
+    end;
   except
     on E: Exception do
     begin

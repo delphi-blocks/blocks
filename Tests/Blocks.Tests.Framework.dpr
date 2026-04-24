@@ -29,12 +29,17 @@ uses
   DUnitX.Loggers.Console,
   DUnitX.Loggers.Xml.NUnit,
   DUnitX.TestFramework,
+  {$IFDEF RELEASE}
+  Winapi.ActiveX,
+  {$ENDIF }
   Blocks.Tests.SemVer in 'Blocks.Tests.SemVer.pas',
   Blocks.Console in '..\Source\Blocks.Console.pas',
   Blocks.Http in '..\Source\Blocks.Http.pas',
   Blocks.JSON in '..\Source\Blocks.JSON.pas',
   Blocks.Tests.JSON in 'Blocks.Tests.JSON.pas',
-  Blocks.Core in '..\Source\Blocks.Core.pas';
+  Blocks.Core in '..\Source\Blocks.Core.pas',
+  Blocks.Model.Package in '..\Source\Blocks.Model.Package.pas',
+  Blocks.Tests.Package in 'Blocks.Tests.Package.pas';
 
 var
   runner : ITestRunner;
@@ -51,6 +56,10 @@ begin
   DUnitX.Loggers.GUI.VCL.Run;
   Exit;
 {$ENDIF}
+{$IFDEF RELEASE}
+  CoInitialize(nil);
+{$ENDIF }
+
   try
     //Check command line options, will exit if invalid
     TDUnitX.CheckCommandLine;
@@ -84,4 +93,7 @@ begin
     on E: Exception do
       System.Writeln(E.ClassName, ': ', E.Message);
   end;
+{$IFDEF RELEASE}
+  CoUninitialize;
+{$ENDIF }
 end.

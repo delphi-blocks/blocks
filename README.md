@@ -79,41 +79,19 @@ Append `@<constraint>` to a package ID to pin or restrict the version:
 
 > **Note:** In `cmd.exe` the `^` character must be escaped as `^^` (e.g. `owner.package@^^1.2.0`). In PowerShell no escaping is needed.
 
-## Canonical mode
+## Output layout
 
-When you run `blocks init` you are asked whether to use **canonical mode**. This setting is stored in the workspace configuration and applied to every subsequent `install` and `uninstall` in that workspace.
-
-### The problem canonical mode solves
-
-A Delphi package project (`.dproj`) declares its own output directories for `.dcu`, `.bpl`, and `.dcp` files. Those paths are usually relative, version-specific, or even hardcoded by the package author, and they vary widely across third-party libraries. When the same Delphi installation is used under different IDE registry profiles (created with `bds.exe -r <key>`), compiled artefacts from different profiles can collide or overwrite each other.
-
-### What canonical mode does
-
-In canonical mode **Blocks ignores the output paths declared inside the `.dproj`** and instead redirects all compiler output to a well-known directory tree under the workspace's `.blocks/` folder, regardless of what the package author has written:
+When `blocks install` compiles a package it overrides only two MSBuild properties; everything else — most importantly the DCU output — follows what the package's own `.dproj` declares.
 
 | Artefact | Output path |
 |----------|-------------|
-| Release DCUs | `<project>\lib\<Platform>\` |
-| Debug DCUs | `<project>\lib\<Platform>\debug\` |
-| BPL files | `.blocks\bpl\` |
-| DCP files | `.blocks\dcp\` |
+| BPL files | `.blocks\bpl\` (release) and `.blocks\bpl\debug\` (debug) |
+| DCP files | `.blocks\dcp\` (release) and `.blocks\dcp\debug\` (debug) |
+| DCU files | Whatever the `.dproj` resolves `DCC_DcuOutput` to for the active config/platform |
 
-These paths are passed to MSBuild via `/p:DCC_DcuOutput`, `/p:DCC_BplOutput`, and `/p:DCC_DcpOutput`, so the package source itself never needs to be modified.
+The fixed BPL/DCP location makes installations under different IDE registry profiles (created with `bds.exe -r <key>`) safe: each workspace gets its own `.blocks\` tree, so artefacts from different profiles never collide.
 
-Both the **debug** and **release** configurations are compiled for every package; the Delphi library registry entries point at the canonical paths above rather than at whatever the `.dproj` specifies.
-
-### When to use it
-
-Canonical mode (the default) makes the compiled output of every package homogeneous and predictable, regardless of how each package author configured the `.dproj`. This is especially useful when you need to install the same package — possibly in different versions — against the same Delphi installation but under different IDE registry profiles (created with `bds.exe -r <key>`): because each profile gets its own `.blocks\bpl\` and `.blocks\dcp\` trees, the artefacts do not collide.
-
-To enable or disable canonical mode after initialisation:
-
-```bat
-blocks config canonical=True
-blocks config canonical=False
-```
-
-> **Warning:** changing this setting in a workspace that already has packages installed is dangerous: Blocks uses the flag to locate BPL/DCU files and registry paths during uninstall. Uninstall all packages before toggling it.
+Both **debug** and **release** configurations are compiled for every package. After the build, Blocks reads the DCU paths from the `.dproj` (replaying the MSBuild cascade for the active platform) and registers them under `HKCU\Software\Embarcadero\<profile>\<BdsVersion>\Library\<Platform>` together with the manifest's `sourcePath`.
 
 ## Package manifest
 
@@ -136,8 +114,8 @@ Each package in the repository is described by a JSON manifest file (`<vendor>.<
     "url": "https://github.com/delphi-blocks/WiRL/tree/v4.6.0"
   },
 
-  // Platforms declare the source paths to add to the Delphi library search paths.
-  // In canonical mode the DCU output paths are ignored and overridden by Blocks.
+  // "sourcePath" entries are registered in the Delphi library "Browsing Path".
+  // DCU output locations come from the .dproj itself; Blocks does not override them.
   "platforms": {
     "Win32": {
       "sourcePath":     ["Source\\Core", "Source\\Client"],
