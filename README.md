@@ -81,17 +81,19 @@ Append `@<constraint>` to a package ID to pin or restrict the version:
 
 ## Output layout
 
-When `blocks install` compiles a package it overrides only two MSBuild properties; everything else — most importantly the DCU output — follows what the package's own `.dproj` declares.
+When `blocks install` compiles a package it overrides the MSBuild output paths so that artefacts live under predictable locations.
 
 | Artefact | Output path |
 |----------|-------------|
 | BPL files | `.blocks\bpl\` (release) and `.blocks\bpl\debug\` (debug) |
 | DCP files | `.blocks\dcp\` (release) and `.blocks\dcp\debug\` (debug) |
-| DCU files | Whatever the `.dproj` resolves `DCC_DcuOutput` to for the active config/platform |
+| DCU files | `<project>\lib\<Platform>\` (release) and `<project>\lib\<Platform>\debug\` (debug) |
 
 The fixed BPL/DCP location makes installations under different IDE registry profiles (created with `bds.exe -r <key>`) safe: each workspace gets its own `.blocks\` tree, so artefacts from different profiles never collide.
 
-Both **debug** and **release** configurations are compiled for every package. After the build, Blocks reads the DCU paths from the `.dproj` (replaying the MSBuild cascade for the active platform) and registers them under `HKCU\Software\Embarcadero\<profile>\<BdsVersion>\Library\<Platform>` together with the manifest's `sourcePath`.
+DCU output can be left to the package's own `.dproj` by setting `packageOptions.keepProjectDcuPaths` to `true` in the manifest. This should not be used unless preserving the DCU layout declared by the `.dproj` is strictly necessary.
+
+Both **debug** and **release** configurations are compiled for every package. After the build, Blocks registers the DCU search paths under `HKCU\Software\Embarcadero\<profile>\<BdsVersion>\Library\<Platform>` together with the manifest's `sourcePath`.
 
 ## Package manifest
 
@@ -153,6 +155,7 @@ Each package in the repository is described by a JSON manifest file (`<vendor>.<
 | `platforms` | Per-platform source and DCU paths added to the Delphi library registry. |
 | `packages` | List of `.dproj` files to compile; type can be `runtime`, `designtime`, or both. |
 | `packageOptions.folders` | Maps Delphi version keys to the subfolder under `packages\` containing the `.dproj` files. A `+` suffix means "this version or newer". |
+| `packageOptions.keepProjectDcuPaths` | Optional; defaults to `false`. When `true`, DCU output paths are taken from the `.dproj` instead of Blocks' default `<project>\lib\<Platform>\`. Should not be used unless preserving the DCU layout declared by the `.dproj` is strictly necessary. |
 | `dependencies` | Other packages that must be installed first, with their version constraints. |
 
 ## Application manifest

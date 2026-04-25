@@ -102,8 +102,7 @@ type
     /// <exception cref="Exception">Raised when a platform is not installed or a package fails to compile.</exception>
     procedure BuildPackages(
         const AWorkspaceDir, AProjectDir, APackageFolder: string;
-        const APackages: TManifestPackageList;
-        const APlatforms: TSupportedPlatforms
+        const AManifest: TManifest
     );
 
     /// <summary>Appends source, browsing, and debug DCU paths to the Delphi library registry.</summary>
@@ -828,8 +827,7 @@ end;
 
 procedure TProduct.BuildPackages(
     const AWorkspaceDir, AProjectDir, APackageFolder: string;
-    const APackages: TManifestPackageList;
-    const APlatforms: TSupportedPlatforms
+    const AManifest: TManifest
 );
 begin
   var BuildConfigs := ['debug', 'release'];
@@ -857,13 +855,13 @@ begin
     SetEnvironmentVariable('PATH', PChar(NewPath));
 
   // Verify all platforms are installed before starting
-  for var LPlatformPair in APlatforms do
+  for var LPlatformPair in AManifest.Platforms do
     if not TestPlatformInstalled(LPlatformPair.Key) then
       raise Exception.CreateFmt('Platform "%s" is not installed for %s.', [LPlatformPair.Key, FDisplayName]);
 
   var PlatformNames := TStringList.Create;
   try
-    for var LPlatformPair in APlatforms do
+    for var LPlatformPair in AManifest.Platforms do
       PlatformNames.Add(LPlatformPair.Key);
 
     TConsole.WriteLine('Compiling packages...', clCyan);
@@ -876,13 +874,13 @@ begin
     PlatformNames.Free;
   end;
 
-  for var LPlatformPair in APlatforms do
+  for var LPlatformPair in AManifest.Platforms do
   begin
     var LPlatform := LPlatformPair.Value;
 
     TConsole.WriteLine('  [' + LPlatformPair.Key + ']', clDkCyan);
 
-    for var LPackage in APackages do
+    for var LPackage in AManifest.Packages do
     begin
       var PkgName := LPackage.Name;
       var TypeStr := string.Join(', ', LPackage.&Type.ToStringArray);
@@ -901,6 +899,12 @@ begin
         LMSBuildParams :=
           ' /p:DCC_BplOutput="' + TPath.Combine(BlocksDir, 'bpl', LSuffix) + '"' +
           ' /p:DCC_DcpOutput="' + TPath.Combine(BlocksDir, 'dcp', LSuffix) + '"';
+
+        if not AManifest.PackageOptions.KeepProjectDcuPaths then
+        begin
+          LMSBuildParams := LMSBuildParams +
+            ' /p:DCC_DcuOutput="' + TPath.Combine(AProjectDir, 'lib', LPlatformPair.Key, LSuffix) + '"';
+        end;
 
         var CmdLine :=
             Format(

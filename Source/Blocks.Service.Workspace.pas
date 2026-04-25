@@ -99,6 +99,28 @@ uses
   Blocks.Service.Product,
   Blocks.GitHub, Blocks.Model.Package;
 
+procedure ExpandMacros(var APath: string; AEnvironmentVariable: TStrings);
+begin
+  APath := RegExReplace(APath, '\$\(([^)]+)\)',
+    function(const AMatch: TMatch): string
+    begin
+      // Unknown macros resolve to '' — same as stripping the residual.
+      Result := AEnvironmentVariable.Values[AMatch.Groups[1].Value];
+    end);
+end;
+
+procedure NormalizePath(var APaths: TArray<string>; const ABasePath: string; AEnvironmentVariable: TStrings);
+begin
+  for var I := Low(APaths) to High(APaths) do
+  begin
+    ExpandMacros(APaths[I], AEnvironmentVariable);
+    if TPath.IsRelativePath(APaths[I]) then
+    begin
+      APaths[I] := ExpandFileName(TPath.Combine(ABasePath, APaths[I]));
+    end;
+  end;
+end;
+
 function GetDProjPath(const AProjectDir: string; AProduct: TProduct; AManifest: TManifest; APackageName: string): string;
 begin
   var LPackageFolder := AProduct.GetPackageFolder(AManifest.PackageOptions.Folders);
@@ -106,45 +128,13 @@ begin
   Result := TPath.Combine(LPackagesPath, APackageName + '.dproj');
 end;
 
-function GetPackageDefinedPlatformPath(const ADprojName, AProjectDir, APlatform: string; APlatformManifest: TManifestPlatform; AEnvironmentVariable: TStrings): TPlatformPaths;
-
-  procedure ExpandMacros(var APath: string);
-  begin
-    APath := RegExReplace(APath, '\$\(([^)]+)\)',
-      function(const AMatch: TMatch): string
-      begin
-        // Unknown macros resolve to '' — same as stripping the residual.
-        Result := AEnvironmentVariable.Values[AMatch.Groups[1].Value];
-      end);
-  end;
-
-  procedure NormalizePath(var APaths: TArray<string>);
-  begin
-    var LDprojPath := ExtractFilePath(ADprojName);
-    for var I := Low(APaths) to High(APaths) do
-    begin
-      ExpandMacros(APaths[I]);
-      if TPath.IsRelativePath(APaths[I]) then
-      begin
-        APaths[I] := ExpandFileName(TPath.Combine(LDprojPath, APaths[I]));
-      end;
-    end;
-  end;
-
-  procedure NormalizeSearchPath(var APaths: TArray<string>);
-  begin
-    for var I := Low(APaths) to High(APaths) do
-    begin
-      if TPath.IsRelativePath(APaths[I]) then
-      begin
-        APaths[I] := ExpandFileName(TPath.Combine(AProjectDir, APaths[I]));
-      end;
-    end;
-  end;
-
+function GetPlatformPaths(const AManifest: TManifest; const ADprojName, AProjectDir, APlatform: string;
+    AEnvironmentVariable: TStrings): TPlatformPaths;
 begin
+  var LPlatformManifest := AManifest.Platforms[APlatform];
   var LPackage := TPackageProject.LoadFromFile(ADprojName);
   try
+    var LDprojDir := ExtractFilePath(ADprojName);
     AEnvironmentVariable.Values['Platform'] := APlatform;
     var LDLLSuffix := LPackage.LibSuffix;
     if SameText(LDLLSuffix, 'AUTO') then
@@ -152,17 +142,27 @@ begin
 
     AEnvironmentVariable.Values['DllSuffix'] := LDLLSuffix;
 
-    var LSourcePath := APlatformManifest.SourcePath.ToStringArray;
-    NormalizeSearchPath(LSourcePath);
+    var LSourcePath := LPlatformManifest.SourcePath.ToStringArray;
+    NormalizePath(LSourcePath, AProjectDir, AEnvironmentVariable);
 
-    var LDebugDcuPath   := LPackage.GetProperty(TPackageProject.DCCDcuOutput, 'Debug',   APlatform).Split([';']);
-    AEnvironmentVariable.Values['Config'] := 'Debug';
-    NormalizePath(LDebugDcuPath);
+    var LDebugDcuPath: TArray<string>;
+    var LReleaseDcuPath: TArray<string>;
 
-    var LReleaseDcuPath := LPackage.GetProperty(TPackageProject.DCCDcuOutput, 'Release', APlatform).Split([';']);
-    AEnvironmentVariable.Values['Config'] := 'Release';
-    NormalizePath(LReleaseDcuPath);
+    if AManifest.PackageOptions.KeepProjectDcuPaths then
+    begin
+      LDebugDcuPath := LPackage.GetProperty(TPackageProject.DCCDcuOutput, 'Debug', APlatform).Split([';']);
+      AEnvironmentVariable.Values['Config'] := 'Debug';
+      NormalizePath(LDebugDcuPath, LDprojDir, AEnvironmentVariable);
 
+      LReleaseDcuPath := LPackage.GetProperty(TPackageProject.DCCDcuOutput, 'Release', APlatform).Split([';']);
+      AEnvironmentVariable.Values['Config'] := 'Release';
+      NormalizePath(LReleaseDcuPath, LDprojDir, AEnvironmentVariable);
+    end
+    else
+    begin
+      LReleaseDcuPath := [TPath.Combine(AProjectDir, 'lib', APlatform)];
+      LDebugDcuPath := [TPath.Combine(AProjectDir, 'lib', APlatform, 'debug')];
+    end;
     Result.SourcePath := LSourcePath;
     Result.ReleaseDCUPath := LReleaseDcuPath;
     Result.DebugDCUPath := LDebugDcuPath;
@@ -424,12 +424,12 @@ begin
     end;
 
     // Step 8 — Compile
-    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LPackageFolder, LManifest.Packages, LManifest.Platforms);
+    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LPackageFolder, LManifest);
 
     // Step 9 — Update product paths
-    var LEnvironmentVariable := TStringList.Create;
+    var LEnvironmentVariables := TStringList.Create;
     try
-      LSelectedProduct.FillEnvironmentVariables(LEnvironmentVariable);
+      LSelectedProduct.FillEnvironmentVariables(LEnvironmentVariables);
       for var LPlatformPair in LManifest.Platforms do
       begin
         var LPackagesPath := TPath.Combine(TPath.Combine(LProjectDir, 'packages'), LPackageFolder);
@@ -437,12 +437,12 @@ begin
         for var LPackage in LManifest.Packages do
         begin
           var DprojPath := TPath.Combine(LPackagesPath, LPackage.Name + '.dproj');
-          var LPlatformPaths := GetPackageDefinedPlatformPath(DprojPath, LProjectDir, LPlatformPair.Key, LPlatformPair.Value, LEnvironmentVariable);
+          var LPlatformPaths := GetPlatformPaths(LManifest, DprojPath, LProjectDir, LPlatformPair.Key, LEnvironmentVariables);
           LSelectedProduct.UpdateSearchPaths(LPlatformPair.Key, LProjectDir, LPlatformPaths);
         end;
       end;
     finally
-      LEnvironmentVariable.Free;
+      LEnvironmentVariables.Free;
     end;
 
     // Step 10 — Update database
@@ -499,17 +499,17 @@ begin
       LSelectedProduct.FillEnvironmentVariables(LEnvironmentVariables);
       for var LPackage in LManifest.Packages do
       begin
-        for var LPlatform in LManifest.Platforms do
+        for var LPlatformPair in LManifest.Platforms do
         begin
           var LPackageFolder := LSelectedProduct.GetPackageFolder(LManifest.PackageOptions.Folders);
           var LPackagesPath := TPath.Combine(TPath.Combine(LProjectDir, 'packages'), LPackageFolder);
           var DprojPath := TPath.Combine(LPackagesPath, LPackage.Name + '.dproj');
 
           if LPackage.IsDesignTime then
-            LSelectedProduct.UninstallPackage(LPackage, WorkDir, DprojPath, LPlatform);
+            LSelectedProduct.UninstallPackage(LPackage, WorkDir, DprojPath, LPlatformPair);
 
-          var LPlatformPaths := GetPackageDefinedPlatformPath(DprojPath, LProjectDir, LPlatform.Key, LPlatform.Value, LEnvironmentVariables);
-          LSelectedProduct.DeleteSearchPaths(LPlatform.Key, LProjectDir, LPlatformPaths);
+          var LPlatformPaths := GetPlatformPaths(LManifest, DprojPath, LProjectDir, LPlatformPair.Key, LEnvironmentVariables);
+          LSelectedProduct.DeleteSearchPaths(LPlatformPair.Key, LProjectDir, LPlatformPaths);
         end;
       end;
     finally

@@ -111,11 +111,13 @@ type
   TManifestPackageOptions = class
   private
     FFolders: TManifestPackageFolders;
+    FKeepProjectDcuPaths: Boolean;
   public
     constructor Create;
     destructor Destroy; override;
 
     property Folders: TManifestPackageFolders read FFolders;
+    property KeepProjectDcuPaths: Boolean read FKeepProjectDcuPaths write FKeepProjectDcuPaths;
   end;
 
   // -----------------------------------------------------------------------
