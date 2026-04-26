@@ -178,15 +178,76 @@ type
     property Dependencies: TDependencyMap read FDependencies;
   end;
 
+  // -----------------------------------------------------------------------
+  // Repository index entry — minimal info for search/lookup
+  // -----------------------------------------------------------------------
+  TRepositoryIndexEntry = class
+  private
+    FId: string;
+    FName: string;
+    FDescription: string;
+    FKeywords: TStringList;
+    FVersions: TStringList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    property Id: string read FId write FId;
+    property Name: string read FName write FName;
+    property Description: string read FDescription write FDescription;
+    property Keywords: TStringList read FKeywords;
+    /// <summary>Available versions, sorted descending (index 0 is the latest).</summary>
+    property Versions: TStringList read FVersions;
+  end;
+
+  TRepositoryIndexEntryList = class(TObjectList<TRepositoryIndexEntry>)
+  public
+    constructor Create;
+  end;
+
+  // -----------------------------------------------------------------------
+  // Repository index — searchable cache of all packages in the local repo
+  // -----------------------------------------------------------------------
+  TRepositoryIndex = class
+  private
+    FEntries: TRepositoryIndexEntryList;
+    FIndexPath: string;
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    /// <summary>Scans the workspace repository folder and returns a populated index.</summary>
+    /// <remarks>For each package, reads only the latest version's manifest.</remarks>
+    class function Build: TRepositoryIndex;
+
+    /// <summary>Load the index from <c>{BlocksDir}\repository\index.json</c>.</summary>
+    procedure Load;
+    /// <summary>Save the index to <c>{BlocksDir}\repository\index.json</c>.</summary>
+    procedure Save;
+
+    /// <summary>Returns entries whose id, name, description or any keyword contains <paramref name="APattern"/> (case insensitive).</summary>
+    /// <param name="APattern">Substring to look for; empty matches all entries.</param>
+    function Search(const APattern: string): TArray<TRepositoryIndexEntry>;
+
+    /// <summary>Returns entries whose <c>Name</c> matches <paramref name="AName"/> exactly (case insensitive).</summary>
+    /// <param name="AName">Package name to look up; package names are not guaranteed to be unique.</param>
+    function FindByName(const AName: string): TArray<TRepositoryIndexEntry>;
+
+    property Entries: TRepositoryIndexEntryList read FEntries;
+  end;
+
 implementation
 
 uses
+  System.StrUtils,
+
   Blocks.Console,
   Blocks.Http,
   Blocks.Service.Workspace;
 
 const
   ManifestSchemaUrl = 'https://delphi-blocks.dev/schema/package.v1.json';
+  RepositoryIndexSchemaUrl = 'https://delphi-blocks.dev/schema/repository-index.v1.json';
 
 { TManifestPlatform }
 
@@ -341,6 +402,168 @@ begin
     end));
 
   Result := LResult;
+end;
+
+{ TRepositoryIndexEntry }
+
+constructor TRepositoryIndexEntry.Create;
+begin
+  inherited Create;
+  FKeywords := TStringList.Create;
+  FVersions := TStringList.Create;
+end;
+
+destructor TRepositoryIndexEntry.Destroy;
+begin
+  FKeywords.Free;
+  FVersions.Free;
+  inherited;
+end;
+
+{ TRepositoryIndexEntryList }
+
+constructor TRepositoryIndexEntryList.Create;
+begin
+  inherited Create(True);
+end;
+
+{ TRepositoryIndex }
+
+constructor TRepositoryIndex.Create;
+begin
+  inherited Create;
+  FEntries := TRepositoryIndexEntryList.Create;
+  FIndexPath := TPath.Combine(TPath.Combine(TWorkspace.BlocksDir, 'repository'), 'index.json');
+end;
+
+destructor TRepositoryIndex.Destroy;
+begin
+  FEntries.Free;
+  inherited;
+end;
+
+procedure TRepositoryIndex.Save;
+begin
+  var LJSON := TJsonHelper.ObjectToJSON(Self) as TJSONObject;
+  try
+    LJSON.AddPair('$schema', RepositoryIndexSchemaUrl);
+    TFile.WriteAllText(FIndexPath, TJsonHelper.PrettyPrint(LJSON));
+  finally
+    LJSON.Free;
+  end;
+end;
+
+procedure TRepositoryIndex.Load;
+begin
+  if FileExists(FIndexPath) then
+  begin
+    FEntries.Clear;
+    var LJSON := TJSONObject.ParseJSONValue(TFile.ReadAllText(FIndexPath), False, True);
+    try
+      TJsonHelper.CheckSchema(LJSON, RepositoryIndexSchemaUrl);
+      TJsonHelper.JSONToObject(Self, LJSON);
+    finally
+      LJSON.Free;
+    end;
+  end;
+end;
+
+class function TRepositoryIndex.Build: TRepositoryIndex;
+begin
+  Result := TRepositoryIndex.Create;
+  try
+    var LRepoDir := TPath.Combine(TWorkspace.BlocksDir, 'repository');
+    if not TDirectory.Exists(LRepoDir) then
+      Exit;
+
+    for var LOwnerDir in TDirectory.GetDirectories(LRepoDir) do
+    begin
+      var LOwner := TPath.GetFileName(LOwnerDir);
+      for var LPackageDir in TDirectory.GetDirectories(LOwnerDir) do
+      begin
+        var LPackage := TPath.GetFileName(LPackageDir);
+        var LId := LOwner + '.' + LPackage;
+
+        var LSemVers: TArray<TSemVer> := [];
+        for var LVersionDir in TDirectory.GetDirectories(LPackageDir) do
+        begin
+          var LVer: TSemVer;
+          if TSemVer.TryParse(TPath.GetFileName(LVersionDir), LVer) then
+            LSemVers := LSemVers + [LVer];
+        end;
+        if Length(LSemVers) = 0 then
+          Continue;
+
+        // Sort descending — latest first
+        TArray.Sort<TSemVer>(LSemVers, TComparer<TSemVer>.Construct(
+          function(const A, B: TSemVer): Integer
+          begin
+            Result := B.CompareTo(A);
+          end));
+
+        var LLatestManifestPath := TPath.Combine(
+            TPath.Combine(LPackageDir, LSemVers[0].ToString),
+            LId + '.manifest.json');
+        if not FileExists(LLatestManifestPath) then
+          Continue;
+
+        var LManifest: TManifest;
+        var LJSON := TJSONObject.ParseJSONValue(TFile.ReadAllText(LLatestManifestPath), False, True);
+        try
+          TJsonHelper.CheckSchema(LJSON, ManifestSchemaUrl);
+          LManifest := TJsonHelper.JSONToObject<TManifest>(LJSON);
+        finally
+          LJSON.Free;
+        end;
+
+        try
+          var LEntry := TRepositoryIndexEntry.Create;
+          LEntry.Id := LId;
+          LEntry.Name := LManifest.Name;
+          LEntry.Description := LManifest.Description;
+          LEntry.Keywords.AddStrings(LManifest.Keywords);
+          for var LSubVer in LSemVers do
+            LEntry.Versions.Add(LSubVer.ToString);
+          Result.Entries.Add(LEntry);
+        finally
+          LManifest.Free;
+        end;
+      end;
+    end;
+  except
+    Result.Free;
+    raise;
+  end;
+end;
+
+function TRepositoryIndex.Search(const APattern: string): TArray<TRepositoryIndexEntry>;
+begin
+  Result := [];
+  for var LEntry in FEntries do
+  begin
+    if ContainsText(LEntry.Id, APattern)
+        or ContainsText(LEntry.Name, APattern)
+        or ContainsText(LEntry.Description, APattern) then
+    begin
+      Result := Result + [LEntry];
+      Continue;
+    end;
+
+    for var LKeyword in LEntry.Keywords do
+      if ContainsText(LKeyword, APattern) then
+      begin
+        Result := Result + [LEntry];
+        Break;
+      end;
+  end;
+end;
+
+function TRepositoryIndex.FindByName(const AName: string): TArray<TRepositoryIndexEntry>;
+begin
+  Result := [];
+  for var LEntry in FEntries do
+    if SameText(LEntry.Name, AName) then
+      Result := Result + [LEntry];
 end;
 
 end.

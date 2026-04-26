@@ -37,6 +37,15 @@ type
     class function GetConfig: TConfig; static;
     class function GetDatabase: TDatabase; static;
     class procedure InitializeFromSource(const ASource: string); static;
+    /// <summary>Rebuilds <c>.blocks\repository\index.json</c> from the local repository.</summary>
+    class procedure RebuildIndex; static;
+    /// <summary>Resolves an install/uninstall argument to a package id (<c>vendor.name</c>).</summary>
+    /// <remarks>
+    ///   If <paramref name="AArg"/> contains a dot it is assumed to already be an id and
+    ///   returned unchanged. Otherwise the repository index is searched by name; ambiguous
+    ///   matches are resolved interactively (or raise when <paramref name="ASilent"/> is true).
+    /// </remarks>
+    class function ResolvePackageId(const AArg: string; ASilent: Boolean = False): string; static;
     class constructor Create;
     class destructor  Destroy;
   public
@@ -62,7 +71,7 @@ type
     class procedure Update(const AWorkDir: string); static;
 
     /// <summary>Downloads, compiles and registers a package in the workspace.</summary>
-    /// <param name="APackageName">Package identifier (without version suffix).</param>
+    /// <param name="APackageName">Package id (<c>vendor.name</c>) or package name; resolved via the repository index.</param>
     /// <param name="AVersionConstraint">Version constraint string (e.g. <c>1.2.0</c>, <c>>=1.0.0</c>); empty for any version.</param>
     /// <param name="AOverwrite">Overwrite the project directory if it already exists.</param>
     /// <param name="ABuildOnly">Skip download; compile the already-extracted project.</param>
@@ -72,7 +81,7 @@ type
         AOverwrite, ABuildOnly, ASilent, AForce: Boolean); static;
 
     /// <summary>Removes a previously installed package from the workspace and the database.</summary>
-    /// <param name="APackageName">Package identifier or manifest path/URL.</param>
+    /// <param name="APackageName">Package id (<c>vendor.name</c>) or package name; resolved via the repository index.</param>
     class procedure Uninstall(const APackageName: string); static;
 
     /// <summary>Root directory of the current workspace.</summary>
@@ -229,6 +238,38 @@ begin
   FWorkDir := ExcludeTrailingPathDelimiter(AValue);
 end;
 
+class function TWorkspace.ResolvePackageId(const AArg: string; ASilent: Boolean): string;
+begin
+  if AArg.Contains('.') then
+    Exit(AArg);
+
+  var LIndex := TRepositoryIndex.Create;
+  try
+    LIndex.Load;
+    var LMatches := LIndex.FindByName(AArg);
+    if Length(LMatches) = 0 then
+      raise Exception.CreateFmt('Package "%s" not found in repository. Try to update the repository', [AArg]);
+    if Length(LMatches) = 1 then
+      Exit(LMatches[0].Id);
+
+    if ASilent then
+      raise Exception.CreateFmt('Package name "%s" is ambiguous: %d matches. Use the full id (vendor.name)', [AArg, Length(LMatches)]);
+
+    TConsole.WriteLine(Format('Multiple packages match name "%s":', [AArg]), clYellow);
+    for var I := 0 to High(LMatches) do
+      TConsole.WriteLine(Format('  [%d] %s', [I + 1, LMatches[I].Id]));
+    TConsole.WriteLine;
+    TConsole.Write(Format('Select [1-%d]: ', [Length(LMatches)]));
+    var LInput := Trim(TConsole.ReadLine);
+    var LIdx: Integer;
+    if not (TryStrToInt(LInput, LIdx) and (LIdx >= 1) and (LIdx <= Length(LMatches))) then
+      raise Exception.Create('Invalid selection');
+    Result := LMatches[LIdx - 1].Id;
+  finally
+    LIndex.Free;
+  end;
+end;
+
 class procedure TWorkspace.Initialize(const AWorkDir, AProduct, ARegistryKey: string);
 begin
   SetWorkDir(AWorkDir);
@@ -239,14 +280,24 @@ begin
     TConsole.WriteLine('Created: ' + GetBlocksDir, clGreen);
   end;
 
-  // Select Delphi version and persist both version name and registry key
+  // Select Delphi version: explicit /product wins; else reuse the one already
+  // saved in the workspace config; else prompt interactively.
+  var LProductName := AProduct;
+  var LRegistryKey := ARegistryKey;
+  if LProductName = '' then
+  begin
+    LProductName := Config.Product;
+    if LRegistryKey = '' then
+      LRegistryKey := Config.RegistryKey;
+  end;
+
   var LSelectedProduct: TProduct;
-  if AProduct = '' then
+  if LProductName = '' then
     LSelectedProduct := TProduct.Select('')
   else
     LSelectedProduct := TProduct.FindByNameAndKey(
-        AProduct,
-        if ARegistryKey = '' then 'BDS' else ARegistryKey
+        LProductName,
+        if LRegistryKey = '' then 'BDS' else LRegistryKey
     );
   Config.Product := LSelectedProduct.VersionName;
   Config.RegistryKey := LSelectedProduct.RegistryKey;
@@ -275,6 +326,20 @@ begin
 
   for var LSource in Config.Sources do
     InitializeFromSource(LSource);
+
+  RebuildIndex;
+end;
+
+class procedure TWorkspace.RebuildIndex;
+begin
+  TConsole.WriteLine('Building repository index...', clCyan);
+  var LIndex := TRepositoryIndex.Build;
+  try
+    LIndex.Save;
+    TConsole.WriteLine(Format('Index built: %d packages', [LIndex.Entries.Count]), clGreen);
+  finally
+    LIndex.Free;
+  end;
 end;
 
 class procedure TWorkspace.InitializeFromSource(const ASource: string);
@@ -336,9 +401,10 @@ end;
 class procedure TWorkspace.Install(const APackageName, AVersionConstraint: string;
     AOverwrite, ABuildOnly, ASilent, AForce: Boolean);
 begin
-  var LManifest := TManifest.GetManifest(APackageName, AVersionConstraint);
+  var LPackageId := ResolvePackageId(APackageName, ASilent);
+  var LManifest := TManifest.GetManifest(LPackageId, AVersionConstraint);
   try
-    TConsole.WriteLine('Config: ' + APackageName, clDkGray);
+    TConsole.WriteLine('Config: ' + LPackageId, clDkGray);
     TConsole.WriteLine;
 
     TConsole.WriteLine('Workspace: ' + WorkDir, clDkGray);
@@ -463,7 +529,8 @@ end;
 
 class procedure TWorkspace.Uninstall(const APackageName: string);
 begin
-  TConsole.WriteLine('Config: ' + APackageName, clDkGray);
+  var LPackageId := ResolvePackageId(APackageName);
+  TConsole.WriteLine('Config: ' + LPackageId, clDkGray);
   TConsole.WriteLine;
 
   TConsole.WriteLine('Workspace: ' + WorkDir, clDkGray);
@@ -481,15 +548,15 @@ begin
   TConsole.WriteLine;
 
   // Step 4 — Check that the package is actually installed
-  var LInstalledVer := Database.InstalledVersion(APackageName);
+  var LInstalledVer := Database.InstalledVersion(LPackageId);
   if LInstalledVer = '' then
   begin
-    TConsole.WriteWarning('Not installed: ' + APackageName);
+    TConsole.WriteWarning('Not installed: ' + LPackageId);
     TConsole.WriteLine;
     Exit;
   end;
 
-  var LManifest := TManifest.GetManifest(APackageName, LInstalledVer);
+  var LManifest := TManifest.GetManifest(LPackageId, LInstalledVer);
   try
     var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
 
@@ -544,6 +611,8 @@ begin
 
   for var LSource in Config.Sources do
     InitializeFromSource(LSource);
+
+  RebuildIndex;
 end;
 
 end.

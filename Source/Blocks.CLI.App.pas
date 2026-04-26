@@ -104,6 +104,15 @@ type
     procedure ShowHelp; override;
   end;
 
+  TSearchCommand = class(TBaseCommand)
+  private
+    [Param]
+    FPattern: string;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
   TConfigCommand = class(TBaseCommand)
   private
     [Param('add')]
@@ -217,13 +226,14 @@ begin
   TConsole.WriteLine('Usage: ' + AppExeName + ' <command> [options]', clWhite);
   TConsole.WriteLine;
   TConsole.WriteLine('Commands:', clWhite);
-  WriteOption('install <source>', 'Install a package from a file path, URL, or registry ID.');
-  WriteOption('uninstall <source>', 'Remove a package from the workspace and database.');
+  WriteOption('install <package>', 'Install a package by id (vendor.name) or name.');
+  WriteOption('uninstall <package>', 'Remove a package from the workspace and database.');
   WriteOption('init', 'Initialise the workspace and download the package repository.');
   WriteOption('list', 'List packages installed in the current workspace.');
   WriteOption('listproducts', 'List detected Delphi installations.');
+  WriteOption('search [pattern]', 'Search the repository index by id, name, description or keywords.');
   WriteOption('config', 'Read or write workspace or system configuration values.');
-  WriteOption('view <id@version>', 'Show details of a package from the repository.');
+  WriteOption('view <id[@version]>', 'Show details of a package from the repository.');
   WriteOption('version', 'Print the version of the blocks executable.');
   WriteOption('upgrade', 'Check for a newer release and download the setup if available.');
   WriteOption('help [command]', 'Show this message, or detailed help for a specific command.');
@@ -231,9 +241,9 @@ begin
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' init /product delphi13');
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package');
-  TConsole.WriteLine('  ' + AppExeName + ' install C:\path\to\manifest.json /overwrite');
-  TConsole.WriteLine('  ' + AppExeName + ' install https://example.com/manifest.json /silent');
+  TConsole.WriteLine('  ' + AppExeName + ' install package /silent');
   TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package');
+  TConsole.WriteLine('  ' + AppExeName + ' search json');
   TConsole.WriteLine('  ' + AppExeName + ' list');
   TConsole.WriteLine('  ' + AppExeName + ' help install');
   TConsole.WriteLine;
@@ -415,12 +425,13 @@ procedure TInstallCommand.ShowHelp;
 begin
   TConsole.WriteLine;
   TConsole.WriteLine('Downloads, compiles and registers a Delphi package into the active');
-  TConsole.WriteLine('Delphi installation. The source can be a registry ID, a local file, or a URL.');
+  TConsole.WriteLine('Delphi installation. The package can be specified by id (vendor.name)');
+  TConsole.WriteLine('or by name; ambiguous names prompt for selection.');
   TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' install <source> [options]', clWhite);
+  TConsole.WriteLine('Usage: ' + AppExeName + ' install <package> [options]', clWhite);
   TConsole.WriteLine;
   TConsole.WriteLine('Arguments:', clWhite);
-  WriteOption('<source>', 'Package ID, local file path, or remote URL of a manifest (.json).');
+  WriteOption('<package>', 'Package id (vendor.name) or package name.');
   WriteOption('', 'Append @<constraint> to specify a version constraint (e.g. owner.pkg@1.2.0,');
   WriteOption('', 'owner.pkg@^1.2.0, owner.pkg@>=1.0.0).');
   TConsole.WriteLine;
@@ -435,8 +446,7 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package');
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package@1.2.0');
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package@^1.2.0 /force');
-  TConsole.WriteLine('  ' + AppExeName + ' install C:\repos\mylib.json /overwrite');
-  TConsole.WriteLine('  ' + AppExeName + ' install owner.package /silent');
+  TConsole.WriteLine('  ' + AppExeName + ' install package /silent');
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package /buildonly');
   TConsole.WriteLine;
 end;
@@ -458,13 +468,72 @@ begin
   TConsole.WriteLine('Removes a previously installed package: deletes its project directory');
   TConsole.WriteLine('and the corresponding entry from the local database.');
   TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' uninstall <source> [options]', clWhite);
+  TConsole.WriteLine('Usage: ' + AppExeName + ' uninstall <package> [options]', clWhite);
   TConsole.WriteLine;
   TConsole.WriteLine('Arguments:', clWhite);
-  WriteOption('<id>', 'Package identifier (e.g. owner.package).');
+  WriteOption('<package>', 'Package id (vendor.name) or package name.');
   TConsole.WriteLine;
   TConsole.WriteLine('Example:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package');
+  TConsole.WriteLine;
+end;
+
+{ TSearchCommand }
+
+procedure TSearchCommand.Execute;
+begin
+  inherited;
+  CheckWorkspace;
+
+  var LIndex := TRepositoryIndex.Create;
+  try
+    LIndex.Load;
+    var LMatches := LIndex.Search(FPattern);
+
+    TConsole.WriteLine;
+    if Length(LMatches) = 0 then
+    begin
+      if FPattern = '' then
+        TConsole.WriteLine('Repository index is empty. Run "blocks init" first.', clYellow)
+      else
+        TConsole.WriteLine(Format('No packages match "%s".', [FPattern]), clYellow);
+      TConsole.WriteLine;
+      Exit;
+    end;
+
+    if FPattern = '' then
+      TConsole.WriteLine(Format('Packages in repository (%d):', [Length(LMatches)]), clWhite)
+    else
+      TConsole.WriteLine(Format('Packages matching "%s" (%d):', [FPattern, Length(LMatches)]), clWhite);
+    TConsole.WriteLine;
+
+    for var LEntry in LMatches do
+    begin
+      TConsole.Write(Format('  %-40s ', [LEntry.Id]), clCyan);
+      TConsole.WriteLine(LEntry.Name, clWhite);
+      if LEntry.Description <> '' then
+        TConsole.WriteLine('    ' + LEntry.Description, clGray);
+      TConsole.WriteLine;
+    end;
+  finally
+    LIndex.Free;
+  end;
+end;
+
+procedure TSearchCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Searches the local repository index by id, name, description and keywords.');
+  TConsole.WriteLine('The match is case insensitive and looks for any substring.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' search [pattern]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Arguments:', clWhite);
+  WriteOption('[pattern]', 'Substring to look for; omit to list all packages.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' search json');
+  TConsole.WriteLine('  ' + AppExeName + ' search');
   TConsole.WriteLine;
 end;
 
@@ -777,7 +846,22 @@ begin
       for var LDep in LManifest.Dependencies do
       begin
         TConsole.Write('    ' + LDep.Key.PadRight(30), clWhite);
-        TConsole.WriteLine(LDep.Value, clDkGray);
+        TConsole.Write(LDep.Value.PadRight(15), clDkGray);
+
+        var LDepInstalled := TWorkspace.Database.InstalledVersion(LDep.Key);
+        if LDepInstalled = '' then
+        begin
+          TConsole.WriteLine;
+          Continue;
+        end;
+
+        var LDepSemVer: TSemVer;
+        var LCompatible := TSemVer.TryParse(LDepInstalled, LDepSemVer)
+            and LDepSemVer.MatchesConstraint(LDep.Value);
+        if LCompatible then
+          TConsole.WriteLine('installed ' + LDepInstalled, clGreen)
+        else
+          TConsole.WriteLine('installed ' + LDepInstalled, clRed);
       end;
     end;
 
@@ -792,6 +876,16 @@ begin
       end;
     end;
 
+    // Install status (workspace-local)
+    TConsole.WriteLine;
+    var LInstalledVer := TWorkspace.Database.InstalledVersion(LManifest.Id);
+    if LInstalledVer = '' then
+      TConsole.WriteLine('  Not installed in this workspace', clDkGray)
+    else if SameText(LInstalledVer, LManifest.Version) then
+      TConsole.WriteLine('  Installed: ' + LInstalledVer, clGreen)
+    else
+      TConsole.WriteLine(Format('  Installed: %s (viewing %s)', [LInstalledVer, LManifest.Version]), clYellow);
+
     TConsole.WriteLine;
   finally
     LManifest.Free;
@@ -803,16 +897,18 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('Shows details of a package from the local repository.');
   TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' view <id@version> [options]', clWhite);
+  TConsole.WriteLine('Usage: ' + AppExeName + ' view <id[@version]> [options]', clWhite);
   TConsole.WriteLine;
   TConsole.WriteLine('Arguments:', clWhite);
-  WriteOption('<id@version>', 'Package identifier and version (e.g. owner.package@1.2.0).');
+  WriteOption('<id[@version]>', 'Package id; optional @version selects a specific version');
+  WriteOption('', '(latest is used when omitted, e.g. owner.package or owner.package@1.2.0).');
   TConsole.WriteLine;
   TConsole.WriteLine('Options:', clWhite);
   WriteOption('/raw', 'Print the raw manifest JSON instead of the formatted summary.');
-  WriteOption('/versions', 'List all available versions of the package (no @version needed).');
+  WriteOption('/versions', 'List all available versions of the package.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' view owner.package');
   TConsole.WriteLine('  ' + AppExeName + ' view owner.package@1.2.0');
   TConsole.WriteLine('  ' + AppExeName + ' view owner.package@1.2.0 /raw');
   TConsole.WriteLine('  ' + AppExeName + ' view owner.package /versions');
@@ -982,6 +1078,7 @@ TCommand.RegisterCommand('listproducts', TListProductsCommand);
 TCommand.RegisterCommand('init', TInitCommand);
 TCommand.RegisterCommand('install', TInstallCommand);
 TCommand.RegisterCommand('uninstall', TUninstallCommand);
+TCommand.RegisterCommand('search', TSearchCommand);
 TCommand.RegisterCommand('config', TConfigCommand);
 TCommand.RegisterCommand('view', TViewCommand);
 TCommand.RegisterCommand('version', TVersionCommand);

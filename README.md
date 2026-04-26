@@ -23,13 +23,14 @@ A command-line package manager for Delphi / RAD Studio. DelphiBlocks automates d
 
 ```
 Commands:
-  install <source>       Install a package from a file path, URL, or registry ID.
-  uninstall <source>     Remove a package from the workspace and database.
+  install <package>      Install a package by id (vendor.name) or name.
+  uninstall <package>    Remove a package from the workspace and database.
   init                   Initialise the workspace and download the package repository.
   list                   List packages installed in the current workspace.
   listproducts           List detected Delphi installations.
+  search [pattern]       Search the repository index by id, name, description or keywords.
   config                 Read or write workspace or system configuration values.
-  view <id@version>      Show details of a package from the repository.
+  view <id[@version]>    Show details of a package from the repository (latest if @version omitted).
   version                Print the version of the blocks executable.
   upgrade                Check for a newer release and download the setup if available.
   help [command]         Show this message, or detailed help for a specific command.
