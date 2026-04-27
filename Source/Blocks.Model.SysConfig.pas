@@ -13,6 +13,7 @@ type
     class function Get(const AKey: string): string; static;
     class procedure &Set(const AKey, AValue: string); static;
     class procedure Add(const AKey, AValue: string); static;
+    class procedure Delete(const AKey, AValue: string); static;
     class procedure GetAll(AConfigs: TStrings); static;
   end;
 
@@ -21,6 +22,11 @@ implementation
 { TSystemConfig }
 
 class procedure TSystemConfig.Add(const AKey, AValue: string);
+begin
+  raise Exception.CreateFmt('System config key "%s" does not support multiple values.', [AKey]);
+end;
+
+class procedure TSystemConfig.Delete(const AKey, AValue: string);
 begin
   raise Exception.CreateFmt('System config key "%s" does not support multiple values.', [AKey]);
 end;

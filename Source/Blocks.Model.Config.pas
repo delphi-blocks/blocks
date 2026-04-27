@@ -26,6 +26,7 @@ type
     function Get(const AKey: string): string;
     procedure &Set(const AKey, AValue: string);
     procedure Add(const AKey, AValue: string);
+    procedure Delete(const AKey, AValue: string);
 
     constructor Create(const AWorkspaceDir: string);
     destructor Destroy; override;
@@ -65,6 +66,19 @@ begin
     FSources.Add(AValue)
   else
     raise Exception.CreateFmt('Config "%s" does not exists or doesn''t support /ADD', [AKey]);
+end;
+
+procedure TConfig.Delete(const AKey, AValue: string);
+begin
+  if SameText(AKey, 'sources') then
+  begin
+    var LIndex := FSources.IndexOf(AValue);
+    if LIndex < 0 then
+      raise Exception.CreateFmt('Value "%s" not found in "%s"', [AValue, AKey]);
+    FSources.Delete(LIndex);
+  end
+  else
+    raise Exception.CreateFmt('Config "%s" does not exists or doesn''t support /DELETE', [AKey]);
 end;
 
 function TConfig.ConfigPath: string;

@@ -117,6 +117,8 @@ type
   private
     [Param('add')]
     FAdd: Boolean;
+    [Param('delete')]
+    FDelete: Boolean;
     [Param('system')]
     FSystem: Boolean;
     [Param]
@@ -622,6 +624,9 @@ end;
 procedure TConfigCommand.Execute;
 begin
   inherited;
+  if FAdd and FDelete then
+    raise Exception.Create('Options /add and /delete cannot be used together.');
+
   if Length(FConfigs) = 0 then
   begin
     if FSystem then
@@ -662,6 +667,8 @@ begin
       begin
         if FAdd then
           TSystemConfig.Add(LKey, LValue)
+        else if FDelete then
+          TSystemConfig.Delete(LKey, LValue)
         else
           TSystemConfig.Set(LKey, LValue);
         TWorkspace.Config.Save;
@@ -670,11 +677,15 @@ begin
       begin
         if FAdd then
           TWorkspace.Config.Add(LKey, LValue)
+        else if FDelete then
+          TWorkspace.Config.Delete(LKey, LValue)
         else
           TWorkspace.Config.&Set(LKey, LValue);
         TWorkspace.Config.Save;
       end;
       TConsole.WriteLine('Config applied');
+      if not FSystem and SameText(LKey, 'sources') then
+        TConsole.WriteWarning('Run "' + AppExeName + ' init" to refresh the repository with the new sources.');
     end;
   end;
 end;
@@ -684,7 +695,7 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('Reads or writes workspace or system configuration values.');
   TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' config [/add] [/system] [<key>[=<value>] ...]', clWhite);
+  TConsole.WriteLine('Usage: ' + AppExeName + ' config [/add | /delete] [/system] [<key>[=<value>] ...]', clWhite);
   TConsole.WriteLine;
   TConsole.WriteLine('Arguments:', clWhite);
   WriteOption('<key>', 'Print the current value of the given key.');
@@ -692,11 +703,14 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('Options:', clWhite);
   WriteOption('/add', 'Append the value instead of replacing it (for list keys).');
+  WriteOption('/delete', 'Remove the value from a list key (for list keys).');
   WriteOption('/system', 'Read or write system-level config (Windows registry) instead of');
   WriteOption('', 'workspace config.');
   TConsole.WriteLine;
   TConsole.WriteLine('Workspace keys:', clWhite);
   WriteOption('sources', 'Comma-separated list of repository URLs used by "init".');
+  WriteOption('', 'After changing this key, run "' + AppExeName + ' init" to refresh');
+  WriteOption('', 'the local repository.');
   WriteOption('product', 'Target Delphi version name (e.g. delphi12, delphi13).');
   WriteOption('registrykey', 'Registry profile key for the target Delphi IDE (default: BDS).');
   TConsole.WriteLine;
@@ -711,6 +725,7 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' config sources');
   TConsole.WriteLine('  ' + AppExeName + ' config sources=https://github.com/owner/my-repo');
   TConsole.WriteLine('  ' + AppExeName + ' config /add sources=https://github.com/owner/other-repo');
+  TConsole.WriteLine('  ' + AppExeName + ' config /delete sources=https://github.com/owner/other-repo');
   TConsole.WriteLine('  ' + AppExeName + ' config product');
   TConsole.WriteLine('  ' + AppExeName + ' config registrykey=myprofile');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath');
