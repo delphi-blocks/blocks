@@ -4,7 +4,7 @@
         <ProjectVersion>20.4</ProjectVersion>
         <MainSource>Blocks.Tests.Framework.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">Release</Config>
+        <Config Condition="'$(Config)'==''">Debug</Config>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>1</TargetedPlatforms>
         <AppType>Console</AppType>
@@ -140,6 +140,8 @@
         <DCCReference Include="..\Source\Blocks.Core.pas"/>
         <DCCReference Include="..\Source\Blocks.Model.Package.pas"/>
         <DCCReference Include="Blocks.Tests.Package.pas"/>
+        <DCCReference Include="Blocks.Tests.Command.pas"/>
+        <DCCReference Include="..\Source\Blocks.CLI.Command.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

@@ -39,7 +39,9 @@ uses
   Blocks.Tests.JSON in 'Blocks.Tests.JSON.pas',
   Blocks.Core in '..\Source\Blocks.Core.pas',
   Blocks.Model.Package in '..\Source\Blocks.Model.Package.pas',
-  Blocks.Tests.Package in 'Blocks.Tests.Package.pas';
+  Blocks.Tests.Package in 'Blocks.Tests.Package.pas',
+  Blocks.Tests.Command in 'Blocks.Tests.Command.pas',
+  Blocks.CLI.Command in '..\Source\Blocks.CLI.Command.pas';
 
 var
   runner : ITestRunner;

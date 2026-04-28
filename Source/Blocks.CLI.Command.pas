@@ -30,6 +30,12 @@ type
   TCommand = class;
   TCommandClass = class of TCommand;
 
+  IParamReader = interface
+    ['{B00B4F44-FA9E-4F7D-AA20-B9F3AC8F6EE9}']
+    function ParamCount: Integer;
+    function ParamStr(I: Integer): string;
+  end;
+
   TCommand = class(TObject)
   strict private
     class var FRegistry: TDictionary<string, TCommandClass>;
@@ -64,7 +70,8 @@ type
     ///     [Param('product')] FProduct: string;     // /product reads next arg
     ///     [Param]            FPackageName: string; // unnamed param (one only)
     /// </summary>
-    class procedure InjectArgs(ACommand: TCommand);
+    class procedure InjectArgs(ACommand: TCommand); overload;
+    class procedure InjectArgs(ACommand: TCommand; AParams: IParamReader); overload;
   public
     /// <summary>
     ///   Executes the command. The base implementation calls InjectArgs to
@@ -75,6 +82,13 @@ type
     ///   Displays usage information for the command.
     /// </summary>
     procedure ShowHelp; virtual;
+  end;
+
+  TCommandLineParamReader = class(TInterfacedObject, IParamReader)
+  public
+    { IParamReader }
+    function ParamCount: Integer;
+    function ParamStr(I: Integer): string;
   end;
 
 implementation
@@ -139,6 +153,11 @@ begin
 end;
 
 class procedure TCommand.InjectArgs(ACommand: TCommand);
+begin
+  TCommand.InjectArgs(ACommand, TCommandLineParamReader.Create);
+end;
+
+class procedure TCommand.InjectArgs(ACommand: TCommand; AParams: IParamReader);
 
   function FindClassFieldByParamName(const AParamName: string; out AUnnamedParam: Boolean): TRttiField;
   begin
@@ -167,23 +186,51 @@ class procedure TCommand.InjectArgs(ACommand: TCommand);
 begin
   var I := 2;
   var LUnnamedParam: Boolean;
-  while I <= ParamCount do
+  while I <= AParams.ParamCount do
   begin
-    var LField := FindClassFieldByParamName(ParamStr(I), LUnnamedParam);
-    if LField.DataType.TypeKind = tkEnumeration then // boolean expected
-      LField.SetValue(ACommand, True)
+    var LField := FindClassFieldByParamName(AParams.ParamStr(I), LUnnamedParam);
+    if LField.DataType.TypeKind = tkEnumeration then
+    begin
+      if LField.FieldType.Handle = TypeInfo(Boolean) then
+        LField.SetValue(ACommand, True)
+      else
+      begin
+        if not LUnnamedParam then
+          Inc(I);
+        var LEnumName := AParams.ParamStr(I);
+        var LEnumOrd := GetEnumValue(LField.FieldType.Handle, LEnumName);
+        if LEnumOrd < 0 then
+          raise Exception.CreateFmt('Invalid value "%s" for param', [LEnumName]);
+        LField.SetValue(ACommand, TValue.FromOrdinal(LField.FieldType.Handle, LEnumOrd));
+      end;
+    end
     else if LField.DataType.TypeKind = tkUString then
     begin
       if not LUnnamedParam then
         Inc(I);
-      LField.SetValue(ACommand, ParamStr(I));
+      LField.SetValue(ACommand, AParams.ParamStr(I));
+    end
+    else if LField.DataType.TypeKind = tkInteger then
+    begin
+      if not LUnnamedParam then
+        Inc(I);
+      LField.SetValue(ACommand, StrToInt(AParams.ParamStr(I)));
+    end
+    else if LField.DataType.TypeKind = tkFloat then
+    begin
+      if not LUnnamedParam then
+        Inc(I);
+      LField.SetValue(ACommand, StrToFloat(AParams.ParamStr(I), TFormatSettings.Invariant));
     end
     else if LField.DataType.TypeKind = tkDynArray then
     begin
       if not LUnnamedParam then
         raise Exception.Create('Array type supported only for unnamed paramers');
+      if (LField.FieldType as TRttiDynamicArrayType).ElementType.TypeKind not in [tkUString, tkString, tkWString] then
+        raise Exception.Create('Array type should be of type string');
+
       var LArray := LField.GetValue(ACommand).AsType<TArray<string>>;
-      LArray := LArray + [ParamStr(I)];
+      LArray := LArray + [AParams.ParamStr(I)];
       LField.SetValue(ACommand, TValue.From(LArray));
     end
     else
@@ -215,6 +262,18 @@ constructor ParamAttribute.Create(const AParamName: string);
 begin
   inherited Create;
   FParamName := AParamName;
+end;
+
+{ TCommandLineParamReader }
+
+function TCommandLineParamReader.ParamCount: Integer;
+begin
+  Result := System.ParamCount;
+end;
+
+function TCommandLineParamReader.ParamStr(I: Integer): string;
+begin
+  Result := System.ParamStr(I);
 end;
 
 end.
