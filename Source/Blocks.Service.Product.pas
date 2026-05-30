@@ -1196,14 +1196,15 @@ begin
         if TArray.Contains<string>(LExisting.Split([';']), LBplPath, TIStringComparer.Ordinal) then
           Continue;
 
-        // Keep the inherited PATH ($(PATH)) when creating the value from scratch.
+        // Prepend so the Blocks-managed bpl wins the Windows DLL search (first
+        // match on PATH wins), staying consistent with CheckDCPPath and keeping
+        // the loaded bpl aligned with its dcp. Keep the inherited PATH ($(PATH))
+        // when creating the value from scratch.
         var LNewValue: string;
         if LExisting = '' then
-          LNewValue := '$(PATH);' + LBplPath
-        else if LExisting.EndsWith(';') then
-          LNewValue := LExisting + LBplPath
+          LNewValue := LBplPath + ';$(PATH)'
         else
-          LNewValue := LExisting + ';' + LBplPath;
+          LNewValue := LBplPath + ';' + LExisting;
         LReg.WriteString('PATH', LNewValue);
         TConsole.WriteLine(Format('Registered bpl path for %s: %s', [LPlatform, LBplPath]), clGreen);
       finally
