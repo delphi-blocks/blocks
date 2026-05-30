@@ -100,6 +100,7 @@
         <DCCReference Include="Blocks.Model.Config.pas"/>
         <DCCReference Include="Blocks.Model.SysConfig.pas"/>
         <DCCReference Include="Blocks.Model.Package.pas"/>
+        <DCCReference Include="Blocks.Service.Script.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

@@ -41,7 +41,10 @@ uses
   Blocks.Model.Package in '..\Source\Blocks.Model.Package.pas',
   Blocks.Tests.Package in 'Blocks.Tests.Package.pas',
   Blocks.Tests.Command in 'Blocks.Tests.Command.pas',
-  Blocks.CLI.Command in '..\Source\Blocks.CLI.Command.pas';
+  Blocks.CLI.Command in '..\Source\Blocks.CLI.Command.pas',
+  Blocks.Model.Manifest in '..\Source\Blocks.Model.Manifest.pas',
+  Blocks.Service.Script in '..\Source\Blocks.Service.Script.pas',
+  Blocks.Tests.Script in 'Blocks.Tests.Script.pas';
 
 var
   runner : ITestRunner;

@@ -5,6 +5,7 @@ interface
 uses
   System.Classes,
   System.SysUtils,
+  System.JSON,
   System.Generics.Collections,
   DUnitX.TestFramework,
 
@@ -112,6 +113,29 @@ type
     property Children: TItemDict read FChildren;
   end;
 
+  TDynObj = class
+  private
+    FJSON: TJSONValue;
+    function GetName: string;
+  public
+    function ToJSON: TJSONValue;
+    procedure FromJSON(AJSON: TJSONValue);
+
+    property Name: string read GetName;
+
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+  TDynObjEnvelop = class
+  private
+    FDynObj: TDynObj;
+  public
+    property DynObj: TDynObj read FDynObj write FDynObj;
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
   [TestFixture]
   TJSONTest = class(TObject)
   private
@@ -144,6 +168,10 @@ type
     procedure TestDeserialization_StringDictionary;
     [Test]
     procedure TestSerialization_ObjectDictionary;
+    [Test]
+    procedure TestSerialization_DynamicObject;
+    [Test]
+    procedure TestDeserialization_DynamicObject;
     [Test]
     procedure TestDeserialization_ObjectDictionary;
     [Test]
@@ -303,9 +331,6 @@ const
 
 implementation
 
-uses
-  System.JSON;
-
 { TTaggedObj }
 
 constructor TTaggedObj.Create;
@@ -423,6 +448,29 @@ begin
     end;
   finally
     LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestSerialization_DynamicObject;
+begin
+  var LTempJSON := TJSONObject.ParseJSONValue('{"name": "luca"}');
+  try
+    var LObj := TDynObjEnvelop.Create;
+    try
+      LObj.DynObj.FromJSON(LTempJSON);
+      var LJSON := TJsonHelper.ObjectToJSON(LObj);
+      try
+        var LDynObjJSON := LJSON.GetValue<TJSONObject>('dynObj');
+        Assert.IsNotNull(LDynObjJSON, 'dynObj is null');
+        Assert.AreEqual('luca', LDynObjJSON.GetValue<string>('name'), 'Property "name" not found');
+      finally
+        LJSON.Free;
+      end;
+    finally
+      LObj.Free;
+    end;
+  finally
+    LTempJSON.Free;
   end;
 end;
 
@@ -693,6 +741,23 @@ begin
   end;
 end;
 
+procedure TJSONTest.TestDeserialization_DynamicObject;
+begin
+  var LObj := TJsonHelper.JSONToObject<TDynObjEnvelop>('{"dynObj": {"name": "luca"}}');
+  try
+    Assert.IsNotNull(LObj.DynObj, 'DynObj propery is null');
+    var LJSON := LObj.DynObj.ToJSON;
+    try
+      Assert.AreEqual('luca', LJSON.GetValue<string>('name'), 'dynObj.name with JSON');
+      Assert.AreEqual('luca', LObj.DynObj.Name, 'dynObj.name with helper property');
+    finally
+      LJSON.Free;
+    end;
+  finally
+    LObj.Free;
+  end;
+end;
+
 procedure TJSONTest.TestDeserialization_ObjectList_Missing;
 begin
   var LObj := TJsonHelper.JSONToObject<TListObj>(ListObjMissingJSON);
@@ -738,6 +803,49 @@ end;
 destructor TFlagObj.Destroy;
 begin
   FFlags.Free;
+  inherited;
+end;
+
+{ TDynObj }
+
+constructor TDynObj.Create;
+begin
+  FJSON := TJSONNull.Create;
+end;
+
+destructor TDynObj.Destroy;
+begin
+  FJSON.Free;
+  inherited;
+end;
+
+procedure TDynObj.FromJSON(AJSON: TJSONValue);
+begin
+  if Assigned(FJSON) then
+    FJSON.Free;
+  FJSON := AJSON.Clone as TJSONValue;
+end;
+
+function TDynObj.GetName: string;
+begin
+  Result := FJSON.GetValue<string>('name', '');
+end;
+
+function TDynObj.ToJSON: TJSONValue;
+begin
+  Result := FJSON.Clone as TJSONValue;
+end;
+
+{ TDynObjEnvelop }
+
+constructor TDynObjEnvelop.Create;
+begin
+  FDynObj := TDynObj.Create;
+end;
+
+destructor TDynObjEnvelop.Destroy;
+begin
+  FDynObj.Free;
   inherited;
 end;
 

@@ -119,6 +119,7 @@ uses
   Blocks.Model.Manifest,
   Blocks.GitHub,
   Blocks.Service.Fetcher,
+  Blocks.Service.Script,
   Blocks.Model.Package;
 
 procedure ExpandMacros(var APath: string; AEnvironmentVariable: TStrings);
@@ -202,6 +203,22 @@ begin
     Result.DebugDCUPath := LDebugDcuPath;
   finally
     LPackage.Free;
+  end;
+end;
+
+// Runs the manifest scripts registered for an install/uninstall event
+// (beforeInstall / afterInstall / beforeUninstall / afterUninstall), once per
+// manifest. At this level only the workspace- and project-level paths are
+// meaningful, so only those variables are exposed.
+procedure RunManifestScripts(const AManifest: TManifest; const AEvent, AWorkspaceDir, AProjectDir: string);
+begin
+  var LEnv := TStringList.Create;
+  try
+    LEnv.Values['WORKSPACE_PATH'] := AWorkspaceDir;
+    LEnv.Values['PROJECT_PATH'] := AProjectDir;
+    TScriptRunner.RunEvent(AManifest, AEvent, LEnv);
+  finally
+    LEnv.Free;
   end;
 end;
 
@@ -549,13 +566,16 @@ begin
       TConsole.WriteLine;
     end;
 
-    var LProjectDir: string;
+    var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
+
+    // Step 6.5 — beforeInstall scripts
+    RunManifestScripts(LManifest, TScriptRunner.EventBeforeInstall, WorkDir, LProjectDir);
+
     if not ABuildOnly then
     begin
       // Step 7 — Fetch the package sources according to the repository type
       TConsole.WriteLine('--- ' + LManifest.Id + ' / ' + LManifest.Name + ' ---', clWhite);
       TConsole.WriteLine('Version: ' + LManifest.Version, clCyan);
-      LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
       EnsureCleanDir(LProjectDir, AOverwrite, ASilent);
       var LFetcher := TRepositoryFetcher.ForRepository(LManifest.Repository);
       LFetcher.FetchTo(LManifest.Repository, LProjectDir);
@@ -564,7 +584,6 @@ begin
     end
     else
     begin
-      LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
       if not TDirectory.Exists(LProjectDir) then
         raise Exception.CreateFmt('Build-only mode: project directory not found: %s', [LProjectDir]);
       TConsole.WriteLine('Build-only mode. Using existing directory: ' + LProjectDir, clYellow);
@@ -597,6 +616,9 @@ begin
     // Step 10 — Update database
     if not ABuildOnly then
       Database.Update(LManifest.Id, LManifest.Version);
+
+    // Step 11 — afterInstall scripts
+    RunManifestScripts(LManifest, TScriptRunner.EventAfterInstall, WorkDir, LProjectDir);
 
     TConsole.WriteLine;
     TConsole.WriteLine('============================================', clGreen);
@@ -643,6 +665,9 @@ begin
   try
     var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
 
+    // Step 4.5 — beforeUninstall scripts (project files still present)
+    RunManifestScripts(LManifest, TScriptRunner.EventBeforeUninstall, WorkDir, LProjectDir);
+
     // Step 5 - Unregister all packages
     var LEnvironmentVariables := TStringList.Create;
     try
@@ -684,6 +709,9 @@ begin
 
     // Step 7 — Remove from database
     Database.RemoveEntry(LManifest.Id);
+
+    // Step 8 — afterUninstall scripts
+    RunManifestScripts(LManifest, TScriptRunner.EventAfterUninstall, WorkDir, LProjectDir);
 
     TConsole.WriteLine;
     TConsole.WriteLine('Uninstalled: ' + LManifest.Name + ' ' + LInstalledVer, clGreen);

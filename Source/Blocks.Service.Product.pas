@@ -214,7 +214,8 @@ uses
   Winapi.TlHelp32,
   Blocks.Core,
   Blocks.Console,
-  Blocks.Http;
+  Blocks.Http,
+  Blocks.Service.Script;
 
 const
   // Platforms for which blocks emits DCP output and registers it on the IDE
@@ -359,6 +360,46 @@ begin
   CloseHandle(PI.hProcess);
   CloseHandle(PI.hThread);
   CloseHandle(hRead);
+end;
+
+// Runs the manifest scripts registered for a compile event (beforeCompile /
+// afterCompile) for a single package, build config and platform. The per-config
+// output paths are exposed through %DCU_PATH% / %BPL_PATH% / %DCP_PATH%, mirroring
+// the layout produced by TProduct.BuildPackages, plus %PACKAGE% / %PLATFORM% /
+// %CONFIG% for the current compilation.
+procedure RunCompileScripts(
+    const AManifest: TManifest;
+    const AEvent, AWorkspaceDir, AProjectDir, APlatform, AConfig, APackage: string
+);
+begin
+  var LBlocksDir := TPath.Combine(AWorkspaceDir, '.blocks');
+  // Build configs flow in lowercase ('debug'/'release'); expose them capitalised
+  // (Delphi's canonical config names) while keeping the lowercase 'debug' suffix.
+  var LSuffix :=
+      if SameText(AConfig, 'Debug') then 'debug'
+      else '';
+  var LConfigName :=
+      if SameText(AConfig, 'Debug') then 'Debug'
+      else 'Release';
+
+  var LEnv := TStringList.Create;
+  try
+    LEnv.Values['CONFIG'] := LConfigName;
+    LEnv.Values['PLATFORM'] := APlatform;
+    LEnv.Values['PACKAGE'] := APackage;
+    LEnv.Values['WORKSPACE_PATH'] := AWorkspaceDir;
+    LEnv.Values['PROJECT_PATH'] := AProjectDir;
+    LEnv.Values['BPL_PATH'] := TPath.Combine(LBlocksDir, APlatform, 'bpl', LSuffix);
+    LEnv.Values['DCP_PATH'] := TPath.Combine(LBlocksDir, APlatform, 'dcp', LSuffix);
+    // When KeepProjectDcuPaths is set the DCU output is driven by each package's
+    // own .dproj, so there is no single project-level DCU path to expose.
+    if not AManifest.PackageOptions.KeepProjectDcuPaths then
+      LEnv.Values['DCU_PATH'] := TPath.Combine(AProjectDir, 'lib', APlatform, LSuffix);
+
+    TScriptRunner.RunEvent(AManifest, AEvent, LEnv);
+  finally
+    LEnv.Free;
+  end;
 end;
 
 // -- TProductPlatform ----------------------------------------------------------
@@ -1253,6 +1294,16 @@ begin
 
       for var LBuildConfig in BuildConfigs do
       begin
+        RunCompileScripts(
+            AManifest,
+            TScriptRunner.EventBeforeCompile,
+            AWorkspaceDir,
+            AProjectDir,
+            LPlatform,
+            LBuildConfig,
+            PkgName
+        );
+
         TConsole.Write(Format('    Building %s [%s/%s]...', [PkgName, TypeStr, LBuildConfig]));
 
         var LMSBuildParams := '';
@@ -1298,6 +1349,16 @@ begin
           raise Exception
               .CreateFmt('Compilation failed on package "%s" for platform "%s".', [PkgName, LPlatformPair.Key]);
         end;
+
+        RunCompileScripts(
+            AManifest,
+            TScriptRunner.EventAfterCompile,
+            AWorkspaceDir,
+            AProjectDir,
+            LPlatform,
+            LBuildConfig,
+            PkgName
+        );
       end;
 
       InstallPackage(LPackage, AWorkspaceDir, DprojPath, LPlatformPair);

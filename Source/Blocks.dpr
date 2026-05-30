@@ -22,7 +22,8 @@ uses
   Blocks.Core in 'Blocks.Core.pas',
   Blocks.Model.Config in 'Blocks.Model.Config.pas',
   Blocks.Model.SysConfig in 'Blocks.Model.SysConfig.pas',
-  Blocks.Model.Package in 'Blocks.Model.Package.pas';
+  Blocks.Model.Package in 'Blocks.Model.Package.pas',
+  Blocks.Service.Script in 'Blocks.Service.Script.pas';
 
 begin
   {$IFDEF DEBUG}

@@ -21,7 +21,6 @@ uses
   System.JSON,
   System.Generics.Collections,
   System.Generics.Defaults,
-
   Blocks.Core,
   Blocks.JSON;
 
@@ -124,6 +123,33 @@ type
   end;
 
   // -----------------------------------------------------------------------
+  // A script to run during the install pipeline (e.g. on "afterCompile")
+  // -----------------------------------------------------------------------
+  TManifestScript = class
+  private
+    FDescription: string;
+    FEvent: string;
+    FCommand: string;
+    FArgs: TStringList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    property Description: string read FDescription write FDescription;
+    property Event: string read FEvent write FEvent;
+    property Command: string read FCommand write FCommand;
+    property Args: TStringList read FArgs;
+  end;
+
+  // -----------------------------------------------------------------------
+  // Script list
+  // -----------------------------------------------------------------------
+  TManifestScriptList = class(TObjectList<TManifestScript>)
+  public
+    constructor Create;
+  end;
+
+  // -----------------------------------------------------------------------
   // Manifest repository information
   // -----------------------------------------------------------------------
 
@@ -147,6 +173,7 @@ type
     FPackages: TManifestPackageList;
     FPackageOptions: TManifestPackageOptions;
     FDependencies: TDependencyMap;
+    FScripts: TManifestScriptList;
     FId: string;
     FVersion: string;
     FName: string;
@@ -179,6 +206,7 @@ type
     [JsonName('packageOptions')]
     property PackageOptions: TManifestPackageOptions read FPackageOptions;
     property Dependencies: TDependencyMap read FDependencies;
+    property Scripts: TManifestScriptList read FScripts;
   end;
 
   // -----------------------------------------------------------------------
@@ -243,7 +271,6 @@ implementation
 
 uses
   System.StrUtils,
-
   Blocks.Console,
   Blocks.Http,
   Blocks.Service.Workspace;
@@ -257,7 +284,7 @@ const
 constructor TManifestPlatform.Create;
 begin
   inherited Create;
-  FSourcePath   := TStringList.Create;
+  FSourcePath := TStringList.Create;
   FReleaseDCUPath := TStringList.Create;
   FDebugDCUPath := TStringList.Create;
 end;
@@ -322,6 +349,27 @@ begin
   inherited;
 end;
 
+{ TManifestScript }
+
+constructor TManifestScript.Create;
+begin
+  inherited Create;
+  FArgs := TStringList.Create;
+end;
+
+destructor TManifestScript.Destroy;
+begin
+  FArgs.Free;
+  inherited;
+end;
+
+{ TManifestScriptList }
+
+constructor TManifestScriptList.Create;
+begin
+  inherited Create(True);
+end;
+
 { TManifest }
 
 constructor TManifest.Create;
@@ -333,6 +381,7 @@ begin
   FPackages := TManifestPackageList.Create;
   FPackageOptions := TManifestPackageOptions.Create;
   FDependencies := TDependencyMap.Create;
+  FScripts := TManifestScriptList.Create;
 end;
 
 destructor TManifest.Destroy;
@@ -343,11 +392,11 @@ begin
   FPackages.Free;
   FPackageOptions.Free;
   FDependencies.Free;
+  FScripts.Free;
   inherited;
 end;
 
-class function TManifest.GetManifest(const APackageName,
-  APackageVersion: string): TManifest;
+class function TManifest.GetManifest(const APackageName, APackageVersion: string): TManifest;
 begin
   var LPackagePair := APackageName.Split(['.']);
   if Length(LPackagePair) <> 2 then
@@ -361,11 +410,14 @@ begin
     if APackageVersion = '' then
       raise Exception.CreateFmt('No versions found for package "%s". Try to update the repository', [APackageName])
     else
-      raise Exception.CreateFmt('No version matching "%s" found for package "%s". Try to update the repository', [APackageVersion, APackageName]);
+      raise Exception.CreateFmt(
+          'No version matching "%s" found for package "%s". Try to update the repository',
+          [APackageVersion, APackageName]);
   end;
 
   var LVersionsDir := TPath.Combine(TWorkspace.BlocksDir, 'repository', LPackagePair[0], LPackagePair[1]);
-  var LFullPath := TPath.Combine(LVersionsDir, LBest.ToString, LPackagePair[0] + '.' + LPackagePair[1] + '.manifest.json');
+  var LFullPath :=
+      TPath.Combine(LVersionsDir, LBest.ToString, LPackagePair[0] + '.' + LPackagePair[1] + '.manifest.json');
   if not FileExists(LFullPath) then
     raise Exception.CreateFmt('Manifest file not found: %s', [LFullPath]);
 
@@ -398,11 +450,10 @@ begin
       LResult := LResult + [LVer];
   end;
 
-  TArray.Sort<TSemVer>(LResult, TComparer<TSemVer>.Construct(
-    function(const A, B: TSemVer): Integer
-    begin
-      Result := A.CompareTo(B);
-    end));
+  TArray.Sort<TSemVer>(
+      LResult,
+      TComparer<TSemVer>.Construct(function(const A, B: TSemVer): Integer begin Result := A.CompareTo(B); end)
+  );
 
   Result := LResult;
 end;
@@ -498,15 +549,13 @@ begin
           Continue;
 
         // Sort descending — latest first
-        TArray.Sort<TSemVer>(LSemVers, TComparer<TSemVer>.Construct(
-          function(const A, B: TSemVer): Integer
-          begin
-            Result := B.CompareTo(A);
-          end));
+        TArray.Sort<TSemVer>(
+            LSemVers,
+            TComparer<TSemVer>.Construct(function(const A, B: TSemVer): Integer begin Result := B.CompareTo(A); end)
+        );
 
-        var LLatestManifestPath := TPath.Combine(
-            TPath.Combine(LPackageDir, LSemVers[0].ToString),
-            LId + '.manifest.json');
+        var LLatestManifestPath :=
+            TPath.Combine(TPath.Combine(LPackageDir, LSemVers[0].ToString), LId + '.manifest.json');
         if not FileExists(LLatestManifestPath) then
         begin
           raise EManfestError.CreateFmt('Manifest "%s" not found', [LLatestManifestPath]);
@@ -572,4 +621,3 @@ begin
 end;
 
 end.
-

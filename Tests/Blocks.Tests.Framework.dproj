@@ -67,6 +67,7 @@
         <VerInfo_Keys>CompanyName=;FileDescription=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=;ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>
         <DCC_ExeOutput>.\$(Platform)\$(Config)</DCC_ExeOutput>
+        <DCC_UnitSearchPath>..\Source;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <DCC_E>false</DCC_E>
         <DCC_N>false</DCC_N>
         <DCC_S>false</DCC_S>
@@ -142,6 +143,9 @@
         <DCCReference Include="Blocks.Tests.Package.pas"/>
         <DCCReference Include="Blocks.Tests.Command.pas"/>
         <DCCReference Include="..\Source\Blocks.CLI.Command.pas"/>
+        <DCCReference Include="..\Source\Blocks.Model.Manifest.pas"/>
+        <DCCReference Include="..\Source\Blocks.Service.Script.pas"/>
+        <DCCReference Include="Blocks.Tests.Script.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

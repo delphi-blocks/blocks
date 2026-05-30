@@ -62,6 +62,12 @@ type
   ['{DD163E75-134C-4035-809C-D9E1EEEC4225}']
   end;
 
+  IDynamicObject = interface(IDynamicType)
+    ['{C6C31F4F-9F57-4C38-B0F5-5EA2F0C33058}']
+    function ToJSON: TJSONValue;
+    procedure FromJSON(AJSONObject: TJSONValue);
+  end;
+
   IDynamicList = interface(IDynamicType)
   ['{9F4A2D72-078B-4EA2-B86E-068206AD0F16}']
     function NewItem: TValue;
@@ -97,6 +103,7 @@ type
   private
     function IsEnumerableMap(AObject: TObject; out AMap: IDynamicMap): Boolean;
     function IsEnumerableList(AObject: TObject; out AList: IDynamicList): Boolean;
+    function IsDynamicObject(AObject: TObject; out ADynamicObject: IDynamicObject): Boolean;
     function WriteList(AObject: TObject; AList: IDynamicList): TJSONArray;
     function WriteDictionary(AObject: TObject; AMap: IDynamicMap): TJSONObject;
     function WriteDataMembers(AObject: TObject): TJSONObject;
@@ -110,6 +117,7 @@ type
   private
     function IsEnumerableMap(AObject: TObject; out AMap: IDynamicMap): Boolean;
     function IsEnumerableList(AObject: TObject; out AList: IDynamicList): Boolean;
+    function IsDynamicObject(AObject: TObject; out ADynamicObject: IDynamicObject): Boolean;
     procedure ReadDataMember(AType: TRttiType; var AValue: TValue; AJSON: TJSONValue);
     procedure ReadDataMembers(AObject: TObject; AType: TRttiType; AJSON: TJSONValue);
     procedure ReadDictionary(ADynamicMap: IDynamicMap; AJSONObject: TJSONObject);
@@ -142,6 +150,21 @@ type
   public
     class function CamelToPascal(const AString: string): string; static;
     class function PascalToCamel(const AString: string): string; static;
+  end;
+
+  TDynamicObject = class(TInterfacedObject, IDynamicObject)
+  private
+    FInstance: TObject;
+    FObjectType: TRttiType;
+    FToJSONMethod: TRttiMethod;
+    FFromJSONMethod: TRttiMethod;
+    constructor Create(AInstance: TObject; AObjectType: TRttiType;
+      AToJSONMethod, AFromJSONMethod: TRttiMethod);
+  public
+    class function GuessType(AInstance: TObject): TDynamicObject;
+  public
+    function ToJSON: TJSONValue;
+    procedure FromJSON(AJSONObject: TJSONValue);
   end;
 
   TDynamicList = class(TInterfacedObject, IDynamicList)
@@ -444,6 +467,13 @@ end;
 
 { TJsonDeserializer }
 
+function TJsonDeserializer.IsDynamicObject(AObject: TObject;
+  out ADynamicObject: IDynamicObject): Boolean;
+begin
+  ADynamicObject := TDynamicObject.GuessType(AObject);
+  Result := Assigned(ADynamicObject);
+end;
+
 function TJsonDeserializer.IsEnumerableList(AObject: TObject;
   out AList: IDynamicList): Boolean;
 begin
@@ -470,6 +500,7 @@ var
 
   LDynamicMap: IDynamicMap absolute LDynamicType;
   LDynamicList: IDynamicList absolute LDynamicType;
+  LDynamicObject: IDynamicObject absolute LDynamicType;
 begin
   case AType.TypeKind of
     tkInt64:       AValue := TJSONHelper.ValueAs<Int64>(AJSON, 0);
@@ -491,6 +522,10 @@ begin
             raise EJSONDeserializerError.Create('TJSONArray expected');
           ReadStringList(TStrings(LPropInstance), TJSONArray(AJSON));
         end
+      end
+      else if IsDynamicObject(LPropInstance, LDynamicObject) then
+      begin
+        LDynamicObject.FromJSON(AJSON);
       end
       else if IsEnumerableMap(LPropInstance, LDynamicMap) then
       begin
@@ -702,6 +737,13 @@ end;
 
 { TJsonSerializer }
 
+function TJsonSerializer.IsDynamicObject(AObject: TObject;
+  out ADynamicObject: IDynamicObject): Boolean;
+begin
+  ADynamicObject := TDynamicObject.GuessType(AObject);
+  Result := Assigned(ADynamicObject);
+end;
+
 function TJsonSerializer.IsEnumerableList(AObject: TObject; out AList: IDynamicList): Boolean;
 begin
   AList := TDynamicList.GuessType(AObject);
@@ -725,6 +767,7 @@ var
 
   LDynamicMap: IDynamicMap absolute LDynamicType;
   LDynamicList: IDynamicList absolute LDynamicType;
+  LDynamicObject: IDynamicObject absolute LDynamicType;
 begin
   case AType.TypeKind of
     tkInt64:        Result := TJSONNumber.Create(AValue.AsInt64);
@@ -747,6 +790,10 @@ begin
       if LPropInstance is TStrings then
       begin
         Result := WriteStringListMembers(TStrings(LPropInstance));
+      end
+      else if IsDynamicObject(LPropInstance, LDynamicObject) then
+      begin
+        Result := LDynamicObject.ToJSON;
       end
       else if IsEnumerableMap(LPropInstance, LDynamicMap) then
       begin
@@ -1199,6 +1246,55 @@ end;
 function TDynamicMap.TEnumerator.MoveNext: Boolean;
 begin
   Result := FMoveNextMethod.Invoke(FInstance, []).AsBoolean;
+end;
+
+{ TDynamicObject }
+
+constructor TDynamicObject.Create(AInstance: TObject; AObjectType: TRttiType;
+  AToJSONMethod, AFromJSONMethod: TRttiMethod);
+begin
+  FInstance := AInstance;
+  FObjectType := AObjectType;
+  FToJSONMethod := AToJSONMethod;
+  FFromJSONMethod := AFromJSONMethod;
+end;
+
+procedure TDynamicObject.FromJSON(AJSONObject: TJSONValue);
+begin
+  FFromJSONMethod.Invoke(FInstance, [AJSONObject]);
+end;
+
+class function TDynamicObject.GuessType(AInstance: TObject): TDynamicObject;
+var
+  LMethodFromJSON, LMethodToJSON: TRttiMethod;
+  LObjectType: TRttiType;
+begin
+  Result := nil;
+
+  if not Assigned(AInstance) then
+    Exit;
+
+  LObjectType := TRttiHelper.Context.GetType(AInstance.ClassType);
+
+  LMethodToJSON := LObjectType.GetMethod('ToJSON');
+  if (not Assigned(LMethodToJSON)) or (LMethodToJSON.MethodKind <> mkFunction) then
+    Exit;
+
+  LMethodFromJSON := LObjectType.GetMethod('FromJSON');
+  if not Assigned(LMethodFromJSON) or (Length(LMethodFromJSON.GetParameters) <> 1) then
+    Exit;
+
+  Result := TDynamicObject.Create(
+    AInstance,
+    LObjectType,
+    LMethodToJSON,
+    LMethodFromJSON
+  );
+end;
+
+function TDynamicObject.ToJSON: TJSONValue;
+begin
+  Result := FToJSONMethod.Invoke(FInstance, []).AsObject as TJSONValue;
 end;
 
 end.

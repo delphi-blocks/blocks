@@ -12,6 +12,8 @@ A command-line package manager for Delphi / RAD Studio. DelphiBlocks automates d
 4. Registers the library paths in the Delphi registry and records the installation in a local database (`.blocks/`).
 5. Supports multiple Delphi IDE profiles via the `registrykey` workspace setting. Delphi allows launching with an alternative registry profile using the `-r` flag (e.g. `bds.exe -r MyProfile`).
 6. Supports custom package repositories. In addition to the default registry, you can add your own GitHub-hosted repositories as package sources.
+7. Supports multiple package versions and dependency management based on [SemVer](https://semver.org/): each package can publish many versions, and Blocks resolves the best match for a constraint and installs dependencies recursively. See [docs/versioning.md](docs/versioning.md).
+8. Supports custom scripts: a manifest can run built-in commands (e.g. copying resources) at lifecycle events such as `afterCompile` or `afterInstall`. See [docs/script.md](docs/script.md).
 
 ## Requirements
 
@@ -79,19 +81,7 @@ blocks config sources
 blocks config /add sources=https://github.com/owner/my-repo
 ```
 
-### Version constraints
-
-Append `@<constraint>` to a package ID to pin or restrict the version:
-
-| Syntax | Meaning |
-|--------|---------|
-| `@1.2.0` | Exact version |
-| `@^1.2.0` | Same major (`>=1.2.0 <2.0.0`) |
-| `@~1.2.0` | Same minor (`>=1.2.0 <1.3.0`) |
-| `@>=1.0.0` | At least 1.0.0 |
-| `@>=1.0.0 <2.0.0` | Explicit range |
-
-> **Note:** In `cmd.exe` the `^` character must be escaped as `^^` (e.g. `owner.package@^^1.2.0`). In PowerShell no escaping is needed.
+> **Version constraints & dependencies:** append `@<constraint>` to a package id to pin or restrict the version (e.g. `owner.package@^1.2.0`). The full constraint syntax and how dependency resolution works are documented in [docs/versioning.md](docs/versioning.md).
 
 ### The `product` command
 
@@ -191,15 +181,7 @@ Each package in the repository is described by a JSON manifest file (`<vendor>.<
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `id` | Unique package identifier in `vendor.name` form. |
-| `repository.url` | GitHub tree URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. |
-| `platforms` | Per-platform source and DCU paths added to the Delphi library registry. |
-| `packages` | List of `.dproj` files to compile; type can be `runtime`, `designtime`, or both. |
-| `packageOptions.folders` | Maps Delphi version keys to the subfolder under `packages\` containing the `.dproj` files. A `+` suffix means "this version or newer". |
-| `packageOptions.keepProjectDcuPaths` | Optional; defaults to `false`. When `true`, DCU output paths are taken from the `.dproj` instead of Blocks' default `<project>\lib\<Platform>\`. Should not be used unless preserving the DCU layout declared by the `.dproj` is strictly necessary. |
-| `dependencies` | Other packages that must be installed first, with their version constraints. |
+For a full field-by-field reference, see [docs/manifest.md](docs/manifest.md).
 
 ## Application manifest
 
