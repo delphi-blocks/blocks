@@ -18,7 +18,6 @@ uses
   System.SysUtils,
   System.IOUtils,
   System.Generics.Collections,
-
   Blocks.JSON;
 
 /// <summary>Manages the per-workspace package database.</summary>
@@ -42,8 +41,21 @@ type
   private
     FPackages: TDictionary<string, TInstalledPackage>;
     FDatabasePath: string;
+    FRepositoryUpdated: TDateTime;
   public
     property Packages: TDictionary<string, TInstalledPackage> read FPackages;
+
+    /// <summary>Timestamp of the last repository refresh (<see cref="TWorkspace.Initialize"/>
+    ///   or <see cref="TWorkspace.Update"/>); zero when the repository was never refreshed.</summary>
+    property RepositoryUpdated: TDateTime read FRepositoryUpdated write FRepositoryUpdated;
+
+    /// <summary>Records <c>Now</c> as the repository refresh time and persists the database.</summary>
+    procedure TouchRepository;
+
+    /// <summary>Returns <c>True</c> when the repository has not been refreshed within the last
+    ///   <paramref name="AMaxAgeDays"/> days (or was never refreshed).</summary>
+    /// <param name="AMaxAgeDays">Maximum acceptable age, expressed in days.</param>
+    function IsRepositoryStale(AMaxAgeDays: Double): Boolean;
 
     /// <summary>Removes the database entry for a package.</summary>
     /// <param name="LibraryId">Library identifier.</param>
@@ -81,7 +93,6 @@ implementation
 
 uses
   System.JSON,
-
   Blocks.Console,
   Blocks.Service.Workspace;
 
@@ -146,6 +157,17 @@ end;
 function TDatabase.IsInstalled(const LibraryId: string): Boolean;
 begin
   Result := FPackages.ContainsKey(LibraryId);
+end;
+
+procedure TDatabase.TouchRepository;
+begin
+  FRepositoryUpdated := Now;
+  Save;
+end;
+
+function TDatabase.IsRepositoryStale(AMaxAgeDays: Double): Boolean;
+begin
+  Result := (FRepositoryUpdated = 0) or (Now - FRepositoryUpdated > AMaxAgeDays);
 end;
 
 constructor TDatabase.Create;

@@ -286,8 +286,8 @@ begin
 
     TConsole.WriteLine('  Workspace  ▸  ' + TWorkspace.WorkDir, clWhite);
     TConsole.WriteLine(
-        '  Delphi     ▸  ' +
-            if LProduct <> '' then LProduct
+        '  Delphi     ▸  '
+            + if LProduct <> '' then LProduct
             else '(not configured)',
         clWhite
     );
@@ -677,6 +677,17 @@ begin
       raise Exception.Create('Operation cancelled. Run "blocks Init" to initialise the workspace first.');
     TWorkspace.Initialize(TWorkspace.WorkDir, '', '');
     TConsole.WriteLine;
+    // Initialize already refreshed the repository, nothing more to do.
+    Exit;
+  end;
+
+  // Refresh the repository list when it has not been updated for more than a day.
+  if TWorkspace.Database.IsRepositoryStale(1) then
+  begin
+    TConsole.WriteLine;
+    TConsole.WriteLine('Repository list is more than a day old, updating...', clCyan);
+    TWorkspace.Update(TWorkspace.WorkDir);
+    TConsole.WriteLine;
   end;
 end;
 
@@ -863,6 +874,7 @@ end;
 procedure TViewCommand.Execute;
 begin
   inherited;
+  CheckWorkspace;
   if FPackage = '' then
     raise Exception.Create('Package name needed');
 

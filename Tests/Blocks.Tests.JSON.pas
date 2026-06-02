@@ -5,10 +5,10 @@ interface
 uses
   System.Classes,
   System.SysUtils,
+  System.DateUtils,
   System.JSON,
   System.Generics.Collections,
   DUnitX.TestFramework,
-
   Blocks.Core,
   Blocks.JSON;
 
@@ -20,6 +20,18 @@ type
   public
     property StrProp: string read FStrProp write FStrProp;
     property IntProp: Integer read FIntProp write FIntProp;
+  end;
+
+  // ----- date / time -----
+  TDateObj = class(TObject)
+  private
+    FName: string;
+    FCreatedAt: TDateTime;
+    FDueDate: TDate;
+  public
+    property Name: string read FName write FName;
+    property CreatedAt: TDateTime read FCreatedAt write FCreatedAt;
+    property DueDate: TDate read FDueDate write FDueDate;
   end;
 
   // ----- string list -----
@@ -198,153 +210,163 @@ type
     procedure TestJSONObject_PreservesKeyOrderOnParse;
     [Test]
     procedure TestJSONObject_PreservesKeyOrderOnRoundTrip;
+    [Test]
+    procedure TestSerialization_DateTime;
+    [Test]
+    procedure TestDeserialization_DateTime;
+    [Test]
+    procedure TestDeserialization_DateTime_Missing;
+    [Test]
+    procedure TestDeserialization_DateTime_LegacyNumberIgnored;
+    [Test]
+    procedure TestRoundTrip_DateTime;
   end;
 
 const
   MyTestJSON =
-    '''
-    {
-      "strProp": "TestValue",
-      "intProp": 43
-    }
-    ''';
+      '''
+      {
+        "strProp": "TestValue",
+        "intProp": 43
+      }
+      ''';
 
   TaggedObjJSON =
-    '''
-    {
-      "name": "TestName",
-      "tags": ["alpha", "beta", "gamma"]
-    }
-    ''';
+      '''
+      {
+        "name": "TestName",
+        "tags": ["alpha", "beta", "gamma"]
+      }
+      ''';
 
   FlaggedObjJSON =
-    '''
-    {
-      "name": "TestName",
-      "flags": ["alpha", "beta", "gamma"]
-    }
-    ''';
+      '''
+      {
+        "name": "TestName",
+        "flags": ["alpha", "beta", "gamma"]
+      }
+      ''';
 
   ListObjJSON =
-    '''
-    {
-      "title": "MyList",
-      "items": [
-        { "value": "first", "count": 1 },
-        { "value": "second", "count": 2 }
-      ]
-    }
-    ''';
+      '''
+      {
+        "title": "MyList",
+        "items": [
+          { "value": "first", "count": 1 },
+          { "value": "second", "count": 2 }
+        ]
+      }
+      ''';
 
   StrDictObjJSON =
-    '''
-    {
-      "name": "TestLabel",
-      "props": {
-        "key1": "value1",
-        "key2": "value2"
+      '''
+      {
+        "name": "TestLabel",
+        "props": {
+          "key1": "value1",
+          "key2": "value2"
+        }
       }
-    }
-    ''';
+      ''';
 
   ObjDictObjJSON =
-    '''
-    {
-      "name": "DictLabel",
-      "children": {
-        "child1": { "value": "v1", "count": 10 },
-        "child2": { "value": "v2", "count": 20 }
+      '''
+      {
+        "name": "DictLabel",
+        "children": {
+          "child1": { "value": "v1", "count": 10 },
+          "child2": { "value": "v2", "count": 20 }
+        }
       }
-    }
-    ''';
+      ''';
 
   TaggedObjEmptyJSON =
-    '''
-    {
-      "name": "TestName",
-      "tags": []
-    }
-    ''';
+      '''
+      {
+        "name": "TestName",
+        "tags": []
+      }
+      ''';
 
   FlaggedObjEmptyJSON =
-    '''
-    {
-      "name": "TestName",
-      "flags": []
-    }
-    ''';
+      '''
+      {
+        "name": "TestName",
+        "flags": []
+      }
+      ''';
 
   ListObjEmptyJSON =
-    '''
-    {
-      "title": "MyList",
-      "items": []
-    }
-    ''';
+      '''
+      {
+        "title": "MyList",
+        "items": []
+      }
+      ''';
 
   StrDictObjEmptyJSON =
-    '''
-    {
-      "name": "TestLabel",
-      "props": {}
-    }
-    ''';
+      '''
+      {
+        "name": "TestLabel",
+        "props": {}
+      }
+      ''';
 
   ObjDictObjEmptyJSON =
-    '''
-    {
-      "name": "DictLabel",
-      "children": {}
-    }
-    ''';
+      '''
+      {
+        "name": "DictLabel",
+        "children": {}
+      }
+      ''';
 
   TaggedObjMissingJSON =
-    '''
-    {
-      "name": "TestName"
-    }
-    ''';
+      '''
+      {
+        "name": "TestName"
+      }
+      ''';
 
   FlaggedObjMissingJSON =
-    '''
-    {
-      "name": "TestName"
-    }
-    ''';
+      '''
+      {
+        "name": "TestName"
+      }
+      ''';
 
   ListObjMissingJSON =
-    '''
-    {
-      "title": "MyList"
-    }
-    ''';
+      '''
+      {
+        "title": "MyList"
+      }
+      ''';
 
   StrDictObjMissingJSON =
-    '''
-    {
-      "name": "TestLabel"
-    }
-    ''';
+      '''
+      {
+        "name": "TestLabel"
+      }
+      ''';
 
   ObjDictObjMissingJSON =
-    '''
-    {
-      "name": "DictLabel"
-    }
-    ''';
+      '''
+      {
+        "name": "DictLabel"
+      }
+      ''';
 
   // Keys deliberately not in alphabetical order, to prove insertion/parse
   // order is what is preserved (not a sort).
   OrderedKeysJSON =
-    '''
-    {
-      "zebra": "1",
-      "alpha": "2",
-      "mike": "3",
-      "bravo": "4",
-      "delta": "5"
-    }
-    ''';
+      '''
+      {
+        "zebra": "1",
+        "alpha": "2",
+        "mike": "3",
+        "bravo": "4",
+        "delta": "5"
+      }
+      ''';
 
 implementation
 
@@ -810,7 +832,7 @@ end;
 
 procedure TJSONTest.TestJSONObject_PreservesKeyOrderOnParse;
 const
-  LExpectedOrder: array [0 .. 4] of string = ('zebra', 'alpha', 'mike', 'bravo', 'delta');
+  LExpectedOrder: array[0..4] of string = ('zebra', 'alpha', 'mike', 'bravo', 'delta');
 begin
   // TJSONObject keeps its pairs in a TList, so iterating by index yields the
   // pairs in the exact order they appear in the source text.
@@ -832,16 +854,96 @@ begin
   var LObj := TJSONObject.ParseJSONValue(OrderedKeysJSON) as TJSONObject;
   try
     var LText := LObj.ToJSON;
-    Assert.IsTrue(
-      LText.IndexOf('zebra') < LText.IndexOf('alpha'), 'zebra before alpha');
-    Assert.IsTrue(
-      LText.IndexOf('alpha') < LText.IndexOf('mike'), 'alpha before mike');
-    Assert.IsTrue(
-      LText.IndexOf('mike') < LText.IndexOf('bravo'), 'mike before bravo');
-    Assert.IsTrue(
-      LText.IndexOf('bravo') < LText.IndexOf('delta'), 'bravo before delta');
+    Assert.IsTrue(LText.IndexOf('zebra') < LText.IndexOf('alpha'), 'zebra before alpha');
+    Assert.IsTrue(LText.IndexOf('alpha') < LText.IndexOf('mike'), 'alpha before mike');
+    Assert.IsTrue(LText.IndexOf('mike') < LText.IndexOf('bravo'), 'mike before bravo');
+    Assert.IsTrue(LText.IndexOf('bravo') < LText.IndexOf('delta'), 'bravo before delta');
   finally
     LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestSerialization_DateTime;
+begin
+  var LObj := TDateObj.Create;
+  try
+    LObj.Name := 'evt';
+    LObj.CreatedAt := EncodeDateTime(2026, 6, 2, 14, 30, 15, 0);
+    LObj.DueDate := EncodeDate(2026, 12, 31);
+    var LJSON := TJsonHelper.ObjectToJSON(LObj);
+    try
+      // TDateTime -> ISO 8601 timestamp. The local wall-clock part is stable;
+      // the trailing UTC offset (e.g. "+02:00") depends on the machine, so we
+      // only assert the prefix.
+      Assert.StartsWith('2026-06-02T14:30:15.000', LJSON.GetValue<string>('createdAt'), 'createdAt');
+      // TDate -> plain date, no time and no offset.
+      Assert.AreEqual('2026-12-31', LJSON.GetValue<string>('dueDate'), 'dueDate');
+    finally
+      LJSON.Free;
+    end;
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_DateTime;
+begin
+  // The string carries an explicit UTC zone ("Z"), so the parsed instant is
+  // unambiguous regardless of the machine timezone: it must equal that same UTC
+  // instant expressed in local time.
+  var LExpected := TTimeZone.Local.ToLocalTime(EncodeDateTime(2026, 6, 2, 12, 30, 15, 0));
+  var LObj :=
+      TJsonHelper.JSONToObject<TDateObj>('{ "name": "evt", "createdAt": "2026-06-02T12:30:15.000Z" }');
+  try
+    Assert.AreEqual('evt', LObj.Name, 'name');
+    Assert.AreEqual(Double(LExpected), Double(LObj.CreatedAt), 0.00001, 'createdAt');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_DateTime_Missing;
+begin
+  // A missing date field must default to 0 instead of raising.
+  var LObj := TJsonHelper.JSONToObject<TDateObj>('{ "name": "evt" }');
+  try
+    Assert.AreEqual('evt', LObj.Name, 'name');
+    Assert.AreEqual(Double(0), Double(LObj.CreatedAt), 0.00001, 'createdAt defaults to 0');
+    Assert.AreEqual(Double(0), Double(LObj.DueDate), 0.00001, 'dueDate defaults to 0');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestDeserialization_DateTime_LegacyNumberIgnored;
+begin
+  // Databases written by the old code stored dates as plain numbers. The ISO
+  // reader must not crash on them; it falls back to 0.
+  var LObj := TJsonHelper.JSONToObject<TDateObj>('{ "name": "evt", "createdAt": 45810.5 }');
+  try
+    Assert.AreEqual(Double(0), Double(LObj.CreatedAt), 0.00001, 'legacy numeric date ignored');
+  finally
+    LObj.Free;
+  end;
+end;
+
+procedure TJSONTest.TestRoundTrip_DateTime;
+begin
+  var LSrc := TDateObj.Create;
+  try
+    LSrc.Name := 'evt';
+    LSrc.CreatedAt := EncodeDateTime(2024, 1, 15, 9, 5, 30, 0);
+    LSrc.DueDate := EncodeDate(2024, 2, 20);
+    var LText := TJsonHelper.ObjectToJSONString(LSrc);
+    var LDst := TJsonHelper.JSONToObject<TDateObj>(LText);
+    try
+      Assert.AreEqual(Double(LSrc.CreatedAt), Double(LDst.CreatedAt), 0.00001, 'createdAt');
+      Assert.AreEqual(Double(LSrc.DueDate), Double(LDst.DueDate), 0.00001, 'dueDate');
+    finally
+      LDst.Free;
+    end;
+  finally
+    LSrc.Free;
   end;
 end;
 

@@ -399,6 +399,8 @@ begin
     LSelectedProduct.CheckDCPPath(AWorkDir);
 
   LSelectedProduct.CheckEnvironment(AWorkDir);
+
+  Database.TouchRepository;
 end;
 
 class procedure TWorkspace.RebuildIndex;
@@ -731,6 +733,8 @@ begin
     InitializeFromSource(LSource);
 
   RebuildIndex;
+
+  Database.TouchRepository;
 end;
 
 end.

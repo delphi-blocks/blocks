@@ -15,7 +15,12 @@ unit Blocks.JSON;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.JSON, System.Rtti, System.TypInfo,
+  System.SysUtils,
+  System.Classes,
+  System.DateUtils,
+  System.JSON,
+  System.Rtti,
+  System.TypInfo,
   System.Generics.Collections;
 
 type
@@ -40,8 +45,8 @@ type
   private
     class procedure PrettyPrint(const AJSONString: string; AWriter: TTextWriter); overload; static;
   public
-    class function JSONToObject<T: class, constructor>(AJson: TJSONValue):T; overload; static;
-    class function JSONToObject<T: class, constructor>(const AJsonString: string):T; overload; static;
+    class function JSONToObject<T: class, constructor>(AJson: TJSONValue): T; overload; static;
+    class function JSONToObject<T: class, constructor>(const AJsonString: string): T; overload; static;
     class function JSONToObject(AType: TRttiType; AJSON: TJSONValue): TObject; overload;
     class procedure JSONToObject(AObject: TObject; AType: TRttiType; AJSON: TJSONValue); overload;
     class procedure JSONToObject(AObject: TObject; AJSON: TJSONValue); overload;
@@ -59,7 +64,7 @@ type
   end;
 
   IDynamicType = interface
-  ['{DD163E75-134C-4035-809C-D9E1EEEC4225}']
+    ['{DD163E75-134C-4035-809C-D9E1EEEC4225}']
   end;
 
   IDynamicObject = interface(IDynamicType)
@@ -69,7 +74,7 @@ type
   end;
 
   IDynamicList = interface(IDynamicType)
-  ['{9F4A2D72-078B-4EA2-B86E-068206AD0F16}']
+    ['{9F4A2D72-078B-4EA2-B86E-068206AD0F16}']
     function NewItem: TValue;
     function GetItemType: TRttiType;
     procedure Add(AItem: TValue);
@@ -81,7 +86,7 @@ type
   end;
 
   IDynamicMap = interface(IDynamicType)
-  ['{89E60A06-C1A9-4D70-83B8-85D9B29510DB}']
+    ['{89E60A06-C1A9-4D70-83B8-85D9B29510DB}']
     function NewKey: TValue;
     function NewValue: TValue;
     function GetKeyType: TRttiType;
@@ -129,7 +134,8 @@ type
 
   TRttiHelper = class
   private
-    class var FContext: TRttiContext;
+    class var
+      FContext: TRttiContext;
   public
     class constructor Create;
     class destructor Destroy;
@@ -158,8 +164,7 @@ type
     FObjectType: TRttiType;
     FToJSONMethod: TRttiMethod;
     FFromJSONMethod: TRttiMethod;
-    constructor Create(AInstance: TObject; AObjectType: TRttiType;
-      AToJSONMethod, AFromJSONMethod: TRttiMethod);
+    constructor Create(AInstance: TObject; AObjectType: TRttiType; AToJSONMethod, AFromJSONMethod: TRttiMethod);
   public
     class function GuessType(AInstance: TObject): TDynamicObject;
   public
@@ -177,9 +182,12 @@ type
     FMoveNextMethod: TRttiMethod;
     FCurrentProperty: TRttiProperty;
     FCountProperty: TRttiProperty;
-    constructor Create(AInstance, AEnumInstance: TObject; AItemType: TRttiType;
-      AAddMethod, AClearMethod, AMoveNextMethod: TRttiMethod;
-      ACurrentProperty, ACountProperty: TRttiProperty);
+    constructor Create(
+        AInstance, AEnumInstance: TObject;
+        AItemType: TRttiType;
+        AAddMethod, AClearMethod, AMoveNextMethod: TRttiMethod;
+        ACurrentProperty, ACountProperty: TRttiProperty
+    );
   public
     destructor Destroy; override;
     class function GuessType(AInstance: TObject): IDynamicList;
@@ -195,22 +203,25 @@ type
   end;
 
   TDynamicMap = class(TInterfacedObject, IDynamicMap)
-  public type
-    TEnumerator = class
-    private
-      const CURRENT_PROP = 'Current';
-      const MOVENEXT_METH = 'MoveNext';
-    private
-      FInstance: TObject;
-      FMoveNextMethod: TRttiMethod;
-      FCurrentProperty: TRttiProperty;
-    public
-      constructor Create(AMethod: TRttiMethod; AInstance: TObject);
-      destructor Destroy; override;
-    public
-      function Current: TValue;
-      function MoveNext: Boolean;
-    end;
+  public
+    type
+      TEnumerator = class
+      private
+        const
+          CURRENT_PROP = 'Current';
+        const
+          MOVENEXT_METH = 'MoveNext';
+      private
+        FInstance: TObject;
+        FMoveNextMethod: TRttiMethod;
+        FCurrentProperty: TRttiProperty;
+      public
+        constructor Create(AMethod: TRttiMethod; AInstance: TObject);
+        destructor Destroy; override;
+      public
+        function Current: TValue;
+        function MoveNext: Boolean;
+      end;
   private
     FInstance: TObject;
     FKeyType: TRttiType;
@@ -223,9 +234,14 @@ type
     FToStringMethod: TRttiMethod;
     FFromStringMethod: TRttiMethod;
 
-    constructor Create(AInstance: TObject; AKeyType, AValueType: TRttiType;
-      AAddMethod, AClearMethod: TRttiMethod; ACountProp: TRttiProperty;
-      AKeyEnum, AValueEnum: TDynamicMap.TEnumerator; AToStringMethod, AFromStringMethod: TRttiMethod);
+    constructor Create(
+        AInstance: TObject;
+        AKeyType, AValueType: TRttiType;
+        AAddMethod, AClearMethod: TRttiMethod;
+        ACountProp: TRttiProperty;
+        AKeyEnum, AValueEnum: TDynamicMap.TEnumerator;
+        AToStringMethod, AFromStringMethod: TRttiMethod
+    );
   public
     class function GuessType(AInstance: TObject): IDynamicMap;
     destructor Destroy; override;
@@ -287,8 +303,7 @@ end;
 
 { TJsonHelper }
 
-class function TJsonHelper.JSONToObject(AType: TRttiType;
-  AJSON: TJSONValue): TObject;
+class function TJsonHelper.JSONToObject(AType: TRttiType; AJSON: TJSONValue): TObject;
 begin
   Result := TRttiHelper.CreateInstance(AType);
   try
@@ -299,8 +314,7 @@ begin
   end;
 end;
 
-class procedure TJsonHelper.JSONToObject(AObject: TObject; AType: TRttiType;
-  AJSON: TJSONValue);
+class procedure TJsonHelper.JSONToObject(AObject: TObject; AType: TRttiType; AJSON: TJSONValue);
 begin
   var LDeserializer := TJsonDeserializer.Create;
   try
@@ -312,11 +326,10 @@ end;
 
 class procedure TJsonHelper.JSONToObject(AObject: TObject; AJSON: TJSONValue);
 begin
-  JSONToObject(AObject, TRttiHelper.Context.GetType(AObject.ClassType) , AJSON);
+  JSONToObject(AObject, TRttiHelper.Context.GetType(AObject.ClassType), AJSON);
 end;
 
-class procedure TJsonHelper.JSONToObject(AObject: TObject;
-  const AJSONString: string);
+class procedure TJsonHelper.JSONToObject(AObject: TObject; const AJSONString: string);
 begin
   var LJson := TJSONObject.ParseJSONValue(AJsonString, False, True);
   try
@@ -467,29 +480,25 @@ end;
 
 { TJsonDeserializer }
 
-function TJsonDeserializer.IsDynamicObject(AObject: TObject;
-  out ADynamicObject: IDynamicObject): Boolean;
+function TJsonDeserializer.IsDynamicObject(AObject: TObject; out ADynamicObject: IDynamicObject): Boolean;
 begin
   ADynamicObject := TDynamicObject.GuessType(AObject);
   Result := Assigned(ADynamicObject);
 end;
 
-function TJsonDeserializer.IsEnumerableList(AObject: TObject;
-  out AList: IDynamicList): Boolean;
+function TJsonDeserializer.IsEnumerableList(AObject: TObject; out AList: IDynamicList): Boolean;
 begin
   AList := TDynamicList.GuessType(AObject);
   Result := Assigned(AList);
 end;
 
-function TJsonDeserializer.IsEnumerableMap(AObject: TObject;
-  out AMap: IDynamicMap): Boolean;
+function TJsonDeserializer.IsEnumerableMap(AObject: TObject; out AMap: IDynamicMap): Boolean;
 begin
   AMap := TDynamicMap.GuessType(AObject);
   Result := Assigned(AMap);
 end;
 
-procedure TJsonDeserializer.JSONToObject(AObject: TObject;
-  AType: TRttiType; AJSON: TJSONValue);
+procedure TJsonDeserializer.JSONToObject(AObject: TObject; AType: TRttiType; AJSON: TJSONValue);
 begin
   ReadDataMembers(AObject, AType, AJSON);
 end;
@@ -503,13 +512,28 @@ var
   LDynamicObject: IDynamicObject absolute LDynamicType;
 begin
   case AType.TypeKind of
-    tkInt64:       AValue := TJSONHelper.ValueAs<Int64>(AJSON, 0);
-    tkInteger:     AValue := TJSONHelper.ValueAs<Integer>(AJSON, 0);
-    tkFloat:       AValue := TJSONHelper.ValueAs<Double>(AJSON, 0);
-    tkLString:     AValue := TJSONHelper.ValueAs<string>(AJSON, '');
-    tkWString:     AValue := TJSONHelper.ValueAs<string>(AJSON, '');
-    tkUString:     AValue := TJSONHelper.ValueAs<string>(AJSON, '');
-    tkString:      AValue := TJSONHelper.ValueAs<string>(AJSON, '');
+    tkInt64: AValue := TJSONHelper.ValueAs<Int64>(AJSON, 0);
+    tkInteger: AValue := TJSONHelper.ValueAs<Integer>(AJSON, 0);
+    tkFloat:
+    begin
+      if (AType.Handle = System.TypeInfo(TDate)) or (AType.Handle = System.TypeInfo(TDateTime)) then
+      begin
+        // Dates are written as ISO 8601 strings; anything else (missing field,
+        // null, or a legacy numeric value) is treated as an unset date.
+        var LDate: TDateTime := 0;
+        if AJSON is TJSONString then
+          LDate := ISO8601ToDate(AJSON.Value, False);
+        if AType.Handle = System.TypeInfo(TDate) then
+          LDate := Trunc(LDate);
+        AValue := TValue.From<TDateTime>(LDate);
+      end
+      else
+        AValue := TJSONHelper.ValueAs<Double>(AJSON, 0);
+    end;
+    tkLString: AValue := TJSONHelper.ValueAs<string>(AJSON, '');
+    tkWString: AValue := TJSONHelper.ValueAs<string>(AJSON, '');
+    tkUString: AValue := TJSONHelper.ValueAs<string>(AJSON, '');
+    tkString: AValue := TJSONHelper.ValueAs<string>(AJSON, '');
     tkEnumeration: AValue := TJSONHelper.ValueAs<Boolean>(AJSON, False);
     tkClass:
     begin
@@ -543,10 +567,10 @@ begin
   end;
 end;
 
-procedure TJsonDeserializer.ReadDataMembers(AObject: TObject; AType: TRttiType;
-  AJSON: TJSONValue);
+procedure TJsonDeserializer.ReadDataMembers(AObject: TObject; AType: TRttiType; AJSON: TJSONValue);
 begin
-  if not (AJSON is TJSONObject) then Exit;
+  if not (AJSON is TJSONObject) then
+    Exit;
 
   for var LProp in AType.GetProperties do
   begin
@@ -594,8 +618,7 @@ begin
   end;
 end;
 
-procedure TJsonDeserializer.ReadStringList(AObject: TStrings;
-  AJSON: TJSONArray);
+procedure TJsonDeserializer.ReadStringList(AObject: TStrings; AJSON: TJSONArray);
 begin
   AObject.Clear;
   for var LJSONItem in AJSON do
@@ -649,18 +672,18 @@ var
 begin
   case AType.TypeKind of
     tkEnumeration: Result := TValue.From<Byte>(0);
-    tkInteger:     Result := TValue.From<Integer>(0);
-    tkInt64:       Result := TValue.From<Int64>(0);
-    tkChar:        Result := TValue.From<UTF8Char>(#0);
-    tkWChar:       Result := TValue.From<Char>(#0);
-    tkFloat:       Result := TValue.From<Double>(0);
-    tkString:      Result := TValue.From<UTF8String>('');
-    tkWString:     Result := TValue.From<string>('');
-    tkLString:     Result := TValue.From<UTF8String>('');
-    tkUString:     Result := TValue.From<string>('');
-    //tkVariant:     Result := TValue.From<Variant>(Null);
+    tkInteger: Result := TValue.From<Integer>(0);
+    tkInt64: Result := TValue.From<Int64>(0);
+    tkChar: Result := TValue.From<UTF8Char>(#0);
+    tkWChar: Result := TValue.From<Char>(#0);
+    tkFloat: Result := TValue.From<Double>(0);
+    tkString: Result := TValue.From<UTF8String>('');
+    tkWString: Result := TValue.From<string>('');
+    tkLString: Result := TValue.From<UTF8String>('');
+    tkUString: Result := TValue.From<string>('');
+    // tkVariant:     Result := TValue.From<Variant>(Null);
 
-    tkClass:       Result := CreateInstance(AType);
+    tkClass: Result := CreateInstance(AType);
 
     tkRecord, tkDynArray:
     begin
@@ -737,8 +760,7 @@ end;
 
 { TJsonSerializer }
 
-function TJsonSerializer.IsDynamicObject(AObject: TObject;
-  out ADynamicObject: IDynamicObject): Boolean;
+function TJsonSerializer.IsDynamicObject(AObject: TObject; out ADynamicObject: IDynamicObject): Boolean;
 begin
   ADynamicObject := TDynamicObject.GuessType(AObject);
   Result := Assigned(ADynamicObject);
@@ -770,13 +792,21 @@ var
   LDynamicObject: IDynamicObject absolute LDynamicType;
 begin
   case AType.TypeKind of
-    tkInt64:        Result := TJSONNumber.Create(AValue.AsInt64);
-    tkInteger:      Result := TJSONNumber.Create(AValue.AsInteger);
-    tkFloat:        Result := TJSONNumber.Create(AValue.AsExtended);
-    tkLString:      Result := TJSONString.Create(AValue.AsString);
-    tkWString:      Result := TJSONString.Create(AValue.AsString);
-    tkUString:      Result := TJSONString.Create(AValue.AsString);
-    tkString:       Result := TJSONString.Create(AValue.AsString);
+    tkInt64: Result := TJSONNumber.Create(AValue.AsInt64);
+    tkInteger: Result := TJSONNumber.Create(AValue.AsInteger);
+    tkFloat:
+    begin
+      if AType.Handle = System.TypeInfo(TDate) then
+        Result := TJSONString.Create(FormatDateTime('yyyy-mm-dd', AValue.AsExtended))
+      else if AType.Handle = System.TypeInfo(TDateTime) then
+        Result := TJSONString.Create(DateToISO8601(AValue.AsExtended, False))
+      else
+        Result := TJSONNumber.Create(AValue.AsExtended);
+    end;
+    tkLString: Result := TJSONString.Create(AValue.AsString);
+    tkWString: Result := TJSONString.Create(AValue.AsString);
+    tkUString: Result := TJSONString.Create(AValue.AsString);
+    tkString: Result := TJSONString.Create(AValue.AsString);
     tkEnumeration:
     begin
       if not AValue.IsType<Boolean> then
@@ -809,8 +839,9 @@ begin
       end;
     end;
 
-    else
-      raise EJSONSerializerError.CreateFmt('WriteDataMembers: type "%s" unknown', [TRttiEnumerationType.GetName(AType.TypeKind)]);
+  else
+    raise EJSONSerializerError
+        .CreateFmt('WriteDataMembers: type "%s" unknown', [TRttiEnumerationType.GetName(AType.TypeKind)]);
   end;
 end;
 
@@ -924,9 +955,12 @@ begin
   Result := FCountProperty.GetValue(FInstance).AsInteger;
 end;
 
-constructor TDynamicList.Create(AInstance, AEnumInstance: TObject; AItemType: TRttiType;
-  AAddMethod, AClearMethod, AMoveNextMethod: TRttiMethod;
-  ACurrentProperty, ACountProperty: TRttiProperty);
+constructor TDynamicList.Create(
+    AInstance, AEnumInstance: TObject;
+    AItemType: TRttiType;
+    AAddMethod, AClearMethod, AMoveNextMethod: TRttiMethod;
+    ACurrentProperty, ACountProperty: TRttiProperty
+);
 begin
   FInstance := AInstance;
   FEnumInstance := AEnumInstance;
@@ -970,10 +1004,9 @@ begin
   LListType := TRttiHelper.Context.GetType(AInstance.ClassType);
 
   LMethodGetEnumerator := LListType.GetMethod('GetEnumerator');
-  if not Assigned(LMethodGetEnumerator) or
-     (LMethodGetEnumerator.MethodKind <> mkFunction) or
-     (LMethodGetEnumerator.ReturnType.Handle.Kind <> tkClass)
-  then
+  if not Assigned(LMethodGetEnumerator)
+      or (LMethodGetEnumerator.MethodKind <> mkFunction)
+      or (LMethodGetEnumerator.ReturnType.Handle.Kind <> tkClass) then
     Exit;
 
   LMethodClear := LListType.GetMethod('Clear');
@@ -1002,23 +1035,23 @@ begin
       Exit;
 
     LMethodMoveNext := LEnumType.GetMethod('MoveNext');
-    if not Assigned(LMethodMoveNext) or
-       (Length(LMethodMoveNext.GetParameters) <> 0) or
-       (LMethodMoveNext.MethodKind <> mkFunction) or
-       (LMethodMoveNext.ReturnType.Handle <> TypeInfo(Boolean))
-    then
+    if not Assigned(LMethodMoveNext)
+        or (Length(LMethodMoveNext.GetParameters) <> 0)
+        or (LMethodMoveNext.MethodKind <> mkFunction)
+        or (LMethodMoveNext.ReturnType.Handle <> TypeInfo(Boolean)) then
       Exit;
 
-    Result := TDynamicList.Create(
-      AInstance,
-      LEnumInstance,
-      LItemType,
-      LMethodAdd,
-      LMethodClear,
-      LMethodMoveNext,
-      LCurrentProp,
-      LCountProp
-    );
+    Result :=
+        TDynamicList.Create(
+            AInstance,
+            LEnumInstance,
+            LItemType,
+            LMethodAdd,
+            LMethodClear,
+            LMethodMoveNext,
+            LCurrentProp,
+            LCountProp
+        );
     LEnumInstance := nil;
   finally
     LEnumInstance.Free;
@@ -1052,9 +1085,14 @@ begin
   Result := FCountProp.GetValue(FInstance).AsInteger;
 end;
 
-constructor TDynamicMap.Create(AInstance: TObject; AKeyType, AValueType: TRttiType;
-  AAddMethod, AClearMethod: TRttiMethod; ACountProp: TRttiProperty;
-  AKeyEnum, AValueEnum: TDynamicMap.TEnumerator; AToStringMethod, AFromStringMethod: TRttiMethod);
+constructor TDynamicMap.Create(
+    AInstance: TObject;
+    AKeyType, AValueType: TRttiType;
+    AAddMethod, AClearMethod: TRttiMethod;
+    ACountProp: TRttiProperty;
+    AKeyEnum, AValueEnum: TDynamicMap.TEnumerator;
+    AToStringMethod, AFromStringMethod: TRttiMethod
+);
 begin
   FInstance := AInstance;
   FKeyType := AKeyType;
@@ -1161,25 +1199,26 @@ begin
 
     // Optional methods (on Key object)
     case LKeyType.TypeKind of
-      tkClass{, tkRecord, tkInterface}:
+      tkClass {, tkRecord, tkInterface}:
       begin
         LToStringMethod := LKeyType.GetMethod('ToString');
         LFromStringMethod := LKeyType.GetMethod('FromString');
       end;
     end;
 
-    Result := TDynamicMap.Create(
-      AInstance,
-      LKeyType,
-      LValType,
-      LAddMethod,
-      LClearMethod,
-      LCountProp,
-      LKeyEnum,
-      LValEnum,
-      LToStringMethod,
-      LFromStringMethod
-    );
+    Result :=
+        TDynamicMap.Create(
+            AInstance,
+            LKeyType,
+            LValType,
+            LAddMethod,
+            LClearMethod,
+            LCountProp,
+            LKeyEnum,
+            LValEnum,
+            LToStringMethod,
+            LFromStringMethod
+        );
     LKeyEnum := nil;
     LValEnum := nil;
   finally
@@ -1250,8 +1289,11 @@ end;
 
 { TDynamicObject }
 
-constructor TDynamicObject.Create(AInstance: TObject; AObjectType: TRttiType;
-  AToJSONMethod, AFromJSONMethod: TRttiMethod);
+constructor TDynamicObject.Create(
+    AInstance: TObject;
+    AObjectType: TRttiType;
+    AToJSONMethod, AFromJSONMethod: TRttiMethod
+);
 begin
   FInstance := AInstance;
   FObjectType := AObjectType;
@@ -1284,12 +1326,7 @@ begin
   if not Assigned(LMethodFromJSON) or (Length(LMethodFromJSON.GetParameters) <> 1) then
     Exit;
 
-  Result := TDynamicObject.Create(
-    AInstance,
-    LObjectType,
-    LMethodToJSON,
-    LMethodFromJSON
-  );
+  Result := TDynamicObject.Create(AInstance, LObjectType, LMethodToJSON, LMethodFromJSON);
 end;
 
 function TDynamicObject.ToJSON: TJSONValue;
