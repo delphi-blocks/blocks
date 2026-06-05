@@ -15,24 +15,31 @@ unit Blocks.Core;
 interface
 
 uses
-  System.Classes, System.SysUtils, System.RegularExpressions,
+  System.Classes,
+  System.SysUtils,
+  System.RegularExpressions,
   System.Generics.Collections,
   Winapi.Windows;
 
 type
   // -----------------------------------------------------------------------
-  // Semantic version (major.minor.patch)
+  // Semantic version (major.minor.patch[.build])
   // -----------------------------------------------------------------------
   TSemVer = record
   public
     Major: Integer;
     Minor: Integer;
     Patch: Integer;
+    Build: Integer;
     class function TryParse(const S: string; out V: TSemVer): Boolean; static;
     class function Parse(const S: string): TSemVer; static;
     /// <summary>Returns the highest version in AVersions that satisfies AConstraint.
     /// Returns False if no version matches.</summary>
-    class function BestMatch(const AVersions: TArray<TSemVer>; const AConstraint: string; out ABest: TSemVer): Boolean; static;
+    class function BestMatch(
+        const AVersions: TArray<TSemVer>;
+        const AConstraint: string;
+        out ABest: TSemVer
+    ): Boolean; static;
     class operator Implicit(const AVersion: TSemVer): string;
     class operator Implicit(const AVersionStr: string): TSemVer;
     function CompareTo(const Other: TSemVer): Integer;
@@ -216,6 +223,8 @@ begin
     Exit(False);
   if (Length(LParts) >= 3) and not TryStrToInt(LParts[2], V.Patch) then
     Exit(False);
+  if (Length(LParts) >= 4) and not TryStrToInt(LParts[3], V.Build) then
+    Exit(False);
   Result := True;
 end;
 
@@ -225,8 +234,11 @@ begin
     raise Exception.CreateFmt('Invalid version: "%s"', [S]);
 end;
 
-class function TSemVer.BestMatch(const AVersions: TArray<TSemVer>;
-  const AConstraint: string; out ABest: TSemVer): Boolean;
+class function TSemVer.BestMatch(
+    const AVersions: TArray<TSemVer>;
+    const AConstraint: string;
+    out ABest: TSemVer
+): Boolean;
 begin
   Result := False;
   for var LVer in AVersions do
@@ -246,9 +258,13 @@ end;
 
 function TSemVer.CompareTo(const Other: TSemVer): Integer;
 begin
-  if Major <> Other.Major then Exit(Major - Other.Major);
-  if Minor <> Other.Minor then Exit(Minor - Other.Minor);
-  Result := Patch - Other.Patch;
+  if Major <> Other.Major then
+    Exit(Major - Other.Major);
+  if Minor <> Other.Minor then
+    Exit(Minor - Other.Minor);
+  if Patch <> Other.Patch then
+    Exit(Patch - Other.Patch);
+  Result := Build - Other.Build;
 end;
 
 class operator TSemVer.Implicit(const AVersionStr: string): TSemVer;
@@ -292,34 +308,47 @@ begin
 
   if LConstraint.StartsWith('>=') then
   begin
-    if not TSemVer.TryParse(Copy(LConstraint, 3, MaxInt), LVer) then Exit(False);
+    if not TSemVer.TryParse(Copy(LConstraint, 3, MaxInt), LVer) then
+      Exit(False);
     Exit(CompareTo(LVer) >= 0);
   end;
   if LConstraint.StartsWith('<=') then
   begin
-    if not TSemVer.TryParse(Copy(LConstraint, 3, MaxInt), LVer) then Exit(False);
+    if not TSemVer.TryParse(Copy(LConstraint, 3, MaxInt), LVer) then
+      Exit(False);
     Exit(CompareTo(LVer) <= 0);
   end;
   if LConstraint.StartsWith('>') then
   begin
-    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then Exit(False);
+    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then
+      Exit(False);
     Exit(CompareTo(LVer) > 0);
   end;
   if LConstraint.StartsWith('<') then
   begin
-    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then Exit(False);
+    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then
+      Exit(False);
     Exit(CompareTo(LVer) < 0);
   end;
   if LConstraint.StartsWith('^') then
   begin
-    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then Exit(False);
+    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then
+      Exit(False);
     LUpper := Default(TSemVer);
-    LUpper.Major := LVer.Major + 1;
+    // Caret allows changes that do not modify the left-most non-zero element.
+    // For 0.x versions the minor (or patch) takes the role of the major.
+    if LVer.Major <> 0 then
+      LUpper.Major := LVer.Major + 1
+    else if LVer.Minor <> 0 then
+      LUpper.Minor := LVer.Minor + 1
+    else
+      LUpper.Patch := LVer.Patch + 1;
     Exit((CompareTo(LVer) >= 0) and (CompareTo(LUpper) < 0));
   end;
   if LConstraint.StartsWith('~') then
   begin
-    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then Exit(False);
+    if not TSemVer.TryParse(Copy(LConstraint, 2, MaxInt), LVer) then
+      Exit(False);
     LUpper := Default(TSemVer);
     LUpper.Major := LVer.Major;
     LUpper.Minor := LVer.Minor + 1;
@@ -335,7 +364,10 @@ end;
 
 function TSemVer.ToString: string;
 begin
-  Result := Format('%d.%d.%d', [Major, Minor, Patch]);
+  if Build <> 0 then
+    Result := Format('%d.%d.%d.%d', [Major, Minor, Patch, Build])
+  else
+    Result := Format('%d.%d.%d', [Major, Minor, Patch]);
 end;
 
 { TAppVersion }
@@ -364,6 +396,7 @@ begin
   Result.Major := HiWord(LFixed.dwFileVersionMS);
   Result.Minor := LoWord(LFixed.dwFileVersionMS);
   Result.Patch := HiWord(LFixed.dwFileVersionLS);
+  Result.Build := LoWord(LFixed.dwFileVersionLS);
 end;
 
 class function TAppVersion.GetCurrentVersion: TSemVer;

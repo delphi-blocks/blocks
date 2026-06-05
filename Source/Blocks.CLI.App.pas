@@ -849,7 +849,6 @@ begin
           TSystemConfig.Delete(LKey, LValue)
         else
           TSystemConfig.Set(LKey, LValue);
-        TWorkspace.Config.Save;
       end
       else
       begin

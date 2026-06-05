@@ -39,7 +39,10 @@ Versions are `MAJOR.MINOR.PATCH` integers (e.g. `1.4.2`). Shorter forms are
 accepted and the missing parts default to `0` — so `1` means `1.0.0` and `1.2`
 means `1.2.0`.
 
-Versions are compared field by field: `MAJOR` first, then `MINOR`, then `PATCH`.
+> A fourth `BUILD` field (e.g. `1.4.2.7`) is also **supported but discouraged**.
+
+Versions are compared field by field: `MAJOR` first, then `MINOR`, then `PATCH`,
+then `BUILD`.
 
 ## Version constraints
 
@@ -49,7 +52,7 @@ supported syntaxes are:
 | Constraint        | Meaning                                            | Matches (example)              |
 |-------------------|----------------------------------------------------|--------------------------------|
 | `@1.2.0`          | Exact version.                                     | only `1.2.0`                   |
-| `@^1.2.0`         | Same major: `>=1.2.0 <2.0.0`.                      | `1.2.0`, `1.9.9` — not `2.0.0` |
+| `@^1.2.0`         | Compatible: `>=1.2.0 <2.0.0`.                      | `1.2.0`, `1.9.9` — not `2.0.0` |
 | `@~1.2.0`         | Same minor: `>=1.2.0 <1.3.0`.                      | `1.2.0`, `1.2.7` — not `1.3.0` |
 | `@>=1.0.0`        | At least `1.0.0`.                                  | `1.0.0`, `2.5.1`               |
 | `@<2.0.0`         | Below `2.0.0`.                                     | `1.9.9` — not `2.0.0`          |
@@ -62,8 +65,10 @@ Notes:
 
 - An exact constraint matches the **full** version, so `@1.2` matches only
   `1.2.0` (use `@1.2.*` for any `1.2.x`).
-- For `0.x` versions the caret still means "same major", i.e. `@^0.2.0`
-  resolves to `>=0.2.0 <1.0.0`.
+- The caret allows changes that do not modify the left-most non-zero field. For
+  `0.x` versions this means the minor (or patch) takes the role normally played
+  by the major, because `0.x` releases are considered unstable: `@^0.2.0`
+  resolves to `>=0.2.0 <0.3.0`, and `@^0.0.3` to `>=0.0.3 <0.0.4`.
 
 > **`cmd.exe` caret escaping** — In `cmd.exe` the `^` character must be doubled
 > (e.g. `owner.package@^^1.2.0`). In PowerShell no escaping is needed.

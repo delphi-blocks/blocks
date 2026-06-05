@@ -17,7 +17,6 @@ interface
 uses
   System.SysUtils,
   DUnitX.TestFramework,
-
   Blocks.Core;
 
 type
@@ -37,6 +36,8 @@ type
     [Test]
     procedure TestMatchCaret;
     [Test]
+    procedure TestMatchCaretZero;
+    [Test]
     procedure TestMatchTilde;
     [Test]
     procedure TestMatchWildcard;
@@ -44,6 +45,8 @@ type
     procedure TestMatchRange;
     [Test]
     procedure TestBestMatch;
+    [Test]
+    procedure TestBuild;
   end;
 
 implementation
@@ -60,23 +63,27 @@ var
   LVer: TSemVer;
 begin
   Assert.IsTrue(
-    TSemVer.TryParse('1.2.3', LVer) and (LVer.Major = 1) and (LVer.Minor = 2) and (LVer.Patch = 3),
-    '1.2.3 parses correctly');
+      TSemVer.TryParse('1.2.3', LVer) and (LVer.Major = 1) and (LVer.Minor = 2) and (LVer.Patch = 3),
+      '1.2.3 parses correctly'
+  );
 
   Assert.IsTrue(
-    TSemVer.TryParse('1.2', LVer) and (LVer.Major = 1) and (LVer.Minor = 2) and (LVer.Patch = 0),
-    '1.2 sets patch to 0');
+      TSemVer.TryParse('1.2', LVer) and (LVer.Major = 1) and (LVer.Minor = 2) and (LVer.Patch = 0),
+      '1.2 sets patch to 0'
+  );
 
   Assert.IsTrue(
-    TSemVer.TryParse('1', LVer) and (LVer.Major = 1) and (LVer.Minor = 0) and (LVer.Patch = 0),
-    '1 sets minor and patch to 0');
+      TSemVer.TryParse('1', LVer) and (LVer.Major = 1) and (LVer.Minor = 0) and (LVer.Patch = 0),
+      '1 sets minor and patch to 0'
+  );
 
   Assert.IsTrue(
-    TSemVer.TryParse('0.0.0', LVer) and (LVer.Major = 0) and (LVer.Minor = 0) and (LVer.Patch = 0),
-    '0.0.0 parses correctly');
+      TSemVer.TryParse('0.0.0', LVer) and (LVer.Major = 0) and (LVer.Minor = 0) and (LVer.Patch = 0),
+      '0.0.0 parses correctly'
+  );
 
   Assert.IsFalse(TSemVer.TryParse('abc', LVer), '"abc" returns False');
-  Assert.IsFalse(TSemVer.TryParse('', LVer),    '"" returns False');
+  Assert.IsFalse(TSemVer.TryParse('', LVer), '"" returns False');
   Assert.IsFalse(TSemVer.TryParse('1.x.3', LVer), '"1.x.3" returns False');
 
   Assert.AreEqual('2.5.11', TSemVer.Parse('2.5.11').ToString, 'ToString round-trips');
@@ -94,8 +101,8 @@ end;
 
 procedure TSemVerTest.TestMatchExact;
 begin
-  Assert.IsTrue(V('1.2.3').MatchesConstraint(''),      'empty matches any');
-  Assert.IsTrue(V('9.9.9').MatchesConstraint('*'),     '* matches any');
+  Assert.IsTrue(V('1.2.3').MatchesConstraint(''), 'empty matches any');
+  Assert.IsTrue(V('9.9.9').MatchesConstraint('*'), '* matches any');
   Assert.IsTrue(V('1.2.3').MatchesConstraint('1.2.3'), '1.2.3 matches 1.2.3');
   Assert.IsFalse(V('1.2.4').MatchesConstraint('1.2.3'), '1.2.4 not matches 1.2.3');
   Assert.IsFalse(V('2.0.0').MatchesConstraint('1.2.3'), '2.0.0 not matches 1.2.3');
@@ -103,74 +110,93 @@ end;
 
 procedure TSemVerTest.TestMatchOperators;
 begin
-  Assert.IsTrue(V('1.2.3').MatchesConstraint('>=1.2.3'),  '>=1.2.3: 1.2.3 matches');
-  Assert.IsTrue(V('1.2.4').MatchesConstraint('>=1.2.3'),  '>=1.2.3: 1.2.4 matches');
-  Assert.IsTrue(V('2.0.0').MatchesConstraint('>=1.2.3'),  '>=1.2.3: 2.0.0 matches');
+  Assert.IsTrue(V('1.2.3').MatchesConstraint('>=1.2.3'), '>=1.2.3: 1.2.3 matches');
+  Assert.IsTrue(V('1.2.4').MatchesConstraint('>=1.2.3'), '>=1.2.3: 1.2.4 matches');
+  Assert.IsTrue(V('2.0.0').MatchesConstraint('>=1.2.3'), '>=1.2.3: 2.0.0 matches');
   Assert.IsFalse(V('1.2.2').MatchesConstraint('>=1.2.3'), '>=1.2.3: 1.2.2 not matches');
 
-  Assert.IsTrue(V('1.2.4').MatchesConstraint('>1.2.3'),   '>1.2.3: 1.2.4 matches');
-  Assert.IsTrue(V('2.0.0').MatchesConstraint('>1.2.3'),   '>1.2.3: 2.0.0 matches');
-  Assert.IsFalse(V('1.2.3').MatchesConstraint('>1.2.3'),  '>1.2.3: 1.2.3 not matches');
-  Assert.IsFalse(V('1.2.2').MatchesConstraint('>1.2.3'),  '>1.2.3: 1.2.2 not matches');
+  Assert.IsTrue(V('1.2.4').MatchesConstraint('>1.2.3'), '>1.2.3: 1.2.4 matches');
+  Assert.IsTrue(V('2.0.0').MatchesConstraint('>1.2.3'), '>1.2.3: 2.0.0 matches');
+  Assert.IsFalse(V('1.2.3').MatchesConstraint('>1.2.3'), '>1.2.3: 1.2.3 not matches');
+  Assert.IsFalse(V('1.2.2').MatchesConstraint('>1.2.3'), '>1.2.3: 1.2.2 not matches');
 
-  Assert.IsTrue(V('1.2.3').MatchesConstraint('<=1.2.3'),  '<=1.2.3: 1.2.3 matches');
-  Assert.IsTrue(V('1.2.2').MatchesConstraint('<=1.2.3'),  '<=1.2.3: 1.2.2 matches');
-  Assert.IsTrue(V('0.9.0').MatchesConstraint('<=1.2.3'),  '<=1.2.3: 0.9.0 matches');
+  Assert.IsTrue(V('1.2.3').MatchesConstraint('<=1.2.3'), '<=1.2.3: 1.2.3 matches');
+  Assert.IsTrue(V('1.2.2').MatchesConstraint('<=1.2.3'), '<=1.2.3: 1.2.2 matches');
+  Assert.IsTrue(V('0.9.0').MatchesConstraint('<=1.2.3'), '<=1.2.3: 0.9.0 matches');
   Assert.IsFalse(V('1.2.4').MatchesConstraint('<=1.2.3'), '<=1.2.3: 1.2.4 not matches');
 
-  Assert.IsTrue(V('1.9.9').MatchesConstraint('<2.0.0'),   '<2.0.0: 1.9.9 matches');
-  Assert.IsTrue(V('0.1.0').MatchesConstraint('<2.0.0'),   '<2.0.0: 0.1.0 matches');
-  Assert.IsFalse(V('2.0.0').MatchesConstraint('<2.0.0'),  '<2.0.0: 2.0.0 not matches');
-  Assert.IsFalse(V('2.0.1').MatchesConstraint('<2.0.0'),  '<2.0.0: 2.0.1 not matches');
+  Assert.IsTrue(V('1.9.9').MatchesConstraint('<2.0.0'), '<2.0.0: 1.9.9 matches');
+  Assert.IsTrue(V('0.1.0').MatchesConstraint('<2.0.0'), '<2.0.0: 0.1.0 matches');
+  Assert.IsFalse(V('2.0.0').MatchesConstraint('<2.0.0'), '<2.0.0: 2.0.0 not matches');
+  Assert.IsFalse(V('2.0.1').MatchesConstraint('<2.0.0'), '<2.0.0: 2.0.1 not matches');
 end;
 
 procedure TSemVerTest.TestMatchCaret;
 begin
-  Assert.IsTrue(V('3.3.0').MatchesConstraint('^3.0.5'),   '^3.0.5: 3.3.0 matches');
-  Assert.IsFalse(V('3.3.0').MatchesConstraint('^3.3.1'),  '^3.3.1: 3.3.0 not matches');
-  Assert.IsTrue(V('1.2.3').MatchesConstraint('^1.2.3'),   '^1.2.3: 1.2.3 matches');
-  Assert.IsTrue(V('1.2.9').MatchesConstraint('^1.2.3'),   '^1.2.3: 1.2.9 matches');
-  Assert.IsTrue(V('1.9.0').MatchesConstraint('^1.2.3'),   '^1.2.3: 1.9.0 matches');
+  Assert.IsTrue(V('3.3.0').MatchesConstraint('^3.0.5'), '^3.0.5: 3.3.0 matches');
+  Assert.IsFalse(V('3.3.0').MatchesConstraint('^3.3.1'), '^3.3.1: 3.3.0 not matches');
+  Assert.IsTrue(V('1.2.3').MatchesConstraint('^1.2.3'), '^1.2.3: 1.2.3 matches');
+  Assert.IsTrue(V('1.2.9').MatchesConstraint('^1.2.3'), '^1.2.3: 1.2.9 matches');
+  Assert.IsTrue(V('1.9.0').MatchesConstraint('^1.2.3'), '^1.2.3: 1.9.0 matches');
   Assert.IsTrue(V('1.99.99').MatchesConstraint('^1.2.3'), '^1.2.3: 1.99.99 matches');
-  Assert.IsFalse(V('2.0.0').MatchesConstraint('^1.2.3'),  '^1.2.3: 2.0.0 not matches');
-  Assert.IsFalse(V('1.2.2').MatchesConstraint('^1.2.3'),  '^1.2.3: 1.2.2 not matches');
-  Assert.IsFalse(V('0.9.9').MatchesConstraint('^1.2.3'),  '^1.2.3: 0.9.9 not matches');
+  Assert.IsFalse(V('2.0.0').MatchesConstraint('^1.2.3'), '^1.2.3: 2.0.0 not matches');
+  Assert.IsFalse(V('1.2.2').MatchesConstraint('^1.2.3'), '^1.2.3: 1.2.2 not matches');
+  Assert.IsFalse(V('0.9.9').MatchesConstraint('^1.2.3'), '^1.2.3: 0.9.9 not matches');
+end;
+
+procedure TSemVerTest.TestMatchCaretZero;
+begin
+  // ^0.x.y: the minor takes the role of the major -> >=0.1.1 <0.2.0
+  Assert.IsTrue(V('0.1.1').MatchesConstraint('^0.1.1'), '^0.1.1: 0.1.1 matches');
+  Assert.IsTrue(V('0.1.9').MatchesConstraint('^0.1.1'), '^0.1.1: 0.1.9 matches');
+  Assert.IsFalse(V('0.2.0').MatchesConstraint('^0.1.1'), '^0.1.1: 0.2.0 not matches');
+  Assert.IsFalse(V('0.1.0').MatchesConstraint('^0.1.1'), '^0.1.1: 0.1.0 not matches');
+  Assert.IsFalse(V('1.0.0').MatchesConstraint('^0.1.1'), '^0.1.1: 1.0.0 not matches');
+
+  // ^0.0.z: the patch takes the role of the major -> >=0.0.3 <0.0.4
+  Assert.IsTrue(V('0.0.3').MatchesConstraint('^0.0.3'), '^0.0.3: 0.0.3 matches');
+  Assert.IsFalse(V('0.0.4').MatchesConstraint('^0.0.3'), '^0.0.3: 0.0.4 not matches');
+  Assert.IsFalse(V('0.1.0').MatchesConstraint('^0.0.3'), '^0.0.3: 0.1.0 not matches');
+
+  // ^0.0.0 -> >=0.0.0 <0.0.1
+  Assert.IsTrue(V('0.0.0').MatchesConstraint('^0.0.0'), '^0.0.0: 0.0.0 matches');
+  Assert.IsFalse(V('0.0.1').MatchesConstraint('^0.0.0'), '^0.0.0: 0.0.1 not matches');
 end;
 
 procedure TSemVerTest.TestMatchTilde;
 begin
-  Assert.IsTrue(V('1.2.3').MatchesConstraint('~1.2.3'),   '~1.2.3: 1.2.3 matches');
-  Assert.IsTrue(V('1.2.9').MatchesConstraint('~1.2.3'),   '~1.2.3: 1.2.9 matches');
-  Assert.IsFalse(V('1.3.0').MatchesConstraint('~1.2.3'),  '~1.2.3: 1.3.0 not matches');
-  Assert.IsFalse(V('2.0.0').MatchesConstraint('~1.2.3'),  '~1.2.3: 2.0.0 not matches');
-  Assert.IsFalse(V('1.2.2').MatchesConstraint('~1.2.3'),  '~1.2.3: 1.2.2 not matches');
+  Assert.IsTrue(V('1.2.3').MatchesConstraint('~1.2.3'), '~1.2.3: 1.2.3 matches');
+  Assert.IsTrue(V('1.2.9').MatchesConstraint('~1.2.3'), '~1.2.3: 1.2.9 matches');
+  Assert.IsFalse(V('1.3.0').MatchesConstraint('~1.2.3'), '~1.2.3: 1.3.0 not matches');
+  Assert.IsFalse(V('2.0.0').MatchesConstraint('~1.2.3'), '~1.2.3: 2.0.0 not matches');
+  Assert.IsFalse(V('1.2.2').MatchesConstraint('~1.2.3'), '~1.2.3: 1.2.2 not matches');
 end;
 
 procedure TSemVerTest.TestMatchWildcard;
 begin
-  Assert.IsTrue(V('1.2.0').MatchesConstraint('1.2.*'),    '1.2.*: 1.2.0 matches');
-  Assert.IsTrue(V('1.2.9').MatchesConstraint('1.2.*'),    '1.2.*: 1.2.9 matches');
-  Assert.IsTrue(V('1.2.99').MatchesConstraint('1.2.*'),   '1.2.*: 1.2.99 matches');
-  Assert.IsFalse(V('1.3.0').MatchesConstraint('1.2.*'),   '1.2.*: 1.3.0 not matches');
-  Assert.IsFalse(V('2.2.0').MatchesConstraint('1.2.*'),   '1.2.*: 2.2.0 not matches');
+  Assert.IsTrue(V('1.2.0').MatchesConstraint('1.2.*'), '1.2.*: 1.2.0 matches');
+  Assert.IsTrue(V('1.2.9').MatchesConstraint('1.2.*'), '1.2.*: 1.2.9 matches');
+  Assert.IsTrue(V('1.2.99').MatchesConstraint('1.2.*'), '1.2.*: 1.2.99 matches');
+  Assert.IsFalse(V('1.3.0').MatchesConstraint('1.2.*'), '1.2.*: 1.3.0 not matches');
+  Assert.IsFalse(V('2.2.0').MatchesConstraint('1.2.*'), '1.2.*: 2.2.0 not matches');
 
-  Assert.IsTrue(V('1.0.0').MatchesConstraint('1.*'),      '1.*: 1.0.0 matches');
-  Assert.IsTrue(V('1.9.9').MatchesConstraint('1.*'),      '1.*: 1.9.9 matches');
-  Assert.IsFalse(V('2.0.0').MatchesConstraint('1.*'),     '1.*: 2.0.0 not matches');
-  Assert.IsFalse(V('0.9.9').MatchesConstraint('1.*'),     '1.*: 0.9.9 not matches');
+  Assert.IsTrue(V('1.0.0').MatchesConstraint('1.*'), '1.*: 1.0.0 matches');
+  Assert.IsTrue(V('1.9.9').MatchesConstraint('1.*'), '1.*: 1.9.9 matches');
+  Assert.IsFalse(V('2.0.0').MatchesConstraint('1.*'), '1.*: 2.0.0 not matches');
+  Assert.IsFalse(V('0.9.9').MatchesConstraint('1.*'), '1.*: 0.9.9 not matches');
 end;
 
 procedure TSemVerTest.TestMatchRange;
 begin
-  Assert.IsTrue(V('1.2.0').MatchesConstraint('>=1.2.0 <2.0.0'),  '>=1.2.0 <2.0.0: 1.2.0 matches');
-  Assert.IsTrue(V('1.5.0').MatchesConstraint('>=1.2.0 <2.0.0'),  '>=1.2.0 <2.0.0: 1.5.0 matches');
-  Assert.IsTrue(V('1.9.9').MatchesConstraint('>=1.2.0 <2.0.0'),  '>=1.2.0 <2.0.0: 1.9.9 matches');
+  Assert.IsTrue(V('1.2.0').MatchesConstraint('>=1.2.0 <2.0.0'), '>=1.2.0 <2.0.0: 1.2.0 matches');
+  Assert.IsTrue(V('1.5.0').MatchesConstraint('>=1.2.0 <2.0.0'), '>=1.2.0 <2.0.0: 1.5.0 matches');
+  Assert.IsTrue(V('1.9.9').MatchesConstraint('>=1.2.0 <2.0.0'), '>=1.2.0 <2.0.0: 1.9.9 matches');
   Assert.IsFalse(V('2.0.0').MatchesConstraint('>=1.2.0 <2.0.0'), '>=1.2.0 <2.0.0: 2.0.0 not matches');
   Assert.IsFalse(V('1.1.9').MatchesConstraint('>=1.2.0 <2.0.0'), '>=1.2.0 <2.0.0: 1.1.9 not matches');
   Assert.IsFalse(V('0.9.0').MatchesConstraint('>=1.2.0 <2.0.0'), '>=1.2.0 <2.0.0: 0.9.0 not matches');
 
-  Assert.IsTrue(V('1.0.1').MatchesConstraint('>1.0.0 <=1.5.0'),  '>1.0.0 <=1.5.0: 1.0.1 matches');
-  Assert.IsTrue(V('1.5.0').MatchesConstraint('>1.0.0 <=1.5.0'),  '>1.0.0 <=1.5.0: 1.5.0 matches');
+  Assert.IsTrue(V('1.0.1').MatchesConstraint('>1.0.0 <=1.5.0'), '>1.0.0 <=1.5.0: 1.0.1 matches');
+  Assert.IsTrue(V('1.5.0').MatchesConstraint('>1.0.0 <=1.5.0'), '>1.0.0 <=1.5.0: 1.5.0 matches');
   Assert.IsFalse(V('1.0.0').MatchesConstraint('>1.0.0 <=1.5.0'), '>1.0.0 <=1.5.0: 1.0.0 not matches');
   Assert.IsFalse(V('1.5.1').MatchesConstraint('>1.0.0 <=1.5.0'), '>1.0.0 <=1.5.0: 1.5.1 not matches');
 end;
@@ -180,56 +206,88 @@ var
   LBest: TSemVer;
   LVersions: TArray<TSemVer>;
 begin
-  LVersions := [
-    TSemVer.Parse('1.0.0'),
-    TSemVer.Parse('1.2.3'),
-    TSemVer.Parse('1.5.0'),
-    TSemVer.Parse('2.0.0'),
-    TSemVer.Parse('2.1.0')
-  ];
+  LVersions :=
+      [
+          TSemVer.Parse('1.0.0'),
+          TSemVer.Parse('1.2.3'),
+          TSemVer.Parse('1.5.0'),
+          TSemVer.Parse('2.0.0'),
+          TSemVer.Parse('2.1.0')
+      ];
+
+  Assert
+      .IsTrue(TSemVer.BestMatch(LVersions, '', LBest) and (LBest.ToString = '2.1.0'), 'empty constraint picks highest');
+
+  Assert.IsTrue(TSemVer.BestMatch(LVersions, '*', LBest) and (LBest.ToString = '2.1.0'), '* picks highest');
+
+  Assert
+      .IsTrue(TSemVer.BestMatch(LVersions, '^1.0.0', LBest) and (LBest.ToString = '1.5.0'), '^1.0.0 picks highest 1.x');
 
   Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '', LBest) and (LBest.ToString = '2.1.0'),
-    'empty constraint picks highest');
+      TSemVer.BestMatch(LVersions, '~1.2.3', LBest) and (LBest.ToString = '1.2.3'),
+      '~1.2.3 picks highest 1.2.x'
+  );
+
+  Assert.IsTrue(TSemVer.BestMatch(LVersions, '>=1.2.3', LBest) and (LBest.ToString = '2.1.0'), '>=1.2.3 picks 2.1.0');
+
+  Assert.IsTrue(TSemVer.BestMatch(LVersions, '<2.0.0', LBest) and (LBest.ToString = '1.5.0'), '<2.0.0 picks 1.5.0');
+
+  Assert.IsTrue(TSemVer.BestMatch(LVersions, '1.2.*', LBest) and (LBest.ToString = '1.2.3'), '1.2.* picks 1.2.3');
+
+  Assert.IsTrue(TSemVer.BestMatch(LVersions, '1.*', LBest) and (LBest.ToString = '1.5.0'), '1.* picks 1.5.0');
+
+  Assert.IsTrue(TSemVer.BestMatch(LVersions, '2.0.0', LBest) and (LBest.ToString = '2.0.0'), 'exact 2.0.0 matches');
 
   Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '*', LBest) and (LBest.ToString = '2.1.0'),
-    '* picks highest');
-
-  Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '^1.0.0', LBest) and (LBest.ToString = '1.5.0'),
-    '^1.0.0 picks highest 1.x');
-
-  Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '~1.2.3', LBest) and (LBest.ToString = '1.2.3'),
-    '~1.2.3 picks highest 1.2.x');
-
-  Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '>=1.2.3', LBest) and (LBest.ToString = '2.1.0'),
-    '>=1.2.3 picks 2.1.0');
-
-  Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '<2.0.0', LBest) and (LBest.ToString = '1.5.0'),
-    '<2.0.0 picks 1.5.0');
-
-  Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '1.2.*', LBest) and (LBest.ToString = '1.2.3'),
-    '1.2.* picks 1.2.3');
-
-  Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '1.*', LBest) and (LBest.ToString = '1.5.0'),
-    '1.* picks 1.5.0');
-
-  Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '2.0.0', LBest) and (LBest.ToString = '2.0.0'),
-    'exact 2.0.0 matches');
-
-  Assert.IsTrue(
-    TSemVer.BestMatch(LVersions, '>=1.2.3 <2.0.0', LBest) and (LBest.ToString = '1.5.0'),
-    '>=1.2.3 <2.0.0 picks 1.5.0');
+      TSemVer.BestMatch(LVersions, '>=1.2.3 <2.0.0', LBest) and (LBest.ToString = '1.5.0'),
+      '>=1.2.3 <2.0.0 picks 1.5.0'
+  );
 
   Assert.IsFalse(TSemVer.BestMatch(LVersions, '>9.0.0', LBest), '>9.0.0 returns False');
-  Assert.IsFalse(TSemVer.BestMatch([], '', LBest),               'empty list returns False');
+  Assert.IsFalse(TSemVer.BestMatch([], '', LBest), 'empty list returns False');
+end;
+
+procedure TSemVerTest.TestBuild;
+var
+  LVer: TSemVer;
+begin
+  // The optional fourth section is parsed into Build (defaults to 0)
+  Assert.IsTrue(
+      TSemVer.TryParse('1.2.3.4', LVer)
+          and (LVer.Major = 1)
+          and (LVer.Minor = 2)
+          and (LVer.Patch = 3)
+          and (LVer.Build = 4),
+      '1.2.3.4 parses build'
+  );
+
+  Assert.IsTrue(TSemVer.TryParse('1.2.3', LVer) and (LVer.Build = 0), '1.2.3 sets build to 0');
+
+  Assert.IsFalse(TSemVer.TryParse('1.2.3.x', LVer), '"1.2.3.x" returns False');
+
+  // 1.2.3 and 1.2.3.0 are equivalent
+  Assert.AreEqual(0, V('1.2.3').CompareTo(V('1.2.3.0')), '1.2.3 = 1.2.3.0');
+
+  // Build participates in comparison
+  Assert.IsTrue(V('1.2.3.5').CompareTo(V('1.2.3.4')) > 0, '1.2.3.5 > 1.2.3.4');
+  Assert.IsTrue(V('1.2.3').CompareTo(V('1.2.3.1')) < 0, '1.2.3 < 1.2.3.1');
+
+  // ToString omits a zero build, keeps a non-zero one
+  Assert.AreEqual('1.2.3', V('1.2.3.0').ToString, 'ToString drops zero build');
+  Assert.AreEqual('1.2.3.4', V('1.2.3.4').ToString, 'ToString keeps non-zero build');
+
+  // Constraints take the build into account
+  Assert.IsTrue(V('1.2.3.4').MatchesConstraint('^1.2.3.4'), '^1.2.3.4: 1.2.3.4 matches');
+  Assert.IsFalse(V('1.2.3.3').MatchesConstraint('^1.2.3.4'), '^1.2.3.4: 1.2.3.3 not matches');
+  Assert.IsTrue(V('1.2.3.5').MatchesConstraint('^1.2.3.4'), '^1.2.3.4: 1.2.3.5 matches');
+  Assert.IsTrue(V('1.9.0').MatchesConstraint('^1.2.3.4'), '^1.2.3.4: 1.9.0 matches');
+  Assert.IsFalse(V('2.0.0').MatchesConstraint('^1.2.3.4'), '^1.2.3.4: 2.0.0 not matches');
+
+  Assert.IsTrue(V('1.2.3.4').MatchesConstraint('>=1.2.3.4'), '>=1.2.3.4: 1.2.3.4 matches');
+  Assert.IsFalse(V('1.2.3').MatchesConstraint('>=1.2.3.4'), '>=1.2.3.4: 1.2.3 not matches');
+
+  Assert.IsTrue(V('1.2.3.4').MatchesConstraint('1.2.3.4'), 'exact 1.2.3.4 matches');
+  Assert.IsFalse(V('1.2.3.4').MatchesConstraint('1.2.3'), 'exact 1.2.3 not matches 1.2.3.4');
 end;
 
 initialization
