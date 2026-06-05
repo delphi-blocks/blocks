@@ -157,7 +157,7 @@ function GetDProjPath(
 begin
   var LPackageFolder := AProduct.GetPackageFolder(AManifest.PackageOptions.Folders);
   var LPackagesPath := TPath.Combine(TPath.Combine(AProjectDir, 'packages'), LPackageFolder);
-  Result := TPath.Combine(LPackagesPath, APackageName + '.dproj');
+  Result := TPath.Combine(LPackagesPath, AProduct.ExpandPackageName(APackageName) + '.dproj');
 end;
 
 function GetPlatformPaths(
@@ -412,8 +412,7 @@ begin
     DownloadDir := TPath.Combine(GetBlocksDir, 'download');
     var ZipPath := TPath.Combine(DownloadDir, 'repository.zip');
 
-    if TDirectory.Exists(DownloadDir) then
-      TDirectory.Delete(DownloadDir, True);
+    TFileUtils.SafeDeleteDirectory(DownloadDir);
     TDirectory.CreateDirectory(DownloadDir);
 
     TConsole.WriteLine(Format('Fetching repository info from "%s"...', [ASource]), clCyan);
@@ -454,7 +453,7 @@ begin
   TConsole.WriteLine('Repository updated: ' + RepoDir, clGreen);
 
   if DownloadDir <> '' then
-    TDirectory.Delete(DownloadDir, True);
+    TFileUtils.SafeDeleteDirectory(DownloadDir);
 end;
 
 class procedure TWorkspace.TestDelphiRunning(AProduct: TProduct);
@@ -602,7 +601,7 @@ begin
           if LPlatformPair.Value.RuntimeOnly and LPackage.IsDesignTime then
             Continue;
 
-          var DprojPath := TPath.Combine(LPackagesPath, LPackage.Name + '.dproj');
+          var DprojPath := TPath.Combine(LPackagesPath, LSelectedProduct.ExpandPackageName(LPackage.Name) + '.dproj');
           var LPlatformPaths :=
               GetPlatformPaths(LManifest, DprojPath, LProjectDir, LPlatformPair.Key, LEnvironmentVariables);
           LSelectedProduct.UpdateSearchPaths(LPlatformPair.Key, LProjectDir, LPlatformPaths);
@@ -675,7 +674,7 @@ begin
       begin
         var LPackageFolder := LSelectedProduct.GetPackageFolder(LManifest.PackageOptions.Folders);
         var LPackagesPath := TPath.Combine(TPath.Combine(LProjectDir, 'packages'), LPackageFolder);
-        var DprojPath := TPath.Combine(LPackagesPath, LPackage.Name + '.dproj');
+        var DprojPath := TPath.Combine(LPackagesPath, LSelectedProduct.ExpandPackageName(LPackage.Name) + '.dproj');
         var LPackageProject := TPackageProject.LoadFromFile(DprojPath);
         try
           for var LPlatformPair in LManifest.Platforms do

@@ -114,6 +114,13 @@ type
     ///   (installed version is older than all keys in the manifest).</exception>
     function GetPackageFolder(APackageFolders: TDictionary<string, string>): string;
 
+    /// <summary>Expands the <c>%PACKAGE_VERSION%</c> placeholder in a manifest
+    ///   package name to this product's package-version suffix (e.g. <c>370</c>
+    ///   for <c>delphi13</c>), so a single manifest can target packages whose
+    ///   <c>.dproj</c> name embeds that suffix. Case-insensitive; names without
+    ///   the placeholder are returned unchanged.</summary>
+    function ExpandPackageName(const AName: string): string;
+
     /// <summary>Compiles all declared packages and updates the Delphi library registry paths.</summary>
     /// <param name="AProjectDir">Root directory of the extracted project.</param>
     /// <param name="APackageFolder">Subfolder under <c>packages\</c> that contains the <c>.dproj</c> files.</param>
@@ -1000,6 +1007,12 @@ begin
   Result := APackageFolders[BestKey];
 end;
 
+function TProduct.ExpandPackageName(const AName: string): string;
+begin
+  // Mirrors the %NAME% placeholder convention used by manifest scripts.
+  Result := StringReplace(AName, '%PACKAGE_VERSION%', FPackageVersion, [rfReplaceAll, rfIgnoreCase]);
+end;
+
 class function TProduct.GetProductNames: TArray<string>;
 begin
   Result := [];
@@ -1304,7 +1317,10 @@ begin
 
     for var LPackage in AManifest.Packages do
     begin
-      var PkgName := LPackage.Name;
+      // Manifest package names may embed the %PACKAGE_VERSION% placeholder
+      // (e.g. "Trysil%PACKAGE_VERSION%") so a single manifest can target
+      // packages whose .dproj name embeds the Delphi package-version suffix.
+      var PkgName := ExpandPackageName(LPackage.Name);
       var TypeStr := string.Join(', ', LPackage.&Type.ToStringArray);
 
       // Skip design-time packages on platforms flagged as runtime-only.
@@ -1318,72 +1334,91 @@ begin
       if not TFile.Exists(DprojPath) then
         raise Exception.CreateFmt('Package not found: %s', [DprojPath]);
 
-      for var LBuildConfig in BuildConfigs do
-      begin
-        RunCompileScripts(
-            AManifest,
-            TScriptRunner.EventBeforeCompile,
-            AWorkspaceDir,
-            AProjectDir,
-            LPlatform,
-            LBuildConfig,
-            PkgName
-        );
-
-        TConsole.Write(Format('    Building %s [%s/%s]...', [PkgName, TypeStr, LBuildConfig]));
-
-        var LMSBuildParams := '';
-        var LSuffix :=
-            if SameText(LBuildConfig, 'Debug') then 'debug'
-            else '';
-
-        LMSBuildParams :=
-            ' /p:DCC_UnitSearchPath="'
-                + TPath.Combine(BlocksDir, LPlatform, 'dcp', LSuffix)
-                + '"'
-                + ' /p:DCC_BplOutput="'
-                + TPath.Combine(BlocksDir, LPlatform, 'bpl', LSuffix)
-                + '"'
-                + ' /p:DCC_DcpOutput="'
-                + TPath.Combine(BlocksDir, LPlatform, 'dcp', LSuffix)
-                + '"';
-
-        var LDcuOutput := TPath.Combine([BlocksDir, 'lib', AManifest.Name, LPlatform]);
-        if LSuffix <> '' then
-          LDcuOutput := TPath.Combine(LDcuOutput, LSuffix);
-        LMSBuildParams := LMSBuildParams + ' /p:DCC_DcuOutput="' + LDcuOutput + '"';
-
-        var CmdLine :=
-            Format(
-                '"%s" "%s" /t:Make /p:config=%s /p:platform=%s %s /nologo /v:quiet',
-                [MsBuild, DprojPath, LBuildConfig, LPlatform, LMSBuildParams]
-            );
-
-        var Output: string;
-        var ExitCode := RunProcessWithOutput(CmdLine, Output);
-
-        if ExitCode = 0 then
-          TConsole.WriteLine(' OK', clGreen)
-        else
+      // Load the .dproj so we can preserve its own DCC_UnitSearchPath: passing
+      // /p:DCC_UnitSearchPath as a global property would otherwise override (and
+      // discard) the search paths declared by the package author.
+      var LPackageProject := TPackageProject.LoadFromFile(DprojPath);
+      try
+        for var LBuildConfig in BuildConfigs do
         begin
-          TConsole.WriteLine(' FAILED', clRed);
-          var Lines := Output.Split([sLineBreak, #13, #10], TStringSplitOptions.ExcludeEmpty);
-          for var Line in Lines do
-            if ContainsText(Line, 'error') then
-              TConsole.WriteLine('      ' + Line, clRed);
-          raise Exception
-              .CreateFmt('Compilation failed on package "%s" for platform "%s".', [PkgName, LPlatformPair.Key]);
-        end;
+          RunCompileScripts(
+              AManifest,
+              TScriptRunner.EventBeforeCompile,
+              AWorkspaceDir,
+              AProjectDir,
+              LPlatform,
+              LBuildConfig,
+              PkgName
+          );
 
-        RunCompileScripts(
-            AManifest,
-            TScriptRunner.EventAfterCompile,
-            AWorkspaceDir,
-            AProjectDir,
-            LPlatform,
-            LBuildConfig,
-            PkgName
-        );
+          TConsole.Write(Format('    Building %s [%s/%s]...', [PkgName, TypeStr, LBuildConfig]));
+
+          var LMSBuildParams := '';
+          var LSuffix :=
+              if SameText(LBuildConfig, 'Debug') then 'debug'
+              else '';
+          var LConfigName :=
+              if SameText(LBuildConfig, 'Debug') then 'Debug'
+              else 'Release';
+
+          // Prepend the blocks dcp directory to the project's own resolved
+          // DCC_UnitSearchPath (for this config/platform) instead of replacing it.
+          var LUnitSearchPath := TPath.Combine(BlocksDir, LPlatform, 'dcp', LSuffix);
+          var LOriginalUnitSearchPath :=
+              LPackageProject.GetProperty(TPackageProject.DCCUnitSearchPath, LConfigName, LPlatform);
+          if LOriginalUnitSearchPath <> '' then
+            LUnitSearchPath := LUnitSearchPath + ';' + LOriginalUnitSearchPath;
+
+          LMSBuildParams :=
+              ' /p:DCC_UnitSearchPath="'
+                  + LUnitSearchPath
+                  + '"'
+                  + ' /p:DCC_BplOutput="'
+                  + TPath.Combine(BlocksDir, LPlatform, 'bpl', LSuffix)
+                  + '"'
+                  + ' /p:DCC_DcpOutput="'
+                  + TPath.Combine(BlocksDir, LPlatform, 'dcp', LSuffix)
+                  + '"';
+
+          var LDcuOutput := TPath.Combine([BlocksDir, 'lib', AManifest.Name, LPlatform]);
+          if LSuffix <> '' then
+            LDcuOutput := TPath.Combine(LDcuOutput, LSuffix);
+          LMSBuildParams := LMSBuildParams + ' /p:DCC_DcuOutput="' + LDcuOutput + '"';
+
+          var CmdLine :=
+              Format(
+                  '"%s" "%s" /t:Make /p:config=%s /p:platform=%s %s /nologo /v:quiet',
+                  [MsBuild, DprojPath, LBuildConfig, LPlatform, LMSBuildParams]
+              );
+
+          var Output: string;
+          var ExitCode := RunProcessWithOutput(CmdLine, Output);
+
+          if ExitCode = 0 then
+            TConsole.WriteLine(' OK', clGreen)
+          else
+          begin
+            TConsole.WriteLine(' FAILED', clRed);
+            var Lines := Output.Split([sLineBreak, #13, #10], TStringSplitOptions.ExcludeEmpty);
+            for var Line in Lines do
+              if ContainsText(Line, 'error') then
+                TConsole.WriteLine('      ' + Line, clRed);
+            raise Exception
+                .CreateFmt('Compilation failed on package "%s" for platform "%s".', [PkgName, LPlatformPair.Key]);
+          end;
+
+          RunCompileScripts(
+              AManifest,
+              TScriptRunner.EventAfterCompile,
+              AWorkspaceDir,
+              AProjectDir,
+              LPlatform,
+              LBuildConfig,
+              PkgName
+          );
+        end;
+      finally
+        LPackageProject.Free;
       end;
 
       InstallPackage(LPackage, AWorkspaceDir, DprojPath, LPlatformPair);

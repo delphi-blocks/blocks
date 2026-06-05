@@ -96,6 +96,7 @@
         <DCCReference Include="Blocks.JSON.pas"/>
         <DCCReference Include="Blocks.CLI.Command.pas"/>
         <DCCReference Include="Blocks.GitHub.pas"/>
+        <DCCReference Include="Blocks.Bitbucket.pas"/>
         <DCCReference Include="Blocks.Core.pas"/>
         <DCCReference Include="Blocks.Model.Config.pas"/>
         <DCCReference Include="Blocks.Model.SysConfig.pas"/>

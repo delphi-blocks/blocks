@@ -42,16 +42,32 @@ implementation
 uses
   System.IOUtils,
   System.Zip,
-  Winapi.Windows,
   Blocks.Core,
   Blocks.Http,
   Blocks.Console,
-  Blocks.GitHub;
+  Blocks.GitHub,
+  Blocks.Bitbucket;
 
 type
-  TGitHubFetcher = class(TInterfacedObject, IRepositoryFetcher)
+  /// <summary>Base class for fetchers that download a ZIP archive whose content
+  ///   is wrapped in a single subdirectory (e.g. "owner-repo-abc1234"), as both
+  ///   GitHub and Bitbucket Cloud archives are. Subclasses only build the URL.</summary>
+  TArchiveFetcher = class(TInterfacedObject, IRepositoryFetcher)
+  protected
+    /// <summary>Builds the archive download URL from the manifest repository.</summary>
+    function BuildZipUrl(ARepository: TManifestRepository): string; virtual; abstract;
   public
     procedure FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
+  end;
+
+  TGitHubFetcher = class(TArchiveFetcher)
+  protected
+    function BuildZipUrl(ARepository: TManifestRepository): string; override;
+  end;
+
+  TBitbucketFetcher = class(TArchiveFetcher)
+  protected
+    function BuildZipUrl(ARepository: TManifestRepository): string; override;
   end;
 
   TLocalFetcher = class(TInterfacedObject, IRepositoryFetcher)
@@ -65,28 +81,25 @@ class function TRepositoryFetcher.ForRepository(ARepository: TManifestRepository
 begin
   if SameText(ARepository.RepoType, 'github') then
     Result := TGitHubFetcher.Create
+  else if SameText(ARepository.RepoType, 'bitbucket') then
+    Result := TBitbucketFetcher.Create
   else if SameText(ARepository.RepoType, 'local') then
     Result := TLocalFetcher.Create
   else
     raise Exception.CreateFmt('Unsupported repository type: "%s"', [ARepository.RepoType]);
 end;
 
-{ TGitHubFetcher }
+{ TArchiveFetcher }
 
-procedure TGitHubFetcher.FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
+procedure TArchiveFetcher.FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
 begin
-  // Repository URL format: https://github.com/owner/repo/tree/ref
-  var LRepoParts := TrimRight(ARepository.Url, ['/']).Split(['/']);
-  if Length(LRepoParts) < 7 then
-    raise Exception.CreateFmt('Cannot parse repository URL: %s', [ARepository.Url]);
-  var LZipUrl := TGitHub.GetGitHubZipUrl(LRepoParts[3], LRepoParts[4], LRepoParts[6]);
+  var LZipUrl := BuildZipUrl(ARepository);
 
   // Keep the temp download on the same volume as the destination so the final
   // directory move is a rename rather than a cross-volume copy.
   var LWorkDir := TPath.GetDirectoryName(ExcludeTrailingPathDelimiter(ADestinationDir));
   var LDownloadDir := TPath.Combine(LWorkDir, TPath.Combine('.blocks', 'download'));
-  if TDirectory.Exists(LDownloadDir) then
-    TDirectory.Delete(LDownloadDir, True);
+  TFileUtils.SafeDeleteDirectory(LDownloadDir);
   TDirectory.CreateDirectory(LDownloadDir);
   try
     var LZipPath := TPath.Combine(LDownloadDir, 'download.zip');
@@ -98,17 +111,37 @@ begin
     TDirectory.CreateDirectory(LExtractDir);
     TZipFile.ExtractZipFile(LZipPath, LExtractDir);
 
-    // GitHub wraps content in a single subdirectory (e.g. "owner-repo-abc1234").
+    // The archive wraps content in a single subdirectory (e.g. "owner-repo-abc1234").
     var LInnerDirs := TDirectory.GetDirectories(LExtractDir);
     if Length(LInnerDirs) = 0 then
       raise Exception.Create('Unexpected zip structure: no subdirectory found.');
 
-    if not MoveFileEx(PChar(LInnerDirs[0]), PChar(ADestinationDir), MOVEFILE_COPY_ALLOWED) then
-      RaiseLastOSError;
+    TFileUtils.SafeMove(LInnerDirs[0], ADestinationDir);
   finally
-    if TDirectory.Exists(LDownloadDir) then
-      TDirectory.Delete(LDownloadDir, True);
+    TFileUtils.SafeDeleteDirectory(LDownloadDir);
   end;
+end;
+
+{ TGitHubFetcher }
+
+function TGitHubFetcher.BuildZipUrl(ARepository: TManifestRepository): string;
+begin
+  // Repository URL format: https://github.com/owner/repo/tree/ref
+  var LRepoParts := TrimRight(ARepository.Url, ['/']).Split(['/']);
+  if Length(LRepoParts) < 7 then
+    raise Exception.CreateFmt('Cannot parse repository URL: %s', [ARepository.Url]);
+  Result := TGitHub.GetGitHubZipUrl(LRepoParts[3], LRepoParts[4], LRepoParts[6]);
+end;
+
+{ TBitbucketFetcher }
+
+function TBitbucketFetcher.BuildZipUrl(ARepository: TManifestRepository): string;
+begin
+  // Repository URL format: https://bitbucket.org/owner/repo/src/ref
+  var LRepoParts := TrimRight(ARepository.Url, ['/']).Split(['/']);
+  if Length(LRepoParts) < 7 then
+    raise Exception.CreateFmt('Cannot parse repository URL: %s', [ARepository.Url]);
+  Result := TBitbucket.GetBitbucketZipUrl(LRepoParts[3], LRepoParts[4], LRepoParts[6]);
 end;
 
 { TLocalFetcher }

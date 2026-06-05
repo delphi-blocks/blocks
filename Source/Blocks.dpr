@@ -19,6 +19,7 @@ uses
   Blocks.JSON in 'Blocks.JSON.pas',
   Blocks.CLI.Command in 'Blocks.CLI.Command.pas',
   Blocks.GitHub in 'Blocks.GitHub.pas',
+  Blocks.Bitbucket in 'Blocks.Bitbucket.pas',
   Blocks.Core in 'Blocks.Core.pas',
   Blocks.Model.Config in 'Blocks.Model.Config.pas',
   Blocks.Model.SysConfig in 'Blocks.Model.SysConfig.pas',

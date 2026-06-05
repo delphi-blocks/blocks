@@ -44,6 +44,43 @@ means `1.2.0`.
 Versions are compared field by field: `MAJOR` first, then `MINOR`, then `PATCH`,
 then `BUILD`.
 
+## Libraries without a version
+
+Some upstream libraries do not declare a version of their own. To store one in
+the repository you still have to give it a version number, but picking an
+arbitrary one (e.g. `0.0.1`) is risky: if the authors later publish a real
+release with that exact number, you end up with two different artifacts sharing
+the same version.
+
+The convention is to **reserve `0.0.0` for unversioned libraries** and to bump
+only the `BUILD` field for successive snapshots:
+
+```
+.blocks/repository/<vendor>/<name>/
+  0.0.0/       (or 0.0.0.1, 0.0.0.2, … for later snapshots)
+```
+
+Because versions are compared numerically, every value in the `0.0.0.*` range
+sorts **below** any real release (the lowest a project realistically publishes
+is `0.0.1`, more often `0.1.0` or `1.0.0`):
+
+```
+0.0.0.7  <  0.0.1  <  0.1.0  <  1.0.0
+```
+
+So the day the authors publish a real version, `blocks install owner.package`
+(no constraint → highest available) picks it up automatically, with no conflict:
+the `0.0.0.*` space is one that upstream never uses.
+
+> **Tip** — to make a snapshot self-documenting you can encode its date in the
+> `BUILD` field, e.g. `0.0.0.20260605`. It still sorts below `0.0.1` and stays
+> monotonic.
+
+When other packages depend on an unversioned library, give them a **broad**
+constraint so they accept both the snapshot and a future real release — use `*`
+(any) or `>=0.0.0`. Avoid `^0.0.0`: it matches `0.0.0.*` but **not** `0.0.1`, so
+it would block the automatic upgrade once a real version appears.
+
 ## Version constraints
 
 Append `@<constraint>` to a package id to pin or restrict the version. The

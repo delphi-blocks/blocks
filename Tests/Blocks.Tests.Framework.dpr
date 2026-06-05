@@ -44,7 +44,9 @@ uses
   Blocks.CLI.Command in '..\Source\Blocks.CLI.Command.pas',
   Blocks.Model.Manifest in '..\Source\Blocks.Model.Manifest.pas',
   Blocks.Service.Script in '..\Source\Blocks.Service.Script.pas',
-  Blocks.Tests.Script in 'Blocks.Tests.Script.pas';
+  Blocks.Tests.Script in 'Blocks.Tests.Script.pas',
+  Blocks.Bitbucket in '..\Source\Blocks.Bitbucket.pas',
+  Blocks.Tests.Bitbucket in 'Blocks.Tests.Bitbucket.pas';
 
 var
   runner : ITestRunner;

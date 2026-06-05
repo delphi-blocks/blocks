@@ -73,13 +73,56 @@ which other packages are required.
 | `homepage` | Project homepage URL. |
 | `author` | Author(s); free-form, optionally with an email. |
 | `keywords` | List of keywords used by `search`. |
-| `repository.type` | Source repository type. Currently `github`. |
-| `repository.url` | GitHub tree URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. |
+| `repository.type` | Source repository type: `github`, `bitbucket`, or `local`. |
+| `repository.url` | Repository URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. For `github` use a tree URL (`https://github.com/owner/repo/tree/<ref>`), for `bitbucket` a src URL (`https://bitbucket.org/owner/repo/src/<ref>`), for `local` a filesystem path. |
 | `platforms` | Per-platform `sourcePath` (registered in the Delphi "Browsing Path") and optional `releaseDCUPath` / `debugDCUPath`. Set `runtimeOnly: true` to skip design-time packages when installing that platform. |
-| `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. |
+| `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. A `name` may contain the `%PACKAGE_VERSION%` placeholder — see below. |
 | `packageOptions.folders` | Maps Delphi version keys to the subfolder under `packages\` containing the `.dproj` files. A `+` suffix means "this version or newer". |
 | `dependencies` | Other packages that must be installed first, with their version constraints. See [versioning.md](versioning.md). |
 | `scripts` | Optional built-in commands run at lifecycle events (e.g. `afterCompile`). See [script.md](script.md). |
+
+## Package name placeholder
+
+Some libraries name their `.dproj` files with the Delphi **package-version suffix**
+(e.g. `Trysil290.dproj` for Delphi 12, `Trysil370.dproj` for Delphi 13). Because a
+`packages[].name` is a single fixed string, you would otherwise need one manifest
+per Delphi version.
+
+To cover them all with a single manifest, a package `name` may contain the
+`%PACKAGE_VERSION%` placeholder. When compiling, Blocks replaces it with the
+package-version suffix of the **active** Delphi version before locating the
+`.dproj`:
+
+| Delphi version | `%PACKAGE_VERSION%` |
+|----------------|---------------------|
+| `delphixe6`    | `200` |
+| `delphixe7`    | `210` |
+| `delphixe8`    | `220` |
+| `delphi10`     | `230` |
+| `delphi101`    | `240` |
+| `delphi102`    | `250` |
+| `delphi103`    | `260` |
+| `delphi104`    | `270` |
+| `delphi11`     | `280` |
+| `delphi12`     | `290` |
+| `delphi13`     | `370` |
+
+```jsonc
+"packages": [
+  { "name": "Trysil%PACKAGE_VERSION%",       "type": ["runtime"] },
+  { "name": "Trysil.JSon%PACKAGE_VERSION%",  "type": ["runtime"] }
+],
+"packageOptions": {
+  "folders": {
+    "delphi12": "290",   // packages\290\Trysil290.dproj
+    "delphi13": "370"    // packages\370\Trysil370.dproj
+  }
+}
+```
+
+The placeholder is case-insensitive and follows the same `%NAME%` convention used
+by [manifest scripts](script.md). It only affects how the `.dproj` is located: the
+compiled `.bpl` / `.dcp` names come from the `.dproj` itself and are unchanged.
 
 ## Related guides
 

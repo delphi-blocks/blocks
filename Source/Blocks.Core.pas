@@ -17,6 +17,7 @@ interface
 uses
   System.Classes,
   System.SysUtils,
+  System.IOUtils,
   System.RegularExpressions,
   System.Generics.Collections,
   Winapi.Windows;
@@ -103,6 +104,29 @@ type
 ///   <c>TMatchEvaluator</c> is required.</remarks>
 function RegExReplace(const AInput, APattern: string; const AEvaluator: TMatchEvaluatorFunc): string;
 
+type
+  // -- Filesystem helpers (resilient to transient AV/indexer locks) -----------
+  TFileUtils = class
+  public
+    /// <summary>Moves a file or directory like WinAPI <c>MoveFileEx</c> (with
+    ///   <c>MOVEFILE_COPY_ALLOWED</c>), retrying briefly on transient
+    ///   sharing/access errors.</summary>
+    /// <remarks>Antivirus real-time scanning or the Search Indexer routinely
+    ///   hold a freshly written file/directory open for a few hundred
+    ///   milliseconds, making the move fail intermittently with
+    ///   <c>ERROR_ACCESS_DENIED</c> or <c>ERROR_SHARING_VIOLATION</c>. Those
+    ///   errors are retried with a short increasing back-off; any other error
+    ///   fails immediately.</remarks>
+    /// <exception cref="EOSError">Raised on a non-transient error, or when the
+    ///   move still fails after the retry budget is exhausted.</exception>
+    class procedure SafeMove(const ASource, ADestination: string); static;
+
+    /// <summary>Recursively deletes a directory, retrying briefly on the same
+    ///   transient sharing/access errors as <see cref="SafeMove"/>. A missing
+    ///   directory is treated as success.</summary>
+    class procedure SafeDeleteDirectory(const APath: string); static;
+  end;
+
 implementation
 
 function ExtractVersionNumber(const S: string): string;
@@ -158,6 +182,55 @@ begin
       Break;
   end;
   Result := Copy(S, 1, Len);
+end;
+
+const
+  // A just-written file held open by antivirus/Search Indexer surfaces as one of
+  // these; both clear within a few hundred ms, so a short retry is worthwhile.
+  FSRetryAttempts = 5;
+  FSRetryBaseDelayMs = 150;
+
+function IsTransientFSError(AError: Cardinal): Boolean;
+begin
+  Result := (AError = ERROR_ACCESS_DENIED) or (AError = ERROR_SHARING_VIOLATION);
+end;
+
+class procedure TFileUtils.SafeMove(const ASource, ADestination: string);
+begin
+  for var LAttempt := 1 to FSRetryAttempts do
+  begin
+    if MoveFileEx(PChar(ASource), PChar(ADestination), MOVEFILE_COPY_ALLOWED) then
+      Exit;
+
+    var LErr := GetLastError;
+    if (LAttempt = FSRetryAttempts) or not IsTransientFSError(LErr) then
+    begin
+      SetLastError(LErr);
+      RaiseLastOSError;
+    end;
+    Sleep(FSRetryBaseDelayMs * LAttempt);
+  end;
+end;
+
+class procedure TFileUtils.SafeDeleteDirectory(const APath: string);
+begin
+  if not TDirectory.Exists(APath) then
+    Exit;
+
+  for var LAttempt := 1 to FSRetryAttempts do
+  begin
+    try
+      TDirectory.Delete(APath, True);
+      Exit;
+    except
+      on E: Exception do
+      begin
+        if LAttempt = FSRetryAttempts then
+          raise;
+        Sleep(FSRetryBaseDelayMs * LAttempt);
+      end;
+    end;
+  end;
 end;
 
 procedure InitializeVersionConstant;
