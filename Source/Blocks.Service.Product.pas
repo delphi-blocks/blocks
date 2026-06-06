@@ -106,6 +106,17 @@ type
     ///   <c>RootDir\bin\bds.exe</c> is found in the process list.</returns>
     function IsRunning: Boolean;
 
+    /// <summary>Checks whether the command-line compiler for a platform is
+    ///   physically installed (its <c>dcc*.exe</c> exists under <c>RootDir\bin</c>).</summary>
+    /// <param name="APlatform">Platform identifier, e.g. <c>Win32</c>, <c>Win64</c>, <c>Win64x</c>.</param>
+    /// <returns><c>True</c> when the matching compiler executable exists; <c>False</c>
+    ///   for an unmapped platform or a missing executable.</returns>
+    /// <remarks>
+    ///   Unlike <see cref="TProductPlatform.Active"/>, which reflects only what the
+    ///   registry advertises, this verifies the toolchain is actually present on disk.
+    /// </remarks>
+    function HasCompiler(const APlatform: string): Boolean;
+
     /// <summary>Resolves the best matching package folder key for this Delphi version.</summary>
     /// <param name="APackageFolders">Dictionary mapping version-name keys (optionally suffixed
     ///   with <c>+</c>) to folder name values, as declared in the package manifest.</param>
@@ -300,6 +311,34 @@ begin
   end;
 
   raise Exception.Create('MSBuild not found. Please install .NET Framework SDK or Visual Studio Build Tools.');
+end;
+
+// -- Compiler location ---------------------------------------------------------
+
+// Maps a platform identifier to its command-line compiler executable. All Delphi
+// compilers live under <RootDir>\bin. Returns '' for platforms we do not map.
+function GetCompilerExe(const APlatform: string): string;
+begin
+  if SameText(APlatform, 'Win32') then
+    Result := 'dcc32.exe'
+  else if SameText(APlatform, 'Win64') then
+    Result := 'dcc64.exe'
+  else if SameText(APlatform, 'Win64x') then
+    Result := 'dcc64x.exe' // Win64 Modern (LLVM), Delphi 12+
+  else if SameText(APlatform, 'OSX64') then
+    Result := 'dccosx64.exe'
+  else if SameText(APlatform, 'OSXARM64') then
+    Result := 'dccosxarm64.exe'
+  else if SameText(APlatform, 'Linux64') then
+    Result := 'dcclinux64.exe'
+  else if SameText(APlatform, 'Android') then
+    Result := 'dccaarm.exe'
+  else if SameText(APlatform, 'Android64') then
+    Result := 'dccaarm64.exe'
+  else if SameText(APlatform, 'iOSDevice64') then
+    Result := 'dcciosarm64.exe'
+  else
+    Result := '';
 end;
 
 // -- Process execution with output capture -------------------------------------
@@ -918,6 +957,15 @@ begin
   end;
 end;
 
+function TProduct.HasCompiler(const APlatform: string): Boolean;
+begin
+  var LCompiler := GetCompilerExe(APlatform);
+  if LCompiler = '' then
+    Exit(False);
+
+  Result := TFile.Exists(TPath.Combine([FRootDir, 'bin', LCompiler]));
+end;
+
 function TProduct.GetPackageOutput(
     const AWorkspaceDir: string;
     APackage: TPackageProject;
@@ -1278,8 +1326,14 @@ begin
     for var LPlatformPair in AManifest.Platforms do
     begin
       var LProductPlatform: TProductPlatform;
-      if Platforms.TryGetValue(LPlatformPair.Key, LProductPlatform) and LProductPlatform.Active then
-        PlatformNames.Add(LPlatformPair.Key);
+      if not (Platforms.TryGetValue(LPlatformPair.Key, LProductPlatform) and LProductPlatform.Active) then
+        Continue;
+      // A mapped platform whose compiler is missing on disk is not buildable;
+      // exclude it here so the header and the "none active" check stay accurate.
+      // The user-facing warning is emitted once, in the compile loop below.
+      if (GetCompilerExe(LPlatformPair.Key) <> '') and not HasCompiler(LPlatformPair.Key) then
+        Continue;
+      PlatformNames.Add(LPlatformPair.Key);
     end;
 
     if PlatformNames.Count = 0 then
@@ -1312,6 +1366,15 @@ begin
     var LProductPlatform: TProductPlatform;
     if not (Platforms.TryGetValue(LPlatform, LProductPlatform) and LProductPlatform.Active) then
       Continue;
+
+    // The platform is registered/active, but the command-line compiler may not
+    // have been installed (e.g. a partial Delphi install). Skip it rather than
+    // letting MSBuild fail with an opaque error.
+    if (GetCompilerExe(LPlatform) <> '') and not HasCompiler(LPlatform) then
+    begin
+      TConsole.WriteLine(Format('  Skipping platform %s (compiler not installed)', [LPlatform]), clDkGray);
+      Continue;
+    end;
 
     TConsole.WriteLine('  [' + LPlatform + ']', clDkCyan);
 
