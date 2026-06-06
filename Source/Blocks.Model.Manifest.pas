@@ -85,6 +85,7 @@ type
   private
     FName: string;
     FType: TStringList;
+    FProducts: TStringList;
   public
     constructor Create;
     destructor Destroy; override;
@@ -92,8 +93,18 @@ type
     function IsDesignTime: Boolean;
     function IsRuntime: Boolean;
 
+    /// <summary>Returns <c>True</c> if this package is compatible with the given Delphi product.</summary>
+    /// <param name="AProductName">Internal product version name (e.g. <c>delphi13</c>).</param>
+    /// <remarks>
+    ///  An empty <c>products</c> list means the package supports every product. Each entry is
+    ///  matched exactly, unless it ends with <c>+</c>, which means "from that version onward".
+    /// </remarks>
+    function SupportsProduct(const AProductName: string): Boolean;
+
     property Name: string read FName write FName;
     property &Type: TStringList read FType;
+    /// <summary>Products the package is compatible with; empty means all products.</summary>
+    property Products: TStringList read FProducts;
   end;
 
   // -----------------------------------------------------------------------
@@ -311,11 +322,13 @@ constructor TManifestPackage.Create;
 begin
   inherited Create;
   FType := TStringList.Create;
+  FProducts := TStringList.Create;
 end;
 
 destructor TManifestPackage.Destroy;
 begin
   FType.Free;
+  FProducts.Free;
   inherited;
 end;
 
@@ -327,6 +340,40 @@ end;
 function TManifestPackage.IsRuntime: Boolean;
 begin
   Result := &Type.Contains('runtime');
+end;
+
+function TManifestPackage.SupportsProduct(const AProductName: string): Boolean;
+
+  function VersionRank(const AVersionName: string): Integer;
+  begin
+    for var I := Low(VersionOrder) to High(VersionOrder) do
+      if SameText(VersionOrder[I], AVersionName) then
+        Exit(I);
+    Result := -1;
+  end;
+
+begin
+  // No "products" constraint means the package is compatible with every product.
+  if FProducts.Count = 0 then
+    Exit(True);
+
+  var LProductRank := VersionRank(AProductName);
+
+  for var LEntry in FProducts do
+  begin
+    var LName := LEntry.Trim;
+    if LName.EndsWith('+') then
+    begin
+      // "from this version onward": product must rank at or above the listed one.
+      var LBaseRank := VersionRank(TrimRight(LName, ['+']));
+      if (LBaseRank >= 0) and (LProductRank >= LBaseRank) then
+        Exit(True);
+    end
+    else if SameText(LName, AProductName) then
+      Exit(True);
+  end;
+
+  Result := False;
 end;
 
 { TManifestPackageList }

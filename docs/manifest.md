@@ -40,9 +40,10 @@ which other packages are required.
   },
 
   // Each entry maps to a .dproj file under packages\<folder>\
+  // "products" is optional; when omitted the package targets every Delphi version.
   "packages": [
     { "name": "WiRL",       "type": ["runtime"] },
-    { "name": "WiRLDesign", "type": ["designtime"] }
+    { "name": "WiRLDesign", "type": ["designtime"], "products": ["delphi103+"] }
   ],
 
   // Maps Delphi version names to the subfolder under packages\ that contains
@@ -76,7 +77,7 @@ which other packages are required.
 | `repository.type` | Source repository type: `github`, `bitbucket`, or `local`. |
 | `repository.url` | Repository URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. For `github` use a tree URL (`https://github.com/owner/repo/tree/<ref>`), for `bitbucket` a src URL (`https://bitbucket.org/owner/repo/src/<ref>`), for `local` a filesystem path. |
 | `platforms` | Per-platform `sourcePath` (registered in the Delphi "Browsing Path") and optional `releaseDCUPath` / `debugDCUPath`. Set `runtimeOnly: true` to skip design-time packages when installing that platform. |
-| `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. A `name` may contain the `%PACKAGE_VERSION%` placeholder — see below. |
+| `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. A `name` may contain the `%PACKAGE_VERSION%` placeholder — see below. An optional `products` list restricts the package to specific Delphi versions — see below. |
 | `packageOptions.folders` | Maps Delphi version keys to the subfolder under `packages\` containing the `.dproj` files. A `+` suffix means "this version or newer". |
 | `dependencies` | Other packages that must be installed first, with their version constraints. See [versioning.md](versioning.md). |
 | `scripts` | Optional built-in commands run at lifecycle events (e.g. `afterCompile`). See [script.md](script.md). |
@@ -123,6 +124,39 @@ package-version suffix of the **active** Delphi version before locating the
 The placeholder is case-insensitive and follows the same `%NAME%` convention used
 by [manifest scripts](script.md). It only affects how the `.dproj` is located: the
 compiled `.bpl` / `.dcp` names come from the `.dproj` itself and are unchanged.
+
+## Per-package Delphi versions
+
+Some libraries ship different `.dproj` files for different Delphi versions — for
+example a design-time package that only exists since a certain release, or a
+package that was dropped in newer versions. The optional `products` field on a
+`packages[]` entry restricts that package to the Delphi versions it supports:
+
+```jsonc
+"packages": [
+  // Compiled on every Delphi version (no "products" field).
+  { "name": "SVGIconImageList",        "type": ["runtime"] },
+
+  // Compiled only on Delphi 10.3 and newer.
+  { "name": "SVGIconImageListFMX",     "type": ["runtime", "FMX"], "products": ["delphi103+"] },
+
+  // Compiled only on these two specific versions.
+  { "name": "dclSVGIconImageList",     "type": ["designtime"], "products": ["delphixe6", "delphixe7"] }
+]
+```
+
+Rules:
+
+- **Omitted or empty** — the package is compatible with every Delphi version.
+- **Exact name** (e.g. `delphixe7`) — the package targets *only* that version.
+- **`+` suffix** (e.g. `delphi103+`) — the package targets that version *and every
+  newer one*.
+
+Version names are the internal `delphi*` identifiers listed in the
+`%PACKAGE_VERSION%` table above. When a package does not support the Delphi version
+being installed, Blocks skips it everywhere in the pipeline: it is not compiled, no
+design-time package is registered, and no library paths are added (or removed on
+uninstall).
 
 ## Related guides
 

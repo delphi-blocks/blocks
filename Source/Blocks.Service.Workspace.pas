@@ -597,6 +597,10 @@ begin
 
         for var LPackage in LManifest.Packages do
         begin
+          // Packages that do not target this product were never built, so skip their paths too.
+          if not LPackage.SupportsProduct(LSelectedProduct.VersionName) then
+            Continue;
+
           // Design-time packages are not built on runtime-only platforms, so skip their paths too.
           if LPlatformPair.Value.RuntimeOnly and LPackage.IsDesignTime then
             Continue;
@@ -672,6 +676,10 @@ begin
       LSelectedProduct.FillEnvironmentVariables(LEnvironmentVariables);
       for var LPackage in LManifest.Packages do
       begin
+        // Packages that do not target this product were never installed, so skip unregistering them.
+        if not LPackage.SupportsProduct(LSelectedProduct.VersionName) then
+          Continue;
+
         var LPackageFolder := LSelectedProduct.GetPackageFolder(LManifest.PackageOptions.Folders);
         var LPackagesPath := TPath.Combine(TPath.Combine(LProjectDir, 'packages'), LPackageFolder);
         var DprojPath := TPath.Combine(LPackagesPath, LSelectedProduct.ExpandPackageName(LPackage.Name) + '.dproj');

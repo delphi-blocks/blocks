@@ -1323,6 +1323,14 @@ begin
       var PkgName := ExpandPackageName(LPackage.Name);
       var TypeStr := string.Join(', ', LPackage.&Type.ToStringArray);
 
+      // Skip packages that do not target this Delphi product.
+      if not LPackage.SupportsProduct(VersionName) then
+      begin
+        TConsole
+            .WriteLine(Format('    Skipping %s [%s] (not supported on %s)', [PkgName, TypeStr, VersionName]), clDkGray);
+        Continue;
+      end;
+
       // Skip design-time packages on platforms flagged as runtime-only.
       if LPlatformPair.Value.RuntimeOnly and LPackage.IsDesignTime then
       begin
