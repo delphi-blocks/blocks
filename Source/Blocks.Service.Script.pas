@@ -1,4 +1,4 @@
-{******************************************************************************}
+﻿{******************************************************************************}
 {                                                                              }
 {  DelphiBlock Installer                                                       }
 {                                                                              }
@@ -240,7 +240,7 @@ begin
   if not TDirectory.Exists(LDcuPath) then
     TDirectory.CreateDirectory(LDcuPath);
 
-  var LPatterns := ['*.res', '*.dfm'];
+  var LPatterns := ['*.res', '*.dfm', '*.fmx'];
 
   for var LSource in LPlatformManifest.SourcePath do
   begin
