@@ -206,6 +206,9 @@ uses
 
 const
   OptionLength = 26;
+  // Maximum width (in columns) of a package description before it is wrapped
+  // onto multiple lines in the search results.
+  DescriptionWidth = 80;
 
 function CtrlHandler(CtrlType: DWORD): BOOL; stdcall;
 begin
@@ -644,10 +647,36 @@ end;
 
 { TSearchCommand }
 
+/// <summary>Splits <c>AText</c> into lines no longer than <c>AWidth</c>
+/// columns, breaking on word boundaries.</summary>
+function WrapText(const AText: string; AWidth: Integer): TArray<string>;
+begin
+  Result := [];
+  var LLine := '';
+  for var LWord in AText.Split([' '], TStringSplitOptions.ExcludeEmpty) do
+  begin
+    if LLine = '' then
+      LLine := LWord
+    else if Length(LLine) + 1 + Length(LWord) <= AWidth then
+      LLine := LLine + ' ' + LWord
+    else
+    begin
+      Result := Result + [LLine];
+      LLine := LWord;
+    end;
+  end;
+  if LLine <> '' then
+    Result := Result + [LLine];
+end;
+
 procedure TSearchCommand.Execute;
 begin
   inherited;
   CheckWorkspace;
+
+  // Every id contains a dot
+  if FPattern = '' then
+    FPattern := '.';
 
   var LIndex := TRepositoryIndex.Create;
   try
@@ -657,10 +686,7 @@ begin
     TConsole.WriteLine;
     if Length(LMatches) = 0 then
     begin
-      if FPattern = '' then
-        TConsole.WriteLine('Repository index is empty. Run "blocks init" first.', clYellow)
-      else
-        TConsole.WriteLine(Format('No packages match "%s".', [FPattern]), clYellow);
+      TConsole.WriteLine(Format('No packages match "%s".', [FPattern]), clYellow);
       TConsole.WriteLine;
       Exit;
     end;
@@ -676,7 +702,8 @@ begin
       TConsole.Write(Format('  %-40s ', [LEntry.Id]), clCyan);
       TConsole.WriteLine(LEntry.Name, clWhite);
       if LEntry.Description <> '' then
-        TConsole.WriteLine('    ' + LEntry.Description, clGray);
+        for var LLine in WrapText(LEntry.Description, DescriptionWidth) do
+          TConsole.WriteLine('    ' + LLine, clGray);
       TConsole.WriteLine;
     end;
   finally
