@@ -126,11 +126,17 @@ type
   // -----------------------------------------------------------------------
   TManifestPackageOptions = class
   private
+    FRootFolder: string;
     FFolders: TManifestPackageFolders;
   public
     constructor Create;
     destructor Destroy; override;
 
+    /// <summary>Root folder (relative to the project directory) that contains the
+    ///   package subfolders. Defaults to <c>packages</c>. Combined with the
+    ///   version-specific entry from <see cref="Folders"/> to locate the <c>.dproj</c> files.</summary>
+    [JsonName('rootFolder')]
+    property RootFolder: string read FRootFolder write FRootFolder;
     property Folders: TManifestPackageFolders read FFolders;
   end;
 
@@ -202,6 +208,16 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+
+    /// <summary>Returns <c>True</c> when the package can be built for the given Delphi product.</summary>
+    /// <param name="AProductName">Internal product version name (e.g. <c>delphi13</c>).</param>
+    /// <remarks>
+    ///  When <c>packageOptions.folders</c> is empty the <c>.dproj</c> files live directly under the
+    ///  root folder, so every product is supported. Otherwise the product is supported only when at
+    ///  least one folder key is at or below it, mirroring the resolution done by
+    ///  <c>TProduct.GetPackageFolder</c>.
+    /// </remarks>
+    function IsProductSupported(const AProductName: string): Boolean;
 
     property Id: string read FId write FId;
     property Name: string read FName write FName;
@@ -388,6 +404,7 @@ end;
 constructor TManifestPackageOptions.Create;
 begin
   inherited Create;
+  FRootFolder := 'packages';
   FFolders := TManifestPackageFolders.Create;
 end;
 
@@ -442,6 +459,36 @@ begin
   FDependencies.Free;
   FScripts.Free;
   inherited;
+end;
+
+function TManifest.IsProductSupported(const AProductName: string): Boolean;
+
+  function VersionRank(const AVersionName: string): Integer;
+  begin
+    for var I := Low(VersionOrder) to High(VersionOrder) do
+      if SameText(VersionOrder[I], AVersionName) then
+        Exit(I);
+    Result := -1;
+  end;
+
+begin
+  // With no per-version folders the .dproj files live directly under the root
+  // folder, so the package is buildable for every product.
+  if FPackageOptions.Folders.Count = 0 then
+    Exit(True);
+
+  var LProductRank := VersionRank(AProductName);
+
+  // Supported when at least one folder key is at or below the product version
+  // (mirrors TProduct.GetPackageFolder's greatest-lower-bound resolution).
+  for var LKey in FPackageOptions.Folders.Keys do
+  begin
+    var LKeyRank := VersionRank(TrimRight(LKey, ['+']));
+    if (LKeyRank >= 0) and (LKeyRank <= LProductRank) then
+      Exit(True);
+  end;
+
+  Result := False;
 end;
 
 class function TManifest.GetManifest(const APackageName, APackageVersion: string): TManifest;

@@ -46,9 +46,13 @@ which other packages are required.
     { "name": "WiRLDesign", "type": ["designtime"], "products": ["delphi103+"] }
   ],
 
-  // Maps Delphi version names to the subfolder under packages\ that contains
-  // the .dproj files for that version. A trailing + means "this version or newer".
+  // "rootFolder" is the directory (relative to the project root) that holds the
+  // package folders; it defaults to "packages" and can be overridden here.
+  // "folders" maps Delphi version names to the subfolder under rootFolder that
+  // contains the .dproj files for that version. A trailing + means "this version
+  // or newer".
   "packageOptions": {
+    "rootFolder": "packages",
     "folders": {
       "delphi11":  "11.0Alexandria",
       "delphi12+": "12.0Athens"
@@ -78,7 +82,8 @@ which other packages are required.
 | `repository.url` | Repository URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. For `github` use a tree URL (`https://github.com/owner/repo/tree/<ref>`), for `bitbucket` a src URL (`https://bitbucket.org/owner/repo/src/<ref>`), for `local` a filesystem path. |
 | `platforms` | Per-platform `sourcePath` (registered in the Delphi "Browsing Path") and optional `releaseDCUPath` / `debugDCUPath`. Set `runtimeOnly: true` to skip design-time packages when installing that platform. |
 | `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. A `name` may contain the `%PACKAGE_VERSION%` placeholder — see below. An optional `products` list restricts the package to specific Delphi versions — see below. |
-| `packageOptions.folders` | Maps Delphi version keys to the subfolder under `packages\` containing the `.dproj` files. A `+` suffix means "this version or newer". |
+| `packageOptions.rootFolder` | Directory (relative to the project root) that contains the package folders. Defaults to `packages`. |
+| `packageOptions.folders` | Maps Delphi version keys to the subfolder under `rootFolder` containing the `.dproj` files. A `+` suffix means "this version or newer". An entry of `.` (or an empty/absent `folders` map) means the `.dproj` files live directly under `rootFolder`, with no per-version subfolder. |
 | `dependencies` | Other packages that must be installed first, with their version constraints. See [versioning.md](versioning.md). |
 | `scripts` | Optional built-in commands run at lifecycle events (e.g. `afterCompile`). See [script.md](script.md). |
 

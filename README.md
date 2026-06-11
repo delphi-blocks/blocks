@@ -136,9 +136,12 @@ Each package in the repository is described by a JSON manifest file (`<vendor>.<
     { "name": "WiRLDesign", "type": ["designtime"] }
   ],
 
-  // Maps Delphi version names to the subfolder under packages\ that contains
-  // the .dproj files for that version. A trailing + means "this version or newer".
+  // "rootFolder" (default "packages") is the directory holding the package folders.
+  // "folders" maps Delphi version names to the subfolder under rootFolder that
+  // contains the .dproj files for that version. A trailing + means "this version or
+  // newer"; a "." entry means the .dproj files live directly under rootFolder.
   "packageOptions": {
+    "rootFolder": "packages",
     "folders": {
       "delphi11":  "11.0Alexandria",
       "delphi12+": "12.0Athens"

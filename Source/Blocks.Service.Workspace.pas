@@ -155,8 +155,7 @@ function GetDProjPath(
     APackageName: string
 ): string;
 begin
-  var LPackageFolder := AProduct.GetPackageFolder(AManifest.PackageOptions.Folders);
-  var LPackagesPath := TPath.Combine(TPath.Combine(AProjectDir, 'packages'), LPackageFolder);
+  var LPackagesPath := AProduct.GetPackagesPath(AProjectDir, AManifest);
   Result := TPath.Combine(LPackagesPath, AProduct.ExpandPackageName(APackageName) + '.dproj');
 end;
 
@@ -549,8 +548,11 @@ begin
       end;
     end;
 
-    // Step 5 — Resolve package folder for selected Delphi version
-    var LPackageFolder := LSelectedProduct.GetPackageFolder(LManifest.PackageOptions.Folders);
+    // Step 5 — Make sure the package targets the selected Delphi version before
+    // downloading anything, so an unsupported version fails fast.
+    if not LManifest.IsProductSupported(LSelectedProduct.VersionName) then
+      raise Exception
+          .CreateFmt('No compatible package found for "%s". Delphi version too old?', [LSelectedProduct.DisplayName]);
 
     // Step 6 — Dependencies
     if not LManifest.Dependencies.IsEmpty then
@@ -585,7 +587,7 @@ begin
     end;
 
     // Step 8 — Compile
-    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LPackageFolder, LManifest);
+    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LManifest);
 
     // Step 9 — Update product paths
     var LEnvironmentVariables := TStringList.Create;
@@ -593,7 +595,7 @@ begin
       LSelectedProduct.FillEnvironmentVariables(LEnvironmentVariables);
       for var LPlatformPair in LManifest.Platforms do
       begin
-        var LPackagesPath := TPath.Combine(TPath.Combine(LProjectDir, 'packages'), LPackageFolder);
+        var LPackagesPath := LSelectedProduct.GetPackagesPath(LProjectDir, LManifest);
 
         for var LPackage in LManifest.Packages do
         begin
@@ -626,7 +628,7 @@ begin
     TConsole.WriteLine('============================================', clGreen);
     TConsole.WriteLine('  Done!', clGreen);
     TConsole.WriteLine('  Project  : ' + LProjectDir, clGreen);
-    TConsole.WriteLine('  Packages : ' + TPath.Combine(LProjectDir, 'packages\' + LPackageFolder), clGreen);
+    TConsole.WriteLine('  Packages : ' + LSelectedProduct.GetPackagesPath(LProjectDir, LManifest), clGreen);
     TConsole.WriteLine('============================================', clGreen);
     TConsole.WriteLine;
   finally
@@ -680,8 +682,7 @@ begin
         if not LPackage.SupportsProduct(LSelectedProduct.VersionName) then
           Continue;
 
-        var LPackageFolder := LSelectedProduct.GetPackageFolder(LManifest.PackageOptions.Folders);
-        var LPackagesPath := TPath.Combine(TPath.Combine(LProjectDir, 'packages'), LPackageFolder);
+        var LPackagesPath := LSelectedProduct.GetPackagesPath(LProjectDir, LManifest);
         var DprojPath := TPath.Combine(LPackagesPath, LSelectedProduct.ExpandPackageName(LPackage.Name) + '.dproj');
         var LPackageProject := TPackageProject.LoadFromFile(DprojPath);
         try

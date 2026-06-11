@@ -125,6 +125,15 @@ type
     ///   (installed version is older than all keys in the manifest).</exception>
     function GetPackageFolder(APackageFolders: TDictionary<string, string>): string;
 
+    /// <summary>Resolves the directory that contains the <c>.dproj</c> files for this product.</summary>
+    /// <param name="AProjectDir">Root directory of the extracted project.</param>
+    /// <param name="AManifest">The package manifest providing the package options.</param>
+    /// <returns><c>AProjectDir\&lt;rootFolder&gt;\&lt;versionFolder&gt;</c>, where <c>rootFolder</c>
+    ///   defaults to <c>packages</c> and the version-specific folder is appended only when the
+    ///   manifest declares one (an entry of <c>.</c> or an empty <c>folders</c> map means the
+    ///   <c>.dproj</c> files live directly under the root folder).</returns>
+    function GetPackagesPath(const AProjectDir: string; AManifest: TManifest): string;
+
     /// <summary>Expands the <c>%PACKAGE_VERSION%</c> placeholder in a manifest
     ///   package name to this product's package-version suffix (e.g. <c>370</c>
     ///   for <c>delphi13</c>), so a single manifest can target packages whose
@@ -134,11 +143,10 @@ type
 
     /// <summary>Compiles all declared packages and updates the Delphi library registry paths.</summary>
     /// <param name="AProjectDir">Root directory of the extracted project.</param>
-    /// <param name="APackageFolder">Subfolder under <c>packages\</c> that contains the <c>.dproj</c> files.</param>
     /// <param name="APackages">Package descriptors from the manifest, one per <c>.dproj</c> file.</param>
     /// <param name="APlatforms">Target platform configurations from the manifest.</param>
     /// <exception cref="Exception">Raised when a platform is not installed or a package fails to compile.</exception>
-    procedure BuildPackages(const AWorkspaceDir, AProjectDir, APackageFolder: string; const AManifest: TManifest);
+    procedure BuildPackages(const AWorkspaceDir, AProjectDir: string; const AManifest: TManifest);
 
     /// <summary>Delete package (bpl and dcp).</summary>
     procedure RemovePackage(
@@ -1055,6 +1063,23 @@ begin
   Result := APackageFolders[BestKey];
 end;
 
+function TProduct.GetPackagesPath(const AProjectDir: string; AManifest: TManifest): string;
+begin
+  var LRootFolder := AManifest.PackageOptions.RootFolder;
+  if LRootFolder = '' then
+    LRootFolder := 'packages';
+  Result := TPath.Combine(AProjectDir, LRootFolder);
+
+  // The version-specific folder is optional: with no "folders" entries (or a "."
+  // placeholder) the .dproj files live directly under the root folder.
+  if AManifest.PackageOptions.Folders.Count > 0 then
+  begin
+    var LFolder := GetPackageFolder(AManifest.PackageOptions.Folders);
+    if (LFolder <> '') and (LFolder <> '.') then
+      Result := TPath.Combine(Result, LFolder);
+  end;
+end;
+
 function TProduct.ExpandPackageName(const AName: string): string;
 begin
   // Mirrors the %NAME% placeholder convention used by manifest scripts.
@@ -1295,7 +1320,7 @@ begin
   end;
 end;
 
-procedure TProduct.BuildPackages(const AWorkspaceDir, AProjectDir, APackageFolder: string; const AManifest: TManifest);
+procedure TProduct.BuildPackages(const AWorkspaceDir, AProjectDir: string; const AManifest: TManifest);
 begin
   var BuildConfigs := ['debug', 'release'];
   var BlocksDir := TPath.Combine(AWorkspaceDir, '.blocks');
@@ -1303,7 +1328,7 @@ begin
   var BdsCommonDir :=
       TPath.Combine(GetEnvironmentVariable('PUBLIC'), TPath.Combine('Documents\Embarcadero\Studio', FBdsVersion));
   var MsBuild := GetMsBuildPath;
-  var PackagesPath := TPath.Combine(TPath.Combine(AProjectDir, 'packages'), APackageFolder);
+  var PackagesPath := GetPackagesPath(AProjectDir, AManifest);
 
   // Set Delphi environment variables inherited by child processes
   SetEnvironmentVariable('BDS', PChar(BdsDir));
