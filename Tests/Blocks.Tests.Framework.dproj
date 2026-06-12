@@ -139,6 +139,7 @@
         <DCCReference Include="..\Source\Blocks.JSON.pas"/>
         <DCCReference Include="Blocks.Tests.JSON.pas"/>
         <DCCReference Include="..\Source\Blocks.Core.pas"/>
+        <DCCReference Include="Blocks.Tests.Core.pas"/>
         <DCCReference Include="..\Source\Blocks.Model.Package.pas"/>
         <DCCReference Include="Blocks.Tests.Package.pas"/>
         <DCCReference Include="Blocks.Tests.Command.pas"/>

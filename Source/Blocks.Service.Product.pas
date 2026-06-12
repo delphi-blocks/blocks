@@ -1205,8 +1205,15 @@ end;
 
 function TProduct.ExpandPackageName(const AName: string): string;
 begin
-  // Mirrors the %NAME% placeholder convention used by manifest scripts.
-  Result := StringReplace(AName, '%PACKAGE_VERSION%', FPackageVersion, [rfReplaceAll, rfIgnoreCase]);
+  // Reuses the shared variable expansion (the %NAME% / $(NAME) syntaxes) used by
+  // manifest scripts; here only %PACKAGE_VERSION% is exposed.
+  var LVariables := TStringList.Create;
+  try
+    LVariables.Values['PACKAGE_VERSION'] := FPackageVersion;
+    Result := ExpandVariables(AName, LVariables);
+  finally
+    LVariables.Free;
+  end;
 end;
 
 class function TProduct.GetProductNames: TArray<string>;

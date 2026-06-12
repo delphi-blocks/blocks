@@ -104,6 +104,12 @@ type
 ///   <c>TMatchEvaluator</c> is required.</remarks>
 function RegExReplace(const AInput, APattern: string; const AEvaluator: TMatchEvaluatorFunc): string;
 
+/// <summary>Expands variable references in <paramref name="AValue"/> using
+///   <paramref name="AEnvironmentVariables"/>. Both the Blocks-specific
+///   <c>%VAR%</c> syntax and the Delphi/MSBuild <c>$(VAR)</c> syntax are
+///   recognised. Unknown variables resolve to an empty string.</summary>
+function ExpandVariables(const AValue: string; AEnvironmentVariables: TStrings): string;
+
 type
   // -- Filesystem helpers (resilient to transient AV/indexer locks) -----------
   TFileUtils = class
@@ -160,6 +166,23 @@ begin
   finally
     LWrapper.Free;
   end;
+end;
+
+function ExpandVariables(const AValue: string; AEnvironmentVariables: TStrings): string;
+var
+  LLookup: TMatchEvaluatorFunc;
+begin
+  LLookup :=
+      function(const AMatch: TMatch): string
+      begin
+        // Unknown variables resolve to '' (Values returns '' for absent keys).
+        Result := AEnvironmentVariables.Values[AMatch.Groups[1].Value];
+      end;
+  // %VAR% is the Blocks-specific placeholder syntax; $(VAR) mirrors the
+  // Delphi/MSBuild macro syntax. Each pass uses a single capture group so the
+  // matched variable name is always Groups[1].
+  Result := RegExReplace(AValue, '%([^%]+)%', LLookup);
+  Result := RegExReplace(Result, '\$\(([^)]+)\)', LLookup);
 end;
 
 function TrimRight(const S: string; const Chars: array of Char): string;

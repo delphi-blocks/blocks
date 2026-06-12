@@ -19,7 +19,6 @@ uses
   System.SysUtils,
   System.IOUtils,
   System.Generics.Collections,
-  System.RegularExpressions,
   System.Types,
   System.Zip,
   Blocks.Model.Database,
@@ -122,25 +121,11 @@ uses
   Blocks.Service.Script,
   Blocks.Model.Package;
 
-procedure ExpandMacros(var APath: string; AEnvironmentVariable: TStrings);
-begin
-  APath :=
-      RegExReplace(
-          APath,
-          '\$\(([^)]+)\)',
-          function(const AMatch: TMatch): string
-          begin
-            // Unknown macros resolve to '' — same as stripping the residual.
-            Result := AEnvironmentVariable.Values[AMatch.Groups[1].Value];
-          end
-      );
-end;
-
 procedure NormalizePath(var APaths: TArray<string>; const ABasePath: string; AEnvironmentVariable: TStrings);
 begin
   for var I := Low(APaths) to High(APaths) do
   begin
-    ExpandMacros(APaths[I], AEnvironmentVariable);
+    APaths[I] := ExpandVariables(APaths[I], AEnvironmentVariable);
     if TPath.IsRelativePath(APaths[I]) then
     begin
       APaths[I] := ExpandFileName(TPath.Combine(ABasePath, APaths[I]));

@@ -156,10 +156,6 @@ type
   // Runs manifest scripts by resolving each one to a registered TScriptCommand
   // -----------------------------------------------------------------------
   TScriptRunner = class
-  private
-    /// <summary>Expands <c>%VAR%</c> macros using <paramref name="AEnvironmentVariables"/>.
-    ///   Unknown variables resolve to an empty string.</summary>
-    class function ExpandVariables(const AValue: string; AEnvironmentVariables: TStrings): string; static;
   public
     const
       // Lifecycle events a manifest script can hook into. Compile events fire once
@@ -208,7 +204,6 @@ implementation
 
 uses
   System.IOUtils,
-  System.RegularExpressions,
   Blocks.Core,
   Blocks.Console;
 
@@ -423,20 +418,6 @@ begin
 end;
 
 { TScriptRunner }
-
-class function TScriptRunner.ExpandVariables(const AValue: string; AEnvironmentVariables: TStrings): string;
-begin
-  Result :=
-      RegExReplace(
-          AValue,
-          '%([^%]+)%',
-          function(const AMatch: TMatch): string
-          begin
-            // Unknown variables resolve to '' — same convention as ExpandMacros.
-            Result := AEnvironmentVariables.Values[AMatch.Groups[1].Value];
-          end
-      );
-end;
 
 class procedure TScriptRunner.Execute(
     AManifest: TManifest;

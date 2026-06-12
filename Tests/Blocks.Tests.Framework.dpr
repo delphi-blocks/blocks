@@ -38,6 +38,7 @@ uses
   Blocks.JSON in '..\Source\Blocks.JSON.pas',
   Blocks.Tests.JSON in 'Blocks.Tests.JSON.pas',
   Blocks.Core in '..\Source\Blocks.Core.pas',
+  Blocks.Tests.Core in 'Blocks.Tests.Core.pas',
   Blocks.Model.Package in '..\Source\Blocks.Model.Package.pas',
   Blocks.Tests.Package in 'Blocks.Tests.Package.pas',
   Blocks.Tests.Command in 'Blocks.Tests.Command.pas',
