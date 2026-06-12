@@ -64,6 +64,7 @@ type
     FRegistryKey: string;
     FPackageVersion: string;
     FPlatforms: TObjectDictionary<string, TProductPlatform>;
+    FDesignTimePlatforms: TArray<string>;
 
     class var
       FProducts: TObjectList<TProduct>;
@@ -129,6 +130,12 @@ type
     /// </remarks>
     function HasCompiler(const APlatform: string): Boolean;
 
+    /// <summary>True when blocks can build (and therefore clean up) packages for
+    ///   this platform: it is active in the product and, when it maps to a
+    ///   command-line compiler, that compiler is installed on disk.</summary>
+    /// <param name="APlatform">Platform identifier, e.g. <c>Win32</c>.</param>
+    function IsPlatformBuildable(const APlatform: string): Boolean;
+
     /// <summary>Resolves the best matching package folder key for this Delphi version.</summary>
     /// <param name="APackageFolders">Dictionary mapping version-name keys (optionally suffixed
     ///   with <c>+</c>) to folder name values, as declared in the package manifest.</param>
@@ -166,6 +173,8 @@ type
         APackage: TPackageProject;
         const APlatformPair: TPair<string, TManifestPlatform>
     );
+
+    function DesignTimeSupport(const APlatform: string): Boolean;
 
     /// <summary>Appends source, browsing, and debug DCU paths to the Delphi library registry.</summary>
     /// <param name="APlatform">Target platform identifier, e.g. <c>Win32</c>.</param>
@@ -264,6 +273,8 @@ type
     property RegistryKey: string read FRegistryKey;
     /// <summary>Platform configurations read from <c>HKCU\Software\Embarcadero\{RegKey}\{BdsVersion}\Library</c>, keyed by platform name.</summary>
     property Platforms: TDictionary<string, TProductPlatform> read GetPlatforms;
+    /// <summary>DesignTime Platform supported by the product.</summary>
+    property DesignTimePlatforms: TArray<string> read FDesignTimePlatforms;
   end;
 
 implementation
@@ -275,12 +286,6 @@ uses
   Blocks.Core,
   Blocks.Console,
   Blocks.Http;
-
-const
-  // Platforms for which blocks emits DCP output and registers it on the IDE
-  // library path. Limited to Windows for now; DCU/DCP usage on other platforms
-  // is unverified.
-  DCPPlatforms: array[0..1] of string = ('Win32', 'Win64');
 
 // -- WinAPI declarations missing from older Delphi headers --------------------
 
@@ -511,6 +516,10 @@ begin
   FRegistryKey := ARegistryKey;
   if not PackageVersion.TryGetValue(FVersionName, FPackageVersion) then
     FPackageVersion := StringReplace(FBdsVersion, '.', '', [rfReplaceAll]);
+
+  FDesignTimePlatforms := ['Win32'];
+  if TSemVer(BdsVersion) >= TSemVer('37.0') then
+    FDesignTimePlatforms := FDesignTimePlatforms + ['Win64'];
 end;
 
 destructor TProduct.Destroy;
@@ -650,6 +659,14 @@ begin
   finally
     Reg.Free;
   end;
+end;
+
+function TProduct.DesignTimeSupport(const APlatform: string): Boolean;
+begin
+  Result := False;
+  for var LPlatform in FDesignTimePlatforms do
+    if SameText(LPlatform, APlatform) then
+      Exit(True);
 end;
 
 class destructor TProduct.Destroy;
@@ -800,8 +817,21 @@ begin
   SafeDeleteFile(LFileName);
   LFileName := GetPackageOutput(AWorkspaceDir, APackage, APlatformPair.Key, 'release', 'dcp');
   SafeDeleteFile(LFileName);
+  if IsPosix(APlatformPair.Key) then
+  begin
+    LFileName := ChangeFileExt(LFileName, '.imp.o');
+    if FileExists(LFileName) then
+      SafeDeleteFile(LFileName);
+  end;
+
   LFileName := GetPackageOutput(AWorkspaceDir, APackage, APlatformPair.Key, 'debug', 'dcp');
   SafeDeleteFile(LFileName);
+  if IsPosix(APlatformPair.Key) then
+  begin
+    LFileName := ChangeFileExt(LFileName, '.imp.o');
+    if FileExists(LFileName) then
+      SafeDeleteFile(LFileName);
+  end;
 
   if SameText(APlatformPair.Key, 'win64') then
   begin
@@ -879,7 +909,11 @@ begin
       if not FileExists(LPackagePath) then
         raise Exception.CreateFmt('Package bpl not found "%s"', [LPackagePath]);
 
-      LReg.WriteString(LPackagePath, LPackage.Description);
+      var LDescription := LPackage.Description;
+      if LDescription = '' then
+        LDescription := '(Untitled)';
+
+      LReg.WriteString(LPackagePath, LDescription);
 
       LReg.CloseKey;
     finally
@@ -1097,6 +1131,18 @@ begin
   Result := TFile.Exists(TPath.Combine([FRootDir, 'bin', LCompiler]));
 end;
 
+function TProduct.IsPlatformBuildable(const APlatform: string): Boolean;
+begin
+  var LProductPlatform: TProductPlatform;
+  if not (Platforms.TryGetValue(APlatform, LProductPlatform) and LProductPlatform.Active) then
+    Exit(False);
+
+  // A mapped platform whose compiler is missing on disk is not buildable.
+  // Unmapped platforms (GetCompilerExe = '') are left to MSBuild, mirroring
+  // the filter applied in BuildPackages.
+  Result := (GetCompilerExe(APlatform) = '') or HasCompiler(APlatform);
+end;
+
 function TProduct.GetPackageOutput(
     const AWorkspaceDir: string;
     APackage: TPackageProject;
@@ -1124,6 +1170,15 @@ begin
 
   var LPackageFileName := APackage.Name + LPackageNameSuffix + '.' + AOutputType;
   Result := ExpandEnvironment(TPath.Combine(LDefaultOutputDirectory, LPackageFileName));
+
+  if IsPosix(APlatform) and SameText(AOutputType, 'bpl') then
+  begin
+    Result := ChangeFileExt(Result, '.so');
+    var LFileName := ExtractFileName(Result);
+    var LFilePath := ExtractFilePath(Result);
+    Result := TPath.Combine(LFilePath, 'bpl' + LFileName);
+  end;
+
 end;
 
 function TProduct.GetBPLFileName(
@@ -1360,7 +1415,11 @@ begin
   var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
   try
     LReg.RootKey := HKEY_CURRENT_USER;
-    for var LPlatform in DCPPlatforms do
+    // Register the dcp output dir for every platform the IDE has configured
+    // under Library, not just the design-time ones: a runtime package compiled
+    // for e.g. Win64 needs its dcp on that platform's search path to build "with
+    // runtime packages", independently of design-time support.
+    for var LPlatform in Platforms.Keys do
     begin
       var LRegPath := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\Library\' + LPlatform;
       if not LReg.OpenKey(LRegPath, False) then
@@ -1404,7 +1463,7 @@ begin
   var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
   try
     LReg.RootKey := HKEY_CURRENT_USER;
-    for var LPlatform in DCPPlatforms do
+    for var LPlatform in DesignTimePlatforms do
     begin
       var LRegPath := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\' + EnvVarsSubKey(LPlatform);
       // CanCreate: the Environment Variables key may not exist until the user
@@ -1618,10 +1677,19 @@ begin
       end;
 
       // Skip design-time packages on platforms flagged as runtime-only.
-      if LPlatformPair.Value.RuntimeOnly and LPackage.IsDesignTime then
+      if LPackage.IsDesignTime then
       begin
-        TConsole.WriteLine(Format('    Skipping %s [%s] (runtime-only platform)', [PkgName, TypeStr]), clDkGray);
-        Continue;
+        if not DesignTimeSupport(LPlatformPair.Key) then
+        begin
+          // TODO: verify this holds for every platform before logging a skip.
+          Continue;
+        end;
+
+        if LPlatformPair.Value.RuntimeOnly then
+        begin
+          TConsole.WriteLine(Format('    Skipping %s [%s] (runtime-only platform)', [PkgName, TypeStr]), clDkGray);
+          Continue;
+        end;
       end;
 
       var DprojPath := TPath.Combine(PackagesPath, PkgName + '.dproj');

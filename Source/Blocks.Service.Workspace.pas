@@ -681,6 +681,18 @@ begin
         try
           for var LPlatformPair in LManifest.Platforms do
           begin
+            // Mirror the install/build filter: only platforms that were actually
+            // buildable (active + compiler installed) ever produced output to
+            // clean up, so skip the rest to avoid spurious delete warnings.
+            if not LSelectedProduct.IsPlatformBuildable(LPlatformPair.Key) then
+              Continue;
+
+            if LPackage.IsDesignTime and (not LSelectedProduct.DesignTimeSupport(LPlatformPair.Key)) then
+              Continue;
+
+            if not LPackage.SupportsProduct(LSelectedProduct.VersionName) then
+              Continue;
+
             if LPackage.IsDesignTime then
               LSelectedProduct.UninstallPackage(LPackage, WorkDir, DprojPath, LPlatformPair);
 
@@ -709,6 +721,16 @@ begin
     end
     else
       TConsole.WriteLine('Directory not found: ' + LProjectDir, clYellow);
+
+    // Step 6.5 — Remove the package's DCU output folder (.blocks\lib\<name>).
+    // RemovePackage only deletes the bpl/dcp/rsm artifacts, so the DCU tree
+    // produced under $(BLOCKSDIR)\lib\<name> would otherwise be left orphaned.
+    var LDcuDir := TPath.Combine([WorkDir, '.blocks', 'lib', LManifest.Name]);
+    if TDirectory.Exists(LDcuDir) then
+    begin
+      TDirectory.Delete(LDcuDir, True);
+      TConsole.WriteLine('Removed: ' + LDcuDir, clYellow);
+    end;
 
     // Step 7 — Remove from database
     Database.RemoveEntry(LManifest.Id);

@@ -43,6 +43,12 @@ type
     ): Boolean; static;
     class operator Implicit(const AVersion: TSemVer): string;
     class operator Implicit(const AVersionStr: string): TSemVer;
+    class operator LessThan(const A, B: TSemVer): Boolean;
+    class operator GreaterThan(const A, B: TSemVer): Boolean;
+    class operator LessThanOrEqual(const A, B: TSemVer): Boolean;
+    class operator GreaterThanOrEqual(const A, B: TSemVer): Boolean;
+    class operator Equal(const A, B: TSemVer): Boolean;
+    class operator NotEqual(const A, B: TSemVer): Boolean;
     function CompareTo(const Other: TSemVer): Integer;
     function MatchesConstraint(const AConstraint: string): Boolean;
     function ToString: string;
@@ -109,6 +115,10 @@ function RegExReplace(const AInput, APattern: string; const AEvaluator: TMatchEv
 ///   <c>$(VAR)</c> syntax. The legacy <c>%VAR%</c> syntax is still recognised for
 ///   backward compatibility. Unknown variables resolve to an empty string.</summary>
 function ExpandVariables(const AValue: string; AEnvironmentVariables: TStrings): string;
+
+/// <summary>Returns True if <paramref name="APlatform"/> is a POSIX target
+///   (Linux, Android or iOS/macOS), as opposed to a Windows target.</summary>
+function IsPosix(const APlatform: string): Boolean;
 
 type
   // -- Filesystem helpers (resilient to transient AV/indexer locks) -----------
@@ -183,6 +193,23 @@ begin
   // so the matched variable name is always Groups[1].
   Result := RegExReplace(AValue, '%([^%]+)%', LLookup);
   Result := RegExReplace(Result, '\$\(([^)]+)\)', LLookup);
+end;
+
+function IsPosix(const APlatform: string): Boolean;
+const
+PosixPlatforms: array[0..5] of string = (
+    'Linux64',
+    'Android',
+    'Android64',
+    'iOSDevice32',
+    'iOSDevice64',
+    'OSXARM64'
+  );
+begin
+  Result := False;
+  for var LPlatform in PosixPlatforms do
+    if SameText(APlatform, LPlatform) then
+      Exit(True);
 end;
 
 function TrimRight(const S: string; const Chars: array of Char): string;
@@ -366,6 +393,36 @@ end;
 class operator TSemVer.Implicit(const AVersionStr: string): TSemVer;
 begin
   Result := TSemVer.Parse(AVersionStr);
+end;
+
+class operator TSemVer.LessThan(const A, B: TSemVer): Boolean;
+begin
+  Result := A.CompareTo(B) < 0;
+end;
+
+class operator TSemVer.GreaterThan(const A, B: TSemVer): Boolean;
+begin
+  Result := A.CompareTo(B) > 0;
+end;
+
+class operator TSemVer.LessThanOrEqual(const A, B: TSemVer): Boolean;
+begin
+  Result := A.CompareTo(B) <= 0;
+end;
+
+class operator TSemVer.GreaterThanOrEqual(const A, B: TSemVer): Boolean;
+begin
+  Result := A.CompareTo(B) >= 0;
+end;
+
+class operator TSemVer.Equal(const A, B: TSemVer): Boolean;
+begin
+  Result := A.CompareTo(B) = 0;
+end;
+
+class operator TSemVer.NotEqual(const A, B: TSemVer): Boolean;
+begin
+  Result := A.CompareTo(B) <> 0;
 end;
 
 function TSemVer.MatchesConstraint(const AConstraint: string): Boolean;
