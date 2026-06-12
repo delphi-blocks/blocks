@@ -6,7 +6,10 @@ uses
   System.Classes,
   System.SysUtils,
   System.IOUtils,
+  System.JSON,
   DUnitX.TestFramework,
+  Blocks.Core,
+  Blocks.JSON,
   Blocks.Model.Manifest,
   Blocks.Service.Script;
 
@@ -18,7 +21,20 @@ type
       LastArgs: string;
     class var
       LastManifest: TManifest;
-    procedure Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings); override;
+    procedure Run(
+        AHelper: IScriptHelper;
+        AManifest: TManifest;
+        AArgs: TManifestScriptArguments;
+        AEnvironmentVariables: TStrings
+    ); override;
+  end;
+
+  TManifestFakeArguments = class(TManifestScriptArguments)
+  private
+    FValue: string;
+  public
+    property Value: string read FValue;
+    constructor Create(AValue: TJSONValue); override;
   end;
 
   [TestFixture]
@@ -36,23 +52,32 @@ type
     [Test]
     procedure TestUnknownCommandRaises;
     [Test]
-    procedure TestEchoIsRecognized;
-    [Test]
     procedure TestCustomCommandIsRegisteredAndRun;
     [Test]
     procedure TestEventBoundCommandRejectsOtherEvents;
     [Test]
     procedure TestCopyResCopiesResAndDfm;
+    [Test]
+    procedure TestToJSONRoundTripsArgs;
+    [Test]
+    procedure TestManifestSerializationThroughFramework;
+    [Test]
+    procedure TestEventBoundCommandRegistersItsArgumentsClass;
   end;
 
 implementation
 
 { TFakeCommand }
 
-procedure TFakeCommand.Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings);
+procedure TFakeCommand.Run(
+    AHelper: IScriptHelper;
+    AManifest: TManifest;
+    AArgs: TManifestScriptArguments;
+    AEnvironmentVariables: TStrings
+);
 begin
   LastManifest := AManifest;
-  LastArgs := string.Join(' ', AArgs.ToStringArray);
+  LastArgs := ExpandVariables(AArgs.GetAs<TManifestFakeArguments>.Value, AEnvironmentVariables);
 end;
 
 procedure TScriptRunnerTest.Setup;
@@ -103,23 +128,6 @@ begin
   end;
 end;
 
-procedure TScriptRunnerTest.TestEchoIsRecognized;
-begin
-  var LScript := TManifestScript.Create;
-  var LEnv := TStringList.Create;
-  try
-    LScript.Command := 'echo';
-    LScript.Args.Add('Hello %NAME%');
-    LEnv.Values['NAME'] := 'World';
-
-    // "echo" is a recognised command: it must not raise (it prints "Hello World").
-    Assert.WillNotRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end);
-  finally
-    LEnv.Free;
-    LScript.Free;
-  end;
-end;
-
 procedure TScriptRunnerTest.TestCustomCommandIsRegisteredAndRun;
 begin
   TScriptCommand.RegisterCommand('fake', TFakeCommand);
@@ -129,8 +137,15 @@ begin
   var LScript := TManifestScript.Create;
   var LEnv := TStringList.Create;
   try
-    LScript.Command := 'fake';
-    LScript.Args.Add('a %V%');
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "fake",
+          "args": "a %V%",
+          "event": "beforeCompile"
+        }
+        '''
+    );
     LEnv.Values['V'] := 'b';
 
     TScriptRunner.Execute(FManifest, LScript, LEnv);
@@ -145,24 +160,38 @@ end;
 
 procedure TScriptRunnerTest.TestEventBoundCommandRejectsOtherEvents;
 begin
-  // Bind the command to afterCompile only.
-  TScriptCommand.RegisterCommand('boundfake', TFakeCommand, [TScriptRunner.EventAfterCompile]);
-
-  var LScript := TManifestScript.Create;
+  // 'boundfake' is bound to afterCompile only (see initialization).
   var LEnv := TStringList.Create;
+  var LRejected := TManifestScript.Create;
+  var LAllowed := TManifestScript.Create;
   try
-    LScript.Command := 'boundfake';
-
     // A different event is rejected.
-    LScript.Event := TScriptRunner.EventBeforeInstall;
-    Assert.WillRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end, EScriptError);
+    LRejected.FromJSONString(
+        '''
+        {
+          "command": "boundfake",
+          "args": "anything",
+          "event": "beforeInstall"
+        }
+        '''
+    );
+    Assert.WillRaise(procedure begin TScriptRunner.Execute(FManifest, LRejected, LEnv); end, EScriptError);
 
     // The bound event runs fine.
-    LScript.Event := TScriptRunner.EventAfterCompile;
-    Assert.WillNotRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end);
+    LAllowed.FromJSONString(
+        '''
+        {
+          "command": "boundfake",
+          "args": "anything",
+          "event": "afterCompile"
+        }
+        '''
+    );
+    Assert.WillNotRaise(procedure begin TScriptRunner.Execute(FManifest, LAllowed, LEnv); end);
   finally
     LEnv.Free;
-    LScript.Free;
+    LRejected.Free;
+    LAllowed.Free;
   end;
 end;
 
@@ -206,7 +235,112 @@ begin
   end;
 end;
 
+procedure TScriptRunnerTest.TestToJSONRoundTripsArgs;
+begin
+  var LScript := TManifestScript.Create;
+  try
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "compile",
+          "description": "Build the helper",
+          "event": "afterInstall",
+          "args": { "projectFile": "Helper.dproj", "platforms": ["Win32", "Win64"] }
+        }
+        '''
+    );
+
+    var LJSON := LScript.ToJSON as TJSONObject;
+    try
+      Assert.AreEqual('compile', LJSON.GetValue<string>('command'));
+      Assert.AreEqual('Build the helper', LJSON.GetValue<string>('description'));
+      Assert.AreEqual('afterInstall', LJSON.GetValue<string>('event'));
+      // The args are preserved verbatim, including the nested object.
+      Assert.AreEqual('Helper.dproj', LJSON.GetValue<string>('args.projectFile'));
+      Assert.AreEqual('Win64', LJSON.GetValue<string>('args.platforms[1]'));
+    finally
+      LJSON.Free;
+    end;
+  finally
+    LScript.Free;
+  end;
+end;
+
+procedure TScriptRunnerTest.TestManifestSerializationThroughFramework;
+begin
+  // Exercise the *real* serialization path: a script inside the manifest goes
+  // through TJsonSerializer, which detects the FromJSON/ToJSON pair and calls
+  // TManifestScript.ToJSON. Verifies no AV / leak and that args survive.
+  var LScript := TManifestScript.Create;
+  LScript.FromJSONString(
+      '''
+      {
+        "command": "compile",
+        "event": "afterInstall",
+        "args": { "projectFile": "Helper.dproj", "platforms": ["Win32"] }
+      }
+      '''
+  );
+  FManifest.Scripts.Add(LScript);
+
+  var LText := TJsonHelper.ObjectToJSONString(FManifest);
+
+  Assert.Contains(LText, '"command":"compile"');
+  Assert.Contains(LText, '"projectFile":"Helper.dproj"');
+end;
+
+procedure TScriptRunnerTest.TestEventBoundCommandRegistersItsArgumentsClass;
+begin
+  // Registering through the events overload (as copyres/compile/expert do) must
+  // still wire up the [ScriptManifest(...)] args class, not just the command.
+  TScriptCommand.RegisterCommand('compiletest', TCompileCommand, [TScriptRunner.EventAfterInstall]);
+
+  var LScript := TManifestScript.Create;
+  try
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "compiletest",
+          "event": "afterInstall",
+          "args": { "projectFile": "x.dproj", "platforms": ["Win32"] }
+        }
+        '''
+    );
+    Assert.IsTrue(
+        LScript.Args is TManifestCompileArguments,
+        'args should decode to TManifestCompileArguments, got ' + LScript.Args.ClassName
+    );
+  finally
+    LScript.Free;
+  end;
+end;
+
+{ TManifestFakeArguments }
+
+constructor TManifestFakeArguments.Create(AValue: TJSONValue);
+begin
+  inherited;
+  FValue := '';
+  if AValue is TJSONString then
+  begin
+    FValue := AValue.Value;
+    Exit;
+  end;
+end;
+
 initialization
+  // The app registers the built-in commands from Blocks.dpr; the test exe must
+  // do the same so tests can use 'copyres', 'compile', etc.
+  RegisterScripts;
+
+  TScriptCommand.RegisterCommand('fake', TFakeCommand, [TScriptRunner.EventAfterCompile]);
+  TManifest.RegisterScriptManifest('fake', TManifestFakeArguments);
+
+  // A dedicated command kept bound to afterCompile; 'fake' is re-registered
+  // unbound by TestCustomCommandIsRegisteredAndRun, so it can't test binding.
+  TScriptCommand.RegisterCommand('boundfake', TFakeCommand, [TScriptRunner.EventAfterCompile]);
+  TManifest.RegisterScriptManifest('boundfake', TManifestFakeArguments);
+
   TDUnitX.RegisterTestFixture(TScriptRunnerTest);
 
 end.

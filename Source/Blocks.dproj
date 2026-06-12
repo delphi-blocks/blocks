@@ -75,7 +75,7 @@
         <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProgramID=com.embarcadero.$(MSBuildProjectName);ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <Manifest_File>(None)</Manifest_File>
         <AppDPIAwarenessMode>none</AppDPIAwarenessMode>
-        <Debugger_RunParams>search libfoo</Debugger_RunParams>
+        <Debugger_RunParams>install davidlastrucci.Trysil</Debugger_RunParams>
         <Debugger_CWD>C:\Progetti\DelphiBlocks\Demo\Workspace</Debugger_CWD>
     </PropertyGroup>
     <ItemGroup>

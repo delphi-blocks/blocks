@@ -140,6 +140,76 @@ type
     property Folders: TManifestPackageFolders read FFolders;
   end;
 
+  /// <summary>Base class for the typed <c>args</c> of a manifest script. Each
+  ///   command name maps to a concrete subclass via
+  ///   <see cref="TManifest.RegisterScriptManifest"/>; the subclass constructor
+  ///   decodes the raw <c>args</c> JSON (which may be a string, object, array or
+  ///   absent) into strongly-typed properties. Commands retrieve their own type
+  ///   through <see cref="GetAs"/>.</summary>
+  TManifestScriptArguments = class
+  private
+    FJSONValue: TJSONValue;
+  public
+    /// <summary>Casts these arguments to the concrete type the command expects,
+    ///   raising <c>EManfestError</c> when the instance is nil (i.e. the script
+    ///   declared no <c>args</c>). Lets a command fail with a clear message
+    ///   instead of dereferencing nil.</summary>
+    function GetAs<T: class>(): T;
+    /// <summary>Decodes <paramref name="AValue"/> (the raw <c>args</c> JSON node,
+    ///   possibly nil) into typed fields, and keeps a private clone of it for
+    ///   <see cref="JSONValue"/>. Subclasses override to parse their own shape.</summary>
+    constructor Create(AValue: TJSONValue); virtual;
+    destructor Destroy; override;
+
+    /// <summary>The raw <c>args</c> JSON node these arguments were decoded from,
+    ///   as a clone owned by this object. Lets a script round-trip back to JSON
+    ///   without re-encoding each command's typed fields. Nil when the script
+    ///   declared no <c>args</c>.</summary>
+    property JSONValue: TJSONValue read FJSONValue;
+  end;
+
+  TManifestScriptArgumentsClass = class of TManifestScriptArguments;
+
+  /// <summary>Fallback argument type for commands that take no <c>args</c>.</summary>
+  TManifestNoArguments = class(TManifestScriptArguments);
+
+  /// <summary>Arguments for the <c>compile</c> command. The <c>args</c> JSON is an
+  ///   object: <c>{ "projectFile": "...", "platforms": ["Win32", "Win64"] }</c>.
+  ///   <c>platforms</c> is mandatory.</summary>
+  TManifestCompileArguments = class(TManifestScriptArguments)
+  private
+    FProjectFile: string;
+    FPlatforms: TArray<string>;
+  public
+    property ProjectFile: string read FProjectFile;
+    property Platforms: TArray<string> read FPlatforms;
+
+    constructor Create(AValue: TJSONValue); override;
+  end;
+
+  /// <summary>Arguments for the <c>echo</c> command. The <c>args</c> JSON is a plain
+  ///   string holding the message to print (still subject to <c>$(VAR)</c>
+  ///   expansion at run time).</summary>
+  TManifestEchoArguments = class(TManifestScriptArguments)
+  private
+    FMessage: string;
+  public
+    property Message: string read FMessage;
+
+    constructor Create(AValue: TJSONValue); override;
+  end;
+
+  /// <summary>Arguments for the <c>expert</c> command: the <c>compile</c> arguments
+  ///   plus an optional <c>description</c> used as the registered expert's label
+  ///   (defaults to the <c>.dll</c> file name when empty).</summary>
+  TManifestExpertArguments = class(TManifestCompileArguments)
+  private
+    FDescription: string;
+  public
+    property Description: string read FDescription;
+    constructor Create(AValue: TJSONValue); override;
+  end;
+
   // -----------------------------------------------------------------------
   // A script to run during the install pipeline (e.g. on "afterCompile")
   // -----------------------------------------------------------------------
@@ -148,15 +218,25 @@ type
     FDescription: string;
     FEvent: string;
     FCommand: string;
-    FArgs: TStringList;
+    FArgs: TManifestScriptArguments;
   public
     constructor Create;
     destructor Destroy; override;
 
+    function ToJSON: TJSONValue;
+    /// <summary>Populates the script from a manifest <c>scripts</c> entry. The
+    ///   concrete <see cref="Args"/> type is chosen from <see cref="Command"/> via
+    ///   the registry, so <c>command</c> must be read before <c>args</c>; an
+    ///   unregistered command falls back to <see cref="TManifestNoArguments"/>.</summary>
+    procedure FromJSON(AJSONObject: TJSONValue);
+    procedure FromJSONString(const AValue: string);
+
     property Description: string read FDescription write FDescription;
     property Event: string read FEvent write FEvent;
     property Command: string read FCommand write FCommand;
-    property Args: TStringList read FArgs;
+    /// <summary>Typed arguments, owned by this script. Nil until
+    ///   <see cref="FromJSON"/> runs (a script built by hand has no args).</summary>
+    property Args: TManifestScriptArguments read FArgs;
   end;
 
   // -----------------------------------------------------------------------
@@ -200,11 +280,23 @@ type
     FHomepage: string;
     FAuthor: string;
     FKeywords: TStringList;
+  private
+    class var
+      FRegistry: TDictionary<string, TManifestScriptArgumentsClass>;
   public
     class function GetManifest(const APackageName, APackageVersion: string): TManifest;
     /// <summary>Returns all available versions of a package, sorted ascending.</summary>
     /// <param name="APackageName">Package identifier in the form <c>vendor.name</c>.</param>
     class function GetVersions(const APackageName: string): TArray<TSemVer>;
+    /// <summary>Maps a script command name to the class that decodes its <c>args</c>.
+    ///   Built-in commands register in this unit's <c>initialization</c>; the test
+    ///   suite registers its own. Keep in sync with the command registry in
+    ///   <c>Blocks.Service.Script</c>.</summary>
+    class procedure RegisterScriptManifest(const AName: string; AClass: TManifestScriptArgumentsClass);
+
+    class constructor Create;
+    class destructor Destroy;
+
   public
     constructor Create;
     destructor Destroy; override;
@@ -419,13 +511,59 @@ end;
 constructor TManifestScript.Create;
 begin
   inherited Create;
-  FArgs := TStringList.Create;
+  FArgs := nil;
 end;
 
 destructor TManifestScript.Destroy;
 begin
   FArgs.Free;
   inherited;
+end;
+
+procedure TManifestScript.FromJSON(AJSONObject: TJSONValue);
+var
+  LArguments: TJSONValue;
+begin
+  if not Assigned(AJSONObject) then
+    Exit;
+
+  FCommand := AJSONObject.GetValue<string>('command');
+  FDescription := AJSONObject.GetValue<string>('description', '');
+  FEvent := AJSONObject.GetValue<string>('event');
+
+  if not AJSONObject.TryGetValue<TJSONValue>('args', LArguments) then
+    LArguments := nil;
+
+  var LScriptArgumentsClass: TManifestScriptArgumentsClass;
+  if not TManifest.FRegistry.TryGetValue(FCommand, LScriptArgumentsClass) then
+    LScriptArgumentsClass := TManifestNoArguments;
+
+  FreeAndNil(FArgs);
+  FArgs := LScriptArgumentsClass.Create(LArguments);
+end;
+
+procedure TManifestScript.FromJSONString(const AValue: string);
+begin
+  var LJSONValue := TJSONObject.ParseJSONValue(AValue, True, True);
+  try
+    FromJSON(LJSONValue);
+  finally
+    LJSONValue.Free;
+  end;
+end;
+
+function TManifestScript.ToJSON: TJSONValue;
+begin
+  var LResult := TJSONObject.Create;
+  LResult.AddPair('command', FCommand);
+  if FDescription <> '' then
+    LResult.AddPair('description', FDescription);
+  LResult.AddPair('event', FEvent);
+  // The args are stored verbatim; clone so the result owns its copy and the
+  // arguments object keeps ownership of its own JSONValue.
+  if Assigned(FArgs) and Assigned(FArgs.JSONValue) then
+    LResult.AddPair('args', FArgs.JSONValue.Clone as TJSONValue);
+  Result := LResult;
 end;
 
 { TManifestScriptList }
@@ -447,6 +585,11 @@ begin
   FPackageOptions := TManifestPackageOptions.Create;
   FDependencies := TDependencyMap.Create;
   FScripts := TManifestScriptList.Create;
+end;
+
+class constructor TManifest.Create;
+begin
+  FRegistry := TDictionary<string, TManifestScriptArgumentsClass>.Create;
 end;
 
 destructor TManifest.Destroy;
@@ -489,6 +632,16 @@ begin
   end;
 
   Result := False;
+end;
+
+class procedure TManifest.RegisterScriptManifest(const AName: string; AClass: TManifestScriptArgumentsClass);
+begin
+  FRegistry.AddOrSetValue(AName, AClass);
+end;
+
+class destructor TManifest.Destroy;
+begin
+  FRegistry.Free;
 end;
 
 class function TManifest.GetManifest(const APackageName, APackageVersion: string): TManifest;
@@ -713,6 +866,71 @@ begin
   for var LEntry in FEntries do
     if SameText(LEntry.Name, AName) then
       Result := Result + [LEntry];
+end;
+
+{ TManifestCompileArguments }
+
+constructor TManifestCompileArguments.Create(AValue: TJSONValue);
+begin
+  inherited;
+  if not Assigned(AValue) or (AValue is not TJSONObject) then
+    Exit;
+
+  FProjectFile := AValue.GetValue<string>('projectFile', '');
+  FPlatforms := [];
+
+  var LPlatforms := AValue.GetValue<TJSONArray>('platforms', nil);
+  if not Assigned(LPlatforms) then
+    raise Exception.Create('Manifest error: platform required for "compile" and "expert" script');
+  for var LPlatform in LPlatforms do
+  begin
+    FPlatforms := FPlatforms + [LPlatform.Value];
+  end;
+end;
+
+{ TManifestScriptArguments }
+
+constructor TManifestScriptArguments.Create(AValue: TJSONValue);
+begin
+  inherited Create;
+  // Keep our own copy: the caller (FromJSON) owns AValue and frees it once
+  // parsing is done, but ToJSON needs it later to rebuild the script's JSON.
+  if Assigned(AValue) then
+    FJSONValue := AValue.Clone as TJSONValue;
+end;
+
+destructor TManifestScriptArguments.Destroy;
+begin
+  FJSONValue.Free;
+  inherited;
+end;
+
+function TManifestScriptArguments.GetAs<T>: T;
+begin
+  if not Assigned(Self) then
+    raise EManfestError.Create('Invalid arguments');
+  Result := Self as T;
+end;
+
+{ TManifestEchoArguments }
+
+constructor TManifestEchoArguments.Create(AValue: TJSONValue);
+begin
+  inherited;
+  if not Assigned(AValue) or (AValue is not TJSONString) then
+    Exit;
+
+  FMessage := (AValue as TJSONString).Value;
+end;
+
+{ TManifestExpertArguments }
+
+constructor TManifestExpertArguments.Create(AValue: TJSONValue);
+begin
+  inherited;
+  if not Assigned(AValue) or (AValue is not TJSONObject) then
+    Exit;
+  FDescription := AValue.GetValue<string>('description', '');
 end;
 
 end.

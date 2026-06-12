@@ -81,7 +81,7 @@ which other packages are required.
 | `repository.type` | Source repository type: `github`, `bitbucket`, or `local`. |
 | `repository.url` | Repository URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. For `github` use a tree URL (`https://github.com/owner/repo/tree/<ref>`), for `bitbucket` a src URL (`https://bitbucket.org/owner/repo/src/<ref>`), for `local` a filesystem path. |
 | `platforms` | Per-platform `sourcePath` (registered in the Delphi "Browsing Path") and optional `releaseDCUPath` / `debugDCUPath`. Set `runtimeOnly: true` to skip design-time packages when installing that platform. |
-| `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. A `name` may contain the `%PACKAGE_VERSION%` placeholder — see below. An optional `products` list restricts the package to specific Delphi versions — see below. |
+| `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. A `name` may contain the `$(PACKAGE_VERSION)` placeholder — see below. An optional `products` list restricts the package to specific Delphi versions — see below. |
 | `packageOptions.rootFolder` | Directory (relative to the project root) that contains the package folders. Defaults to `packages`. |
 | `packageOptions.folders` | Maps Delphi version keys to the subfolder under `rootFolder` containing the `.dproj` files. A `+` suffix means "this version or newer". An entry of `.` (or an empty/absent `folders` map) means the `.dproj` files live directly under `rootFolder`, with no per-version subfolder. |
 | `dependencies` | Other packages that must be installed first, with their version constraints. See [versioning.md](versioning.md). |
@@ -95,12 +95,12 @@ Some libraries name their `.dproj` files with the Delphi **package-version suffi
 per Delphi version.
 
 To cover them all with a single manifest, a package `name` may contain the
-`%PACKAGE_VERSION%` placeholder. When compiling, Blocks replaces it with the
+`$(PACKAGE_VERSION)` placeholder. When compiling, Blocks replaces it with the
 package-version suffix of the **active** Delphi version before locating the
 `.dproj`:
 
-| Delphi version | `%PACKAGE_VERSION%` |
-|----------------|---------------------|
+| Delphi version | `$(PACKAGE_VERSION)` |
+|----------------|----------------------|
 | `delphixe6`    | `200` |
 | `delphixe7`    | `210` |
 | `delphixe8`    | `220` |
@@ -115,8 +115,8 @@ package-version suffix of the **active** Delphi version before locating the
 
 ```jsonc
 "packages": [
-  { "name": "Trysil%PACKAGE_VERSION%",       "type": ["runtime"] },
-  { "name": "Trysil.JSon%PACKAGE_VERSION%",  "type": ["runtime"] }
+  { "name": "Trysil$(PACKAGE_VERSION)",       "type": ["runtime"] },
+  { "name": "Trysil.JSon$(PACKAGE_VERSION)",  "type": ["runtime"] }
 ],
 "packageOptions": {
   "folders": {
@@ -126,7 +126,7 @@ package-version suffix of the **active** Delphi version before locating the
 }
 ```
 
-The placeholder is case-insensitive and follows the same `%NAME%` convention used
+The placeholder is case-insensitive and follows the same `$(NAME)` convention used
 by [manifest scripts](script.md). It only affects how the `.dproj` is located: the
 compiled `.bpl` / `.dcp` names come from the `.dproj` itself and are unchanged.
 
@@ -158,7 +158,7 @@ Rules:
   newer one*.
 
 Version names are the internal `delphi*` identifiers listed in the
-`%PACKAGE_VERSION%` table above. When a package does not support the Delphi version
+`$(PACKAGE_VERSION)` table above. When a package does not support the Delphi version
 being installed, Blocks skips it everywhere in the pipeline: it is not compiled, no
 design-time package is registered, and no library paths are added (or removed on
 uninstall).

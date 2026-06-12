@@ -33,6 +33,7 @@ begin
   try
     CoInitialize(nil);
     try
+      RegisterScripts;
       TApp.RunBlocks;
     finally
       CoUninitialize;

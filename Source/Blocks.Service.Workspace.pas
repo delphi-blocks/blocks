@@ -191,7 +191,7 @@ begin
     LEnv.Values['WORKSPACE_PATH'] := AWorkspaceDir;
     LEnv.Values['PROJECT_PATH'] := AProjectDir;
     // The package-version suffix lets scripts target .dproj names that embed it
-    // (e.g. %PACKAGE_VERSION% in the "compile" command's path).
+    // (e.g. $(PACKAGE_VERSION) in the "compile" command's path).
     LEnv.Values['PACKAGE_VERSION'] := AProduct.PackageVersionSuffix;
     // AProduct implements IScriptHelper, giving commands like "compile" a compiler.
     TScriptRunner.RunEvent(AManifest, AEvent, LEnv, AProduct);

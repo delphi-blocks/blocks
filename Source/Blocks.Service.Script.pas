@@ -17,11 +17,21 @@ interface
 uses
   System.Classes,
   System.SysUtils,
+  System.Rtti,
   System.Generics.Collections,
   Blocks.Model.Manifest;
 
 type
   EScriptError = class(Exception)
+  end;
+
+  ScriptManifestAttribute = class(TCustomAttribute)
+  private
+    FManifestArgumentsClass: TManifestScriptArgumentsClass;
+  public
+    property ManifestArgumentsClass: TManifestScriptArgumentsClass
+        read FManifestArgumentsClass write FManifestArgumentsClass;
+    constructor Create(AManifestArgumentsClass: TManifestScriptArgumentsClass);
   end;
 
   // -----------------------------------------------------------------------
@@ -90,31 +100,42 @@ type
     /// <param name="AHelper">Host services (e.g. compilation); may be <c>nil</c> when
     ///   the firing event provides none. Commands that need it must guard.</param>
     /// <param name="AManifest">The owning manifest, for commands that inspect it.</param>
-    /// <param name="AArgs">The script args, already <c>%VAR%</c>-expanded.</param>
+    /// <param name="AArgs">Typed script args (the right subclass for this command).
+    ///   Not pre-expanded: each command expands the <c>$(VAR)</c> macros in the fields
+    ///   it actually uses against <paramref name="AEnvironmentVariables"/>.</param>
     /// <param name="AEnvironmentVariables">The event variables (name=value pairs).</param>
     procedure Run(
         AHelper: IScriptHelper;
         AManifest: TManifest;
-        AArgs, AEnvironmentVariables: TStrings
+        AArgs: TManifestScriptArguments;
+        AEnvironmentVariables: TStrings
     ); virtual; abstract;
   end;
 
   // -----------------------------------------------------------------------
-  // Built-in command: prints the (already expanded) args as one line.
+  // Built-in command: prints its message arg (after $(VAR) expansion) to the
+  // console. Valid for any event.
   // -----------------------------------------------------------------------
+  [ScriptManifest(TManifestEchoArguments)]
   TEchoCommand = class(TScriptCommand)
   public
-    procedure Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings); override;
+    procedure Run(
+        AHelper: IScriptHelper;
+        AManifest: TManifest;
+        AArgs: TManifestScriptArguments;
+        AEnvironmentVariables: TStrings
+    ); override;
   end;
 
   // -----------------------------------------------------------------------
-  // Built-in command (install events): compiles the project named by its first
-  // argument (resolved against %PROJECT_PATH% when relative), always in Release.
-  // A "/p:plat1,plat2" option lists the platforms to build (every one whose
+  // Built-in command (install events): compiles the project given by
+  // args.projectFile (resolved against $(PROJECT_PATH) when relative), always in
+  // Release. args.platforms lists the platforms to build (only those whose
   // compiler is installed; default Win32). Requires a compiler, supplied through
   // IScriptHelper. The compile loop calls AfterPlatformCompiled after each
   // successful platform; subclasses override it to add post-build steps.
   // -----------------------------------------------------------------------
+  [ScriptManifest(TManifestCompileArguments)]
   TCompileCommand = class(TScriptCommand)
   protected
     /// <summary>Hook run after a platform is successfully compiled. Base: no-op.</summary>
@@ -122,10 +143,16 @@ type
     procedure AfterPlatformCompiled(
         AHelper: IScriptHelper;
         AManifest: TManifest;
+        AArgs: TManifestScriptArguments;
         const AProjectFile, AWorkspaceDir, APlatform: string
     ); virtual;
   public
-    procedure Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings); override;
+    procedure Run(
+        AHelper: IScriptHelper;
+        AManifest: TManifest;
+        AArgs: TManifestScriptArguments;
+        AEnvironmentVariables: TStrings
+    ); override;
   end;
 
   // -----------------------------------------------------------------------
@@ -133,23 +160,31 @@ type
   // "compile", but each compiled platform's output is treated as an IDE expert
   // .dll and registered via IScriptHelper, so the IDE loads it on next start.
   // -----------------------------------------------------------------------
+  [ScriptManifest(TManifestExpertArguments)]
   TExpertCommand = class(TCompileCommand)
   protected
     procedure AfterPlatformCompiled(
         AHelper: IScriptHelper;
         AManifest: TManifest;
+        AArgs: TManifestScriptArguments;
         const AProjectFile, AWorkspaceDir, APlatform: string
     ); override;
   end;
 
   // -----------------------------------------------------------------------
   // Built-in command (afterCompile): copies every .res and .dfm found under the
-  // current platform's source paths into %DCU_PATH%, so the compiled DCUs sit next
-  // to their resources. Bound to afterCompile, where %DCU_PATH% is defined.
+  // current platform's source paths into $(DCU_PATH), so the compiled DCUs sit next
+  // to their resources. Bound to afterCompile, where $(DCU_PATH) is defined.
   // -----------------------------------------------------------------------
+  [ScriptManifest(TManifestNoArguments)]
   TCopyResCommand = class(TScriptCommand)
   public
-    procedure Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings); override;
+    procedure Run(
+        AHelper: IScriptHelper;
+        AManifest: TManifest;
+        AArgs: TManifestScriptArguments;
+        AEnvironmentVariables: TStrings
+    ); override;
   end;
 
   // -----------------------------------------------------------------------
@@ -168,8 +203,9 @@ type
       EventBeforeUninstall = 'beforeUninstall';
       EventAfterUninstall = 'afterUninstall';
   public
-    /// <summary>Runs a single manifest script: expands the <c>%VAR%</c> macros on
-    ///   command and args, resolves the command by name and runs it.</summary>
+    /// <summary>Runs a single manifest script: expands the <c>$(VAR)</c> macros on the
+    ///   command name, resolves the command by name and runs it. The command expands
+    ///   the macros in its own typed args.</summary>
     /// <param name="AManifest">The owning manifest, made available to the command
     ///   (e.g. to inspect packages or platforms).</param>
     /// <param name="AScript">The script configuration to execute.</param>
@@ -199,6 +235,8 @@ type
         AHelper: IScriptHelper = nil
     ); static;
   end;
+
+procedure RegisterScripts;
 
 implementation
 
@@ -241,6 +279,18 @@ begin
   for var I := 0 to High(AEvents) do
     LRegistration.Events[I] := AEvents[I];
   FRegistry.AddOrSetValue(AName, LRegistration);
+
+  // Keep the model-side args registry in sync from this same call (both
+  // overloads funnel here): the [ScriptManifest(...)] attribute pairs the
+  // command with the class that decodes its "args".
+  var LRttiContext := TRttiContext.Create;
+  try
+    var LRttiType := LRttiContext.GetType(AClass);
+    if LRttiType.HasAttribute(ScriptManifestAttribute) then
+      TManifest.RegisterScriptManifest(AName, LRttiType.GetAttribute<ScriptManifestAttribute>.ManifestArgumentsClass);
+  finally
+    LRttiContext.Free;
+  end;
 end;
 
 class function TScriptCommand.FindRegistration(const AName: string; out ARegistration: TRegistration): Boolean;
@@ -281,10 +331,16 @@ end;
 
 { TEchoCommand }
 
-procedure TEchoCommand.Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings);
+procedure TEchoCommand.Run(
+    AHelper: IScriptHelper;
+    AManifest: TManifest;
+    AArgs: TManifestScriptArguments;
+    AEnvironmentVariables: TStrings
+);
 begin
-  // The args are already %VAR%-expanded by TScriptRunner; join them into one message.
-  TConsole.WriteLine(string.Join(' ', AArgs.ToStringArray));
+  var LMessagePattern := AArgs.GetAs<TManifestEchoArguments>().Message;
+  var LMessage := ExpandVariables(LMessagePattern, AEnvironmentVariables);
+  TConsole.WriteLine(LMessage);
 end;
 
 { TCompileCommand }
@@ -292,21 +348,29 @@ end;
 procedure TCompileCommand.AfterPlatformCompiled(
     AHelper: IScriptHelper;
     AManifest: TManifest;
+    AArgs: TManifestScriptArguments;
     const AProjectFile, AWorkspaceDir, APlatform: string
 );
 begin
   // Base command only compiles; nothing to do after a platform builds.
 end;
 
-procedure TCompileCommand.Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings);
+procedure TCompileCommand.Run(
+    AHelper: IScriptHelper;
+    AManifest: TManifest;
+    AArgs: TManifestScriptArguments;
+    AEnvironmentVariables: TStrings
+);
 begin
-  if AArgs.Count < 1 then
+  var LCompileArgs := AArgs.GetAs<TManifestCompileArguments>;
+
+  var LProjectFile := ExpandVariables(LCompileArgs.ProjectFile, AEnvironmentVariables);
+  if LProjectFile = '' then
     raise EScriptError.Create('compile: missing project file argument');
   if AHelper = nil then
     raise EScriptError.Create('compile: no compiler available for this event');
 
-  var LProjectFile := AArgs[0];
-  // The path is relative to the extracted project; %PROJECT_PATH% is exposed for
+  // The path is relative to the extracted project; $(PROJECT_PATH) is exposed for
   // install events. Absolute paths are honoured as given.
   var LProjectPath := AEnvironmentVariables.Values['PROJECT_PATH'];
   if TPath.IsRelativePath(LProjectFile) and (LProjectPath <> '') then
@@ -317,14 +381,7 @@ begin
 
   var LWorkspace := AEnvironmentVariables.Values['WORKSPACE_PATH'];
 
-  // Platforms come from a "/p:plat1,plat2" option (e.g. "/p:win32,win64");
-  // with none given, default to Win32 (the usual target for an IDE expert).
-  var LPlatforms: TArray<string> := [];
-  for var I := 1 to AArgs.Count - 1 do
-    if AArgs[I].StartsWith('/p:', True) then
-      for var LPlat in AArgs[I].Substring(3).Split([',']) do
-        if LPlat.Trim <> '' then
-          LPlatforms := LPlatforms + [LPlat.Trim];
+  var LPlatforms := LCompileArgs.Platforms;
   if Length(LPlatforms) = 0 then
     LPlatforms := ['Win32'];
 
@@ -347,7 +404,7 @@ begin
     TConsole.WriteLine(' OK', clGreen);
     LCompiled := True;
 
-    AfterPlatformCompiled(AHelper, AManifest, LProjectFile, LWorkspace, LPlatform);
+    AfterPlatformCompiled(AHelper, AManifest, AArgs, LProjectFile, LWorkspace, LPlatform);
   end;
 
   if not LCompiled then
@@ -361,9 +418,12 @@ end;
 procedure TExpertCommand.AfterPlatformCompiled(
     AHelper: IScriptHelper;
     AManifest: TManifest;
+    AArgs: TManifestScriptArguments;
     const AProjectFile, AWorkspaceDir, APlatform: string
 );
 begin
+  var LDescription := AArgs.GetAs<TManifestExpertArguments>.Description;
+
   // The expert .dll lands in the DCU output dir (DCC_ExeOutput mirrors it):
   // <workspace>\.blocks\lib\<manifest name>\<platform>, named after the .dproj.
   var LExpertDll :=
@@ -378,19 +438,27 @@ begin
           ]
       );
   TConsole.Write(Format('  Registering expert %s [%s]...', [TPath.GetFileName(LExpertDll), APlatform]));
-  AHelper.RegisterExpert(LExpertDll, TPath.GetFileName(LExpertDll), APlatform);
+  if LDescription = '' then
+    LDescription := TPath.GetFileName(LExpertDll);
+
+  AHelper.RegisterExpert(LExpertDll, LDescription, APlatform);
 end;
 
 { TCopyResCommand }
 
-procedure TCopyResCommand.Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings);
+procedure TCopyResCommand.Run(
+    AHelper: IScriptHelper;
+    AManifest: TManifest;
+    AArgs: TManifestScriptArguments;
+    AEnvironmentVariables: TStrings
+);
 begin
   var LPlatform := AEnvironmentVariables.Values['PLATFORM'];
   var LProjectPath := AEnvironmentVariables.Values['PROJECT_PATH'];
   var LDcuPath := AEnvironmentVariables.Values['DCU_PATH'];
 
   if LDcuPath = '' then
-    raise EScriptError.Create('copyres: %DCU_PATH% is not set');
+    raise EScriptError.Create('copyres: $(DCU_PATH) is not set');
 
   // Source paths are declared per platform; nothing to do if this platform is absent.
   var LPlatformManifest: TManifestPlatform;
@@ -428,22 +496,14 @@ class procedure TScriptRunner.Execute(
 begin
   var LCommandName := ExpandVariables(AScript.Command, AEnvironmentVariables);
 
-  var LArgs := TStringList.Create;
+  // Reject commands that declare a set of events they support but exclude this one.
+  TScriptCommand.ValidateEvent(LCommandName, AScript.Event);
+
+  var LCommand := TScriptCommand.Create(LCommandName);
   try
-    for var LArg in AScript.Args do
-      LArgs.Add(ExpandVariables(LArg, AEnvironmentVariables));
-
-    // Reject commands that declare a set of events they support but exclude this one.
-    TScriptCommand.ValidateEvent(LCommandName, AScript.Event);
-
-    var LCommand := TScriptCommand.Create(LCommandName);
-    try
-      LCommand.Run(AHelper, AManifest, LArgs, AEnvironmentVariables);
-    finally
-      LCommand.Free;
-    end;
+    LCommand.Run(AHelper, AManifest, AScript.Args, AEnvironmentVariables);
   finally
-    LArgs.Free;
+    LCommand.Free;
   end;
 end;
 
@@ -459,12 +519,22 @@ begin
       Execute(AManifest, LScript, AEnvironmentVariables, AHelper);
 end;
 
-initialization
+procedure RegisterScripts;
+begin
   TScriptCommand.RegisterCommand('echo', TEchoCommand);
   TScriptCommand.RegisterCommand('copyres', TCopyResCommand, [TScriptRunner.EventAfterCompile]);
   TScriptCommand
       .RegisterCommand('compile', TCompileCommand, [TScriptRunner.EventBeforeInstall, TScriptRunner.EventAfterInstall]);
   TScriptCommand
       .RegisterCommand('expert', TExpertCommand, [TScriptRunner.EventBeforeInstall, TScriptRunner.EventAfterInstall]);
+end;
+
+{ ScriptManifestAttribute }
+
+constructor ScriptManifestAttribute.Create(AManifestArgumentsClass: TManifestScriptArgumentsClass);
+begin
+  inherited Create;
+  FManifestArgumentsClass := AManifestArgumentsClass;
+end;
 
 end.

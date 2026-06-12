@@ -146,7 +146,7 @@ type
     ///   <c>.dproj</c> files live directly under the root folder).</returns>
     function GetPackagesPath(const AProjectDir: string; AManifest: TManifest): string;
 
-    /// <summary>Expands the <c>%PACKAGE_VERSION%</c> placeholder in a manifest
+    /// <summary>Expands the <c>$(PACKAGE_VERSION)</c> placeholder in a manifest
     ///   package name to this product's package-version suffix (e.g. <c>370</c>
     ///   for <c>delphi13</c>), so a single manifest can target packages whose
     ///   <c>.dproj</c> name embeds that suffix. Case-insensitive; names without
@@ -254,7 +254,7 @@ type
     /// <summary>Internal version name used in file paths and registry lookups (e.g. <c>delphi12</c>).</summary>
     property VersionName: string read FVersionName;
     /// <summary>Package-version suffix for this IDE (e.g. <c>370</c> for <c>delphi13</c>), the value
-    ///   that replaces the <c>%PACKAGE_VERSION%</c> placeholder.</summary>
+    ///   that replaces the <c>$(PACKAGE_VERSION)</c> placeholder.</summary>
     property PackageVersionSuffix: string read FPackageVersion;
     /// <summary>Human-readable IDE display name (e.g. <c>Delphi 12 Athens</c>).</summary>
     property DisplayName: string read FDisplayName;
@@ -451,9 +451,9 @@ end;
 
 // Runs the manifest scripts registered for a compile event (beforeCompile /
 // afterCompile) for a single package, build config and platform. The per-config
-// output paths are exposed through %DCU_PATH% / %BPL_PATH% / %DCP_PATH%, mirroring
-// the layout produced by TProduct.BuildPackages, plus %PACKAGE% / %PLATFORM% /
-// %CONFIG% for the current compilation.
+// output paths are exposed through $(DCU_PATH) / $(BPL_PATH) / $(DCP_PATH), mirroring
+// the layout produced by TProduct.BuildPackages, plus $(PACKAGE) / $(PLATFORM) /
+// $(CONFIG) for the current compilation.
 procedure RunCompileScripts(
     const AManifest: TManifest;
     const AEvent, AWorkspaceDir, AProjectDir, APlatform, AConfig, APackage: string;
@@ -1205,8 +1205,8 @@ end;
 
 function TProduct.ExpandPackageName(const AName: string): string;
 begin
-  // Reuses the shared variable expansion (the %NAME% / $(NAME) syntaxes) used by
-  // manifest scripts; here only %PACKAGE_VERSION% is exposed.
+  // Reuses the shared variable expansion ($(NAME), with the legacy %NAME% still
+  // accepted) used by manifest scripts; here only $(PACKAGE_VERSION) is exposed.
   var LVariables := TStringList.Create;
   try
     LVariables.Values['PACKAGE_VERSION'] := FPackageVersion;
@@ -1603,8 +1603,8 @@ begin
 
     for var LPackage in AManifest.Packages do
     begin
-      // Manifest package names may embed the %PACKAGE_VERSION% placeholder
-      // (e.g. "Trysil%PACKAGE_VERSION%") so a single manifest can target
+      // Manifest package names may embed the $(PACKAGE_VERSION) placeholder
+      // (e.g. "Trysil$(PACKAGE_VERSION)") so a single manifest can target
       // packages whose .dproj name embeds the Delphi package-version suffix.
       var PkgName := ExpandPackageName(LPackage.Name);
       var TypeStr := string.Join(', ', LPackage.&Type.ToStringArray);

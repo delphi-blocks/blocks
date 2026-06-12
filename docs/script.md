@@ -21,7 +21,7 @@ lifecycle **event**, with optional **args**:
     "description": "Tell the user where the DCUs went",
     "event": "afterCompile",
     "command": "echo",
-    "args": ["Compiled %PACKAGE% for %PLATFORM%/%CONFIG% into %DCU_PATH%"]
+    "args": "Compiled $(PACKAGE) for $(PLATFORM)/$(CONFIG) into $(DCU_PATH)"
   }
 ]
 ```
@@ -31,16 +31,18 @@ lifecycle **event**, with optional **args**:
 | `command`     | yes      | Name of the built-in command to run (see [Commands](#commands)).   |
 | `event`       | yes      | Lifecycle event the script is bound to (see [Events](#events)).    |
 | `description` | no       | Free-text label, for humans.                                       |
-| `args`        | no       | List of string arguments passed to the command.                    |
+| `args`        | no       | Arguments for the command. **The shape is command-specific** — a string for `echo`, an object for `compile`/`expert`. See each command below. |
 
 Scripts run **in declaration order** for a given event. A script whose `event`
 does not match any fired event never runs.
 
 ## Variable expansion
 
-Before a command runs, every `%VAR%` placeholder in its `command` and in each
-`args` entry is replaced with the value of the corresponding event variable.
-**Unknown variables expand to an empty string.**
+Before a command uses an argument, every `$(VAR)` placeholder in it — and in the
+script's `command` — is replaced with the value of the corresponding event
+variable. **Unknown variables expand to an empty string.** Each command decides
+which of its arguments are expanded (e.g. `echo` expands its message, `compile`
+expands its `projectFile`).
 
 The set of available variables depends on the event:
 
@@ -49,27 +51,27 @@ The set of available variables depends on the event:
 These fire **once per package**, for each platform and build config, so the
 output paths point at the exact location that compilation used.
 
-| Variable           | Value                                                                 |
-|--------------------|-----------------------------------------------------------------------|
-| `%PACKAGE%`        | Name of the package (`.dproj`) being compiled.                        |
-| `%PLATFORM%`       | Target platform, e.g. `Win32`, `Win64`.                               |
-| `%CONFIG%`         | Build config, `Debug` or `Release`.                                   |
-| `%WORKSPACE_PATH%` | Workspace root directory.                                             |
-| `%PROJECT_PATH%`   | Extracted project directory (`<workspace>\<package name>`).           |
-| `%BPL_PATH%`       | BPL output dir (`<workspace>\.blocks\<platform>\bpl[\debug]`).        |
-| `%DCP_PATH%`       | DCP output dir (`<workspace>\.blocks\<platform>\dcp[\debug]`).        |
-| `%DCU_PATH%`       | DCU output dir (`<workspace>\.blocks\lib\<name>\<platform>[\debug]`). |
+| Variable             | Value                                                                 |
+|----------------------|-----------------------------------------------------------------------|
+| `$(PACKAGE)`         | Name of the package (`.dproj`) being compiled.                        |
+| `$(PLATFORM)`        | Target platform, e.g. `Win32`, `Win64`.                               |
+| `$(CONFIG)`          | Build config, `Debug` or `Release`.                                   |
+| `$(WORKSPACE_PATH)`  | Workspace root directory.                                             |
+| `$(PROJECT_PATH)`    | Extracted project directory (`<workspace>\<package name>`).           |
+| `$(BPL_PATH)`        | BPL output dir (`<workspace>\.blocks\<platform>\bpl[\debug]`).        |
+| `$(DCP_PATH)`        | DCP output dir (`<workspace>\.blocks\<platform>\dcp[\debug]`).        |
+| `$(DCU_PATH)`        | DCU output dir (`<workspace>\.blocks\lib\<name>\<platform>[\debug]`). |
 
 ### Install / uninstall events (`beforeInstall`, `afterInstall`, `beforeUninstall`, `afterUninstall`)
 
 These fire **once per manifest**. Only workspace- and project-level paths are
 meaningful at this stage:
 
-| Variable             | Value                                                              |
-|----------------------|--------------------------------------------------------------------|
-| `%WORKSPACE_PATH%`   | Workspace root directory.                                          |
-| `%PROJECT_PATH%`     | Extracted project directory.                                       |
-| `%PACKAGE_VERSION%`  | Package-version suffix of the target IDE (e.g. `370` for Delphi 13). |
+| Variable              | Value                                                              |
+|-----------------------|--------------------------------------------------------------------|
+| `$(WORKSPACE_PATH)`   | Workspace root directory.                                          |
+| `$(PROJECT_PATH)`     | Extracted project directory.                                       |
+| `$(PACKAGE_VERSION)`  | Package-version suffix of the target IDE (e.g. `370` for Delphi 13). |
 
 ## Events
 
@@ -85,8 +87,8 @@ meaningful at this stage:
 Notes:
 
 - Compile events run for every platform **and** for both `Debug` and `Release`
-  configs, so a script may run several times with different `%CONFIG%` /
-  `%PLATFORM%` / output paths.
+  configs, so a script may run several times with different `$(CONFIG)` /
+  `$(PLATFORM)` / output paths.
 - Because `Install` resolves dependencies recursively, every manifest in the
   dependency tree fires its own install/uninstall events.
 - Install/uninstall events only fire when the operation actually proceeds (for
@@ -100,21 +102,21 @@ an error.
 
 ### `echo`
 
-Prints its arguments (after variable expansion), joined by a single space, to
-the console. Valid for any event.
+Prints its message (after variable expansion) to the console. `args` is a single
+string. Valid for any event.
 
 ```json
-{ "event": "afterInstall", "command": "echo", "args": ["Installed into %PROJECT_PATH%"] }
+{ "event": "afterInstall", "command": "echo", "args": "Installed into $(PROJECT_PATH)" }
 ```
 
 ### `copyres`
 
 Copies resource files next to the compiled units. **Bound to `afterCompile`**
-(it needs `%DCU_PATH%`).
+(it needs `$(DCU_PATH)`).
 
 What it does:
 
-1. Reads the current `%PLATFORM%` and looks up that platform's `sourcePath`
+1. Reads the current `$(PLATFORM)` and looks up that platform's `sourcePath`
    entries in the manifest:
 
    ```json
@@ -124,8 +126,8 @@ What it does:
    }
    ```
 
-2. Resolves each `sourcePath` against `%PROJECT_PATH%` (when relative).
-3. Recursively copies every `.res` and `.dfm` found there into `%DCU_PATH%`,
+2. Resolves each `sourcePath` against `$(PROJECT_PATH)` (when relative).
+3. Recursively copies every `.res` and `.dfm` found there into `$(DCU_PATH)`,
    overwriting existing files.
 
 It takes no `args`. Because `afterCompile` fires once per package, `copyres`
@@ -141,12 +143,12 @@ and intentionally produces no extra output.
 Compiles an extra project that the normal package pipeline does not build.
 **Bound to the install events** (`beforeInstall`, `afterInstall`).
 
-Arguments:
+`args` is an object:
 
-| Arg               | Required | Meaning                                                                          |
-|-------------------|----------|----------------------------------------------------------------------------------|
-| 1 (positional)    | yes      | Path to the `.dproj` to build, relative to `%PROJECT_PATH%` (or absolute).        |
-| `/p:<platforms>`  | no       | Comma-separated platform list, e.g. `/p:win32,win64` (default `Win32`).           |
+| Field         | Required | Meaning                                                                    |
+|---------------|----------|----------------------------------------------------------------------------|
+| `projectFile` | yes      | Path to the `.dproj` to build, relative to `$(PROJECT_PATH)` (or absolute).  |
+| `platforms`   | yes      | Array of platforms to build, e.g. `["Win32", "Win64"]`.                     |
 
 The project is always built in the `Release` config. Every listed platform whose
 compiler is actually installed is built; platforms without a compiler are skipped
@@ -156,7 +158,7 @@ unit search path, and `DCC_DcuOutput` / `DCC_ExeOutput` point at
 `.blocks\lib\<manifest name>\<platform>[\debug]`, so the produced binary lands
 next to its DCUs.
 
-Because the args are variable-expanded first, `%PACKAGE_VERSION%` can target a
+Because `projectFile` is variable-expanded first, `$(PACKAGE_VERSION)` can target a
 `.dproj` whose name embeds the IDE package suffix:
 
 ```json
@@ -164,21 +166,30 @@ Because the args are variable-expanded first, `%PACKAGE_VERSION%` can target a
   "description": "Compile the Trysil helper",
   "event": "afterInstall",
   "command": "compile",
-  "args": ["Trysil.Helper\\Trysil.Helper%PACKAGE_VERSION%.dproj", "/p:win32,win64"]
+  "args": {
+    "projectFile": "Trysil.Helper\\Trysil.Helper$(PACKAGE_VERSION).dproj",
+    "platforms": ["Win32", "Win64"]
+  }
 }
 ```
 
 ### `expert`
 
-Same arguments and build behaviour as [`compile`](#compile), but each compiled
-platform's output is treated as a design-time **IDE expert** `.dll` and
-registered so the IDE loads it on next start. Typical use is building an expert
-that depends on the runtime package just installed. **Bound to the install
-events.**
+Same `args` and build behaviour as [`compile`](#compile), plus an optional
+`description` field. Each compiled platform's output is treated as a design-time
+**IDE expert** `.dll` and registered so the IDE loads it on next start. Typical
+use is building an expert that depends on the runtime package just installed.
+**Bound to the install events.**
+
+| Field         | Required | Meaning                                                          |
+|---------------|----------|------------------------------------------------------------------|
+| `projectFile` | yes      | As for [`compile`](#compile).                                    |
+| `platforms`   | yes      | As for [`compile`](#compile).                                    |
+| `description` | no       | Name to register the expert under (defaults to the `.dll` file name). |
 
 After each successful platform build the produced `.dll` (named after the
 `.dproj`, in the output dir described above) is registered: a value named after
-the `.dll` is written under
+the `description` (or the `.dll` file name when omitted) is written under
 `HKCU\Software\Embarcadero\<regkey>\<bdsversion>\Experts` (Win32) or
 `...\Experts x64` (Win64), with the full `.dll` path as its value.
 
@@ -193,7 +204,11 @@ and as the `$(BLOCKSDIR)\lib\<manifest name>\...` macro form).
   "description": "Compile and register the Trysil expert",
   "event": "afterInstall",
   "command": "expert",
-  "args": ["Trysil.Expert\\Trysil.Expert%PACKAGE_VERSION%.dproj", "/p:win32,win64"]
+  "args": {
+    "projectFile": "Trysil.Expert\\Trysil.Expert$(PACKAGE_VERSION).dproj",
+    "platforms": ["Win32", "Win64"],
+    "description": "Trysil IDE Expert"
+  }
 }
 ```
 
