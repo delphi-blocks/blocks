@@ -5,6 +5,7 @@
 - [x] Delphi environment variable BLOCKSDIR
 - [x] Add per package constraints (such as required Delphi version, ...)
 - [x] `build` command that recompiles an already installed package
+- [ ] Change macros from %NAME% to $(NAME)
 - [ ] Import and export of the dependency database so the same environment can be recreated on another machine
 - [ ] Support for platforms other than Win32 and Win64
 - [ ] Ability to pass a custom DEFINE during installation or in the manifest
@@ -13,8 +14,8 @@
 - [ ] Handle naming conflicts (install folder, package names, DCU folder names)
 - [ ] New repository location (private repo? HTTP url? Authentication?)
 - [ ] New manifest scripts, such as a `copy`, `cmd`, `rename`, `fetch` ... (see [Scripts](#scripts))
-- [ ] GUI version
-- [ ] Expert version to be installed in the IDE
+- [ ] Graphical (GUI) front-end for the tool
+- [ ] IDE expert that integrates Blocks directly into the Delphi IDE
 
 ## Scripts
 
@@ -25,7 +26,7 @@ Example configuration:
   "description": "Copy README.md",
   "command": "copy",
   "event": "afterCompile",
-  "args": "*.README %DCU_PATH%"
+  "args": ["*.README", "%DCU_PATH%"]
 }
 ```
 
@@ -37,8 +38,10 @@ Example configuration:
 Available commands:
 
 * `copyres`: copies resources and dfm files *(already implemented)*
+* `echo [arg1 [arg2 [...]]]`: prints the arguments *(already implemented)*
+* `compile expert\MyExpert%BDSVERSION% [/p:win32,win64] [/c:release]`: compile a .dproj for the specified platform and config
+* `regwrite`: ???
 * `copy source target`: copies the given files (supports wildcards)
 * `move source target`: moves the given files (supports wildcards)
-* `echo [arg1 [arg2 [...]]]`: prints the arguments *(already implemented)*
 * `cmd [arg1 [arg2 [...]]]`: runs the given commands
 * `bat filename`: runs the given batch file

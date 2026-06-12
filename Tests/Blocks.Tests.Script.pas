@@ -18,7 +18,7 @@ type
       LastArgs: string;
     class var
       LastManifest: TManifest;
-    procedure Run(AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings); override;
+    procedure Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings); override;
   end;
 
   [TestFixture]
@@ -49,7 +49,7 @@ implementation
 
 { TFakeCommand }
 
-procedure TFakeCommand.Run(AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings);
+procedure TFakeCommand.Run(AHelper: IScriptHelper; AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings);
 begin
   LastManifest := AManifest;
   LastArgs := string.Join(' ', AArgs.ToStringArray);

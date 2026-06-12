@@ -24,7 +24,8 @@ uses
   System.Generics.Defaults,
   Blocks.Model.Package,
   Blocks.Model.Database,
-  Blocks.Model.Manifest;
+  Blocks.Model.Manifest,
+  Blocks.Service.Script;
 
 type
   TPlatformPaths = record
@@ -54,7 +55,7 @@ type
   end;
 
   /// <summary>Represents a single Delphi/RAD Studio installation.</summary>
-  TProduct = class
+  TProduct = class(TNoRefCountObject, IScriptHelper)
   private
     FBdsVersion: string;
     FVersionName: string;
@@ -81,6 +82,17 @@ type
         APackage: TPackageProject;
         const APlatform, AConfig, AOutputType: string
     ): string;
+
+    /// <summary>Locates MSBuild, sets the Delphi build environment variables, and
+    ///   compiles a single project (<c>.dproj</c>) for one config/platform.</summary>
+    /// <param name="AProjectFileName">Full path to the <c>.dproj</c> to build.</param>
+    /// <param name="AConfig">Build configuration (e.g. <c>Debug</c> or <c>Release</c>).</param>
+    /// <param name="APlatform">Target platform (e.g. <c>Win32</c>).</param>
+    /// <param name="AOptions">DCC_* output/search-path overrides for this compilation.</param>
+    /// <returns>The captured MSBuild stdout/stderr on success.</returns>
+    /// <exception cref="Exception">Raised when MSBuild returns a non-zero exit code;
+    ///   the error lines are printed to the console before the exception is raised.</exception>
+    function CompileProject(const AWorkspaceDir, AManifestName, AProjectFileName, AConfig, APlatform: string): string;
 
   public
     constructor Create(const ABdsVersion, AVersionName, ADisplayName, ARootDir, ARegistryKey: string);
@@ -195,6 +207,25 @@ type
         APlatformPair: TPair<string, TManifestPlatform>
     );
 
+    /// <summary>Registers an IDE expert <c>.dll</c> in the registry so the IDE loads it on
+    ///   start. Implements <see cref="IScriptHelper.RegisterExpert"/>.</summary>
+    /// <remarks>
+    ///   Writes a value named <paramref name="AName"/> (= the full <paramref name="AExpertPath"/>) under
+    ///   <c>HKCU\Software\Embarcadero\{RegKey}\{BdsVersion}\Experts</c> (Win32) or
+    ///   <c>...\Experts x64</c> (Win64). Other platforms are skipped with a warning.
+    /// </remarks>
+    procedure RegisterExpert(const AExpertPath, AName, APlatform: string);
+
+    /// <summary>Removes from the IDE Experts registry every expert this workspace installed
+    ///   for <paramref name="AManifestName"/>.</summary>
+    /// <remarks>
+    ///   Scans <c>HKCU\Software\Embarcadero\{RegKey}\{BdsVersion}\Experts</c> and
+    ///   <c>...\Experts x64</c>, deleting any value whose path starts with
+    ///   <c>{AWorkspaceDir}\.blocks\lib\{AManifestName}\</c> — matched both as the absolute
+    ///   path written at install and as the <c>$(BLOCKSDIR)\lib\{AManifestName}\</c> macro form.
+    /// </remarks>
+    procedure UnregisterExperts(const AWorkspaceDir, AManifestName: string);
+
     /// <summary>Unregister package from the Delphi IDE.</summary>
     procedure UninstallPackage(
         APackage: TManifestPackage;
@@ -222,6 +253,9 @@ type
     property BdsVersion: string read FBdsVersion;
     /// <summary>Internal version name used in file paths and registry lookups (e.g. <c>delphi12</c>).</summary>
     property VersionName: string read FVersionName;
+    /// <summary>Package-version suffix for this IDE (e.g. <c>370</c> for <c>delphi13</c>), the value
+    ///   that replaces the <c>%PACKAGE_VERSION%</c> placeholder.</summary>
+    property PackageVersionSuffix: string read FPackageVersion;
     /// <summary>Human-readable IDE display name (e.g. <c>Delphi 12 Athens</c>).</summary>
     property DisplayName: string read FDisplayName;
     /// <summary>Root installation directory of the IDE (e.g. <c>C:\Program Files (x86)\Embarcadero\Studio\23.0</c>).</summary>
@@ -240,8 +274,7 @@ uses
   Winapi.TlHelp32,
   Blocks.Core,
   Blocks.Console,
-  Blocks.Http,
-  Blocks.Service.Script;
+  Blocks.Http;
 
 const
   // Platforms for which blocks emits DCP output and registers it on the IDE
@@ -423,7 +456,8 @@ end;
 // %CONFIG% for the current compilation.
 procedure RunCompileScripts(
     const AManifest: TManifest;
-    const AEvent, AWorkspaceDir, AProjectDir, APlatform, AConfig, APackage: string
+    const AEvent, AWorkspaceDir, AProjectDir, APlatform, AConfig, APackage: string;
+    const AHelper: IScriptHelper
 );
 begin
   var LBlocksDir := TPath.Combine(AWorkspaceDir, '.blocks');
@@ -451,7 +485,7 @@ begin
       LDcuPath := TPath.Combine(LDcuPath, LSuffix);
     LEnv.Values['DCU_PATH'] := LDcuPath;
 
-    TScriptRunner.RunEvent(AManifest, AEvent, LEnv);
+    TScriptRunner.RunEvent(AManifest, AEvent, LEnv, AHelper);
   finally
     LEnv.Free;
   end;
@@ -855,6 +889,95 @@ begin
     LPackage.Free;
   end;
 
+end;
+
+procedure TProduct.RegisterExpert(const AExpertPath, AName, APlatform: string);
+begin
+  // The IDE loads experts from a per-platform registry key, mirroring the
+  // 'Known Packages' / 'Known Packages x64' split used for design-time packages.
+  var LExpertsSubKey :=
+      if SameText(APlatform, 'Win32') then 'Experts'
+      else if SameText(APlatform, 'Win64') then 'Experts x64'
+      else '';
+  if LExpertsSubKey = '' then
+  begin
+    // Caller printed the lead-in with Write; close its line, then warn.
+    TConsole.WriteLine(' SKIPPED', clYellow);
+    TConsole.WriteWarning(Format('Cannot register expert for platform "%s": unsupported', [APlatform]));
+    Exit;
+  end;
+
+  if not FileExists(AExpertPath) then
+  begin
+    TConsole.WriteLine(' FAILED', clRed);
+    raise Exception.CreateFmt('Expert dll not found "%s"', [AExpertPath]);
+  end;
+
+  var LRegPath := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\' + LExpertsSubKey;
+
+  var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
+  try
+    LReg.RootKey := HKEY_CURRENT_USER;
+    // CanCreate: the Experts key may not exist until the first expert is registered.
+    if not LReg.OpenKey(LRegPath, True) then
+    begin
+      TConsole.WriteLine(' FAILED', clRed);
+      raise Exception.CreateFmt('Cannot open registry key "%s"', [LRegPath]);
+    end;
+    try
+      LReg.WriteString(AName, AExpertPath);
+    finally
+      LReg.CloseKey;
+    end;
+  finally
+    LReg.Free;
+  end;
+
+  TConsole.WriteLine(' OK', clGreen);
+end;
+
+procedure TProduct.UnregisterExperts(const AWorkspaceDir, AManifestName: string);
+begin
+  // An expert is ours when its registered path lives under the workspace blocks
+  // lib folder for this manifest. Match both the absolute path written at install
+  // and the $(BLOCKSDIR) macro form, so either survives. The trailing delimiter
+  // keeps one manifest name from matching another that merely shares its prefix.
+  var LLibSubPath := 'lib\' + AManifestName;
+  var LFullPrefix := IncludeTrailingPathDelimiter(TPath.Combine([AWorkspaceDir, '.blocks', LLibSubPath]));
+  var LMacroPrefix := '$(BLOCKSDIR)\' + LLibSubPath + '\';
+
+  var LReg := TRegistry.Create(KEY_READ or KEY_WRITE);
+  try
+    LReg.RootKey := HKEY_CURRENT_USER;
+    for var LExpertsSubKey in ['Experts', 'Experts x64'] do
+    begin
+      var LRegPath := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\' + LExpertsSubKey;
+      if not LReg.OpenKey(LRegPath, False) then
+        Continue;
+      try
+        // GetValueNames is a snapshot, so deleting while iterating it is safe.
+        var LNames := TStringList.Create;
+        try
+          LReg.GetValueNames(LNames);
+          for var LName in LNames do
+          begin
+            var LValue := LReg.ReadString(LName);
+            if LValue.StartsWith(LFullPrefix, True) or LValue.StartsWith(LMacroPrefix, True) then
+            begin
+              LReg.DeleteValue(LName);
+              TConsole.WriteLine(Format('Unregistered expert %s', [LName]), clYellow);
+            end;
+          end;
+        finally
+          LNames.Free;
+        end;
+      finally
+        LReg.CloseKey;
+      end;
+    end;
+  finally
+    LReg.Free;
+  end;
 end;
 
 // Reads the command line of a process using NtQueryInformationProcess class 60
@@ -1320,31 +1443,100 @@ begin
   end;
 end;
 
+function TProduct.CompileProject(
+    const AWorkspaceDir,
+    AManifestName,
+    AProjectFileName,
+    AConfig,
+    APlatform: string
+): string;
+begin
+  var LPackageProject := TPackageProject.LoadFromFile(AProjectFileName);
+  try
+    var LBlocksDir := TPath.Combine(AWorkspaceDir, '.blocks');
+    var LSuffix :=
+        if SameText(AConfig, 'Debug') then 'debug'
+        else '';
+    var LConfigName :=
+        if SameText(AConfig, 'Debug') then 'Debug'
+        else 'Release';
+    // Prepend the blocks dcp directory to the project's own resolved
+    // DCC_UnitSearchPath (for this config/platform) instead of replacing it.
+    var LUnitSearchPath := TPath.Combine(LBlocksDir, APlatform, 'dcp', LSuffix);
+    var LOriginalUnitSearchPath :=
+        LPackageProject.GetProperty(TPackageProject.DCCUnitSearchPath, LConfigName, APlatform);
+    if LOriginalUnitSearchPath <> '' then
+      LUnitSearchPath := LUnitSearchPath + ';' + LOriginalUnitSearchPath;
+
+    var LDcuOutput := TPath.Combine([LBlocksDir, 'lib', AManifestName, APlatform]);
+    if LSuffix <> '' then
+      LDcuOutput := TPath.Combine(LDcuOutput, LSuffix);
+
+    var LBdsDir := FRootDir;
+    var LBdsCommonDir :=
+        TPath.Combine(GetEnvironmentVariable('PUBLIC'), TPath.Combine('Documents\Embarcadero\Studio', FBdsVersion));
+    var LMsBuild := GetMsBuildPath;
+
+    // Set Delphi environment variables inherited by child processes
+    SetEnvironmentVariable('BDS', PChar(LBdsDir));
+    SetEnvironmentVariable('BDSINCLUDE', PChar(LBdsDir + '\include'));
+    SetEnvironmentVariable('BDSCOMMONDIR', PChar(LBdsCommonDir));
+    SetEnvironmentVariable('LANGDIR', 'EN');
+    SetEnvironmentVariable('PLATFORM', '');
+
+    // Prepend BDS bin dirs to PATH (no duplicates)
+    var LCurPath := GetEnvironmentVariable('PATH');
+    var LNewPath := LCurPath;
+    for var LBinDir in [LBdsDir + '\bin64', LBdsDir + '\bin'] do
+      if Pos(LBinDir, LNewPath) = 0 then
+        LNewPath := LBinDir + ';' + LNewPath;
+    if LNewPath <> LCurPath then
+      SetEnvironmentVariable('PATH', PChar(LNewPath));
+
+    // Only emit a /p:DCC_* override when a value is supplied: passing it empty would
+    // wipe the path the project author declared. This lets a bare compile (e.g. an
+    // expert built through IScriptHelper) keep the project's own settings.
+    var LMSBuildParams := '';
+    for var LOverride
+        in [
+            TPair<string, string>.Create('DCC_UnitSearchPath', LUnitSearchPath),
+            TPair<string, string>.Create('DCC_BplOutput', TPath.Combine(LBlocksDir, APlatform, 'bpl', LSuffix)),
+            TPair<string, string>.Create('DCC_DcpOutput', TPath.Combine(LBlocksDir, APlatform, 'dcp', LSuffix)),
+            TPair<string, string>.Create('DCC_DcuOutput', LDcuOutput),
+            // An expert produces an executable/library; drop it next to its DCUs.
+            TPair<string, string>.Create('DCC_ExeOutput', LDcuOutput)] do
+      if LOverride.Value <> '' then
+        LMSBuildParams := LMSBuildParams + Format(' /p:%s="%s"', [LOverride.Key, LOverride.Value]);
+
+    var LCmdLine :=
+        Format(
+            '"%s" "%s" /t:Make /p:config=%s /p:platform=%s %s /nologo /v:quiet',
+            [LMsBuild, AProjectFileName, AConfig, APlatform, LMSBuildParams]
+        );
+
+    var LExitCode := RunProcessWithOutput(LCmdLine, Result);
+
+    if LExitCode <> 0 then
+    begin
+      TConsole.WriteLine(' FAILED', clRed);
+      var LLines := Result.Split([sLineBreak, #13, #10], TStringSplitOptions.ExcludeEmpty);
+      for var LLine in LLines do
+        if ContainsText(LLine, 'error') then
+          TConsole.WriteLine('      ' + LLine, clRed);
+      raise Exception.CreateFmt(
+          'Compilation failed on "%s" for platform "%s".',
+          [TPath.GetFileNameWithoutExtension(AProjectFileName), APlatform]);
+    end;
+
+  finally
+    LPackageProject.Free;
+  end;
+end;
+
 procedure TProduct.BuildPackages(const AWorkspaceDir, AProjectDir: string; const AManifest: TManifest);
 begin
   var BuildConfigs := ['debug', 'release'];
-  var BlocksDir := TPath.Combine(AWorkspaceDir, '.blocks');
-  var BdsDir := FRootDir;
-  var BdsCommonDir :=
-      TPath.Combine(GetEnvironmentVariable('PUBLIC'), TPath.Combine('Documents\Embarcadero\Studio', FBdsVersion));
-  var MsBuild := GetMsBuildPath;
   var PackagesPath := GetPackagesPath(AProjectDir, AManifest);
-
-  // Set Delphi environment variables inherited by child processes
-  SetEnvironmentVariable('BDS', PChar(BdsDir));
-  SetEnvironmentVariable('BDSINCLUDE', PChar(BdsDir + '\include'));
-  SetEnvironmentVariable('BDSCOMMONDIR', PChar(BdsCommonDir));
-  SetEnvironmentVariable('LANGDIR', 'EN');
-  SetEnvironmentVariable('PLATFORM', '');
-
-  // Prepend BDS bin dirs to PATH (no duplicates)
-  var CurPath := GetEnvironmentVariable('PATH');
-  var NewPath := CurPath;
-  for var BinDir in [BdsDir + '\bin64', BdsDir + '\bin'] do
-    if Pos(BinDir, NewPath) = 0 then
-      NewPath := BinDir + ';' + NewPath;
-  if NewPath <> CurPath then
-    SetEnvironmentVariable('PATH', PChar(NewPath));
 
   var PlatformNames := TStringList.Create;
   try
@@ -1376,8 +1568,7 @@ begin
     end;
 
     TConsole.WriteLine('Compiling packages...', clCyan);
-    TConsole.WriteLine('  MSBuild   : ' + MsBuild);
-    TConsole.WriteLine('  BDS       : ' + BdsDir);
+    TConsole.WriteLine('  BDS       : ' + FRootDir);
     TConsole.WriteLine('  Packages  : ' + PackagesPath);
     TConsole.WriteLine('  Platforms : ' + PlatformNames.CommaText);
     TConsole.WriteLine;
@@ -1444,64 +1635,14 @@ begin
               AProjectDir,
               LPlatform,
               LBuildConfig,
-              PkgName
+              PkgName,
+              Self
           );
 
           TConsole.Write(Format('    Building %s [%s/%s]...', [PkgName, TypeStr, LBuildConfig]));
 
-          var LMSBuildParams := '';
-          var LSuffix :=
-              if SameText(LBuildConfig, 'Debug') then 'debug'
-              else '';
-          var LConfigName :=
-              if SameText(LBuildConfig, 'Debug') then 'Debug'
-              else 'Release';
-
-          // Prepend the blocks dcp directory to the project's own resolved
-          // DCC_UnitSearchPath (for this config/platform) instead of replacing it.
-          var LUnitSearchPath := TPath.Combine(BlocksDir, LPlatform, 'dcp', LSuffix);
-          var LOriginalUnitSearchPath :=
-              LPackageProject.GetProperty(TPackageProject.DCCUnitSearchPath, LConfigName, LPlatform);
-          if LOriginalUnitSearchPath <> '' then
-            LUnitSearchPath := LUnitSearchPath + ';' + LOriginalUnitSearchPath;
-
-          LMSBuildParams :=
-              ' /p:DCC_UnitSearchPath="'
-                  + LUnitSearchPath
-                  + '"'
-                  + ' /p:DCC_BplOutput="'
-                  + TPath.Combine(BlocksDir, LPlatform, 'bpl', LSuffix)
-                  + '"'
-                  + ' /p:DCC_DcpOutput="'
-                  + TPath.Combine(BlocksDir, LPlatform, 'dcp', LSuffix)
-                  + '"';
-
-          var LDcuOutput := TPath.Combine([BlocksDir, 'lib', AManifest.Name, LPlatform]);
-          if LSuffix <> '' then
-            LDcuOutput := TPath.Combine(LDcuOutput, LSuffix);
-          LMSBuildParams := LMSBuildParams + ' /p:DCC_DcuOutput="' + LDcuOutput + '"';
-
-          var CmdLine :=
-              Format(
-                  '"%s" "%s" /t:Make /p:config=%s /p:platform=%s %s /nologo /v:quiet',
-                  [MsBuild, DprojPath, LBuildConfig, LPlatform, LMSBuildParams]
-              );
-
-          var Output: string;
-          var ExitCode := RunProcessWithOutput(CmdLine, Output);
-
-          if ExitCode = 0 then
-            TConsole.WriteLine(' OK', clGreen)
-          else
-          begin
-            TConsole.WriteLine(' FAILED', clRed);
-            var Lines := Output.Split([sLineBreak, #13, #10], TStringSplitOptions.ExcludeEmpty);
-            for var Line in Lines do
-              if ContainsText(Line, 'error') then
-                TConsole.WriteLine('      ' + Line, clRed);
-            raise Exception
-                .CreateFmt('Compilation failed on package "%s" for platform "%s".', [PkgName, LPlatformPair.Key]);
-          end;
+          CompileProject(AWorkspaceDir, AManifest.Name, DprojPath, LBuildConfig, LPlatform);
+          TConsole.WriteLine(' OK', clGreen);
 
           RunCompileScripts(
               AManifest,
@@ -1510,7 +1651,8 @@ begin
               AProjectDir,
               LPlatform,
               LBuildConfig,
-              PkgName
+              PkgName,
+              Self
           );
         end;
       finally

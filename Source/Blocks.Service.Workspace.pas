@@ -195,13 +195,21 @@ end;
 // (beforeInstall / afterInstall / beforeUninstall / afterUninstall), once per
 // manifest. At this level only the workspace- and project-level paths are
 // meaningful, so only those variables are exposed.
-procedure RunManifestScripts(const AManifest: TManifest; const AEvent, AWorkspaceDir, AProjectDir: string);
+procedure RunManifestScripts(
+    const AManifest: TManifest;
+    const AEvent, AWorkspaceDir, AProjectDir: string;
+    AProduct: TProduct
+);
 begin
   var LEnv := TStringList.Create;
   try
     LEnv.Values['WORKSPACE_PATH'] := AWorkspaceDir;
     LEnv.Values['PROJECT_PATH'] := AProjectDir;
-    TScriptRunner.RunEvent(AManifest, AEvent, LEnv);
+    // The package-version suffix lets scripts target .dproj names that embed it
+    // (e.g. %PACKAGE_VERSION% in the "compile" command's path).
+    LEnv.Values['PACKAGE_VERSION'] := AProduct.PackageVersionSuffix;
+    // AProduct implements IScriptHelper, giving commands like "compile" a compiler.
+    TScriptRunner.RunEvent(AManifest, AEvent, LEnv, AProduct);
   finally
     LEnv.Free;
   end;
@@ -566,7 +574,7 @@ begin
     var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
 
     // Step 6.5 — beforeInstall scripts
-    RunManifestScripts(LManifest, TScriptRunner.EventBeforeInstall, WorkDir, LProjectDir);
+    RunManifestScripts(LManifest, TScriptRunner.EventBeforeInstall, WorkDir, LProjectDir, LSelectedProduct);
 
     if not ABuildOnly then
     begin
@@ -622,7 +630,7 @@ begin
       Database.Update(LManifest.Id, LManifest.Version);
 
     // Step 11 — afterInstall scripts
-    RunManifestScripts(LManifest, TScriptRunner.EventAfterInstall, WorkDir, LProjectDir);
+    RunManifestScripts(LManifest, TScriptRunner.EventAfterInstall, WorkDir, LProjectDir, LSelectedProduct);
 
     TConsole.WriteLine;
     TConsole.WriteLine('============================================', clGreen);
@@ -670,7 +678,7 @@ begin
     var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
 
     // Step 4.5 — beforeUninstall scripts (project files still present)
-    RunManifestScripts(LManifest, TScriptRunner.EventBeforeUninstall, WorkDir, LProjectDir);
+    RunManifestScripts(LManifest, TScriptRunner.EventBeforeUninstall, WorkDir, LProjectDir, LSelectedProduct);
 
     // Step 5 - Unregister all packages
     var LEnvironmentVariables := TStringList.Create;
@@ -705,6 +713,9 @@ begin
       LEnvironmentVariables.Free;
     end;
 
+    // Step 5.5 — Unregister any IDE experts pointing into this package's blocks lib folder
+    LSelectedProduct.UnregisterExperts(WorkDir, LManifest.Name);
+
     // Step 6 — Remove project directory
     if TDirectory.Exists(LProjectDir) then
     begin
@@ -718,7 +729,7 @@ begin
     Database.RemoveEntry(LManifest.Id);
 
     // Step 8 — afterUninstall scripts
-    RunManifestScripts(LManifest, TScriptRunner.EventAfterUninstall, WorkDir, LProjectDir);
+    RunManifestScripts(LManifest, TScriptRunner.EventAfterUninstall, WorkDir, LProjectDir, LSelectedProduct);
 
     TConsole.WriteLine;
     TConsole.WriteLine('Uninstalled: ' + LManifest.Name + ' ' + LInstalledVer, clGreen);

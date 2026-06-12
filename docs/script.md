@@ -65,10 +65,11 @@ output paths point at the exact location that compilation used.
 These fire **once per manifest**. Only workspace- and project-level paths are
 meaningful at this stage:
 
-| Variable           | Value                                          |
-|--------------------|------------------------------------------------|
-| `%WORKSPACE_PATH%` | Workspace root directory.                      |
-| `%PROJECT_PATH%`   | Extracted project directory.                   |
+| Variable             | Value                                                              |
+|----------------------|--------------------------------------------------------------------|
+| `%WORKSPACE_PATH%`   | Workspace root directory.                                          |
+| `%PROJECT_PATH%`     | Extracted project directory.                                       |
+| `%PACKAGE_VERSION%`  | Package-version suffix of the target IDE (e.g. `370` for Delphi 13). |
 
 ## Events
 
@@ -135,34 +136,64 @@ and intentionally produces no extra output.
 { "description": "Copy resources and dfm", "event": "afterCompile", "command": "copyres" }
 ```
 
-## Adding a new command
+### `compile`
 
-Commands live in `Source/Blocks.Service.Script.pas`. To add one:
+Compiles an extra project that the normal package pipeline does not build.
+**Bound to the install events** (`beforeInstall`, `afterInstall`).
 
-1. Derive a class from `TScriptCommand` and override `Run`:
+Arguments:
 
-   ```pascal
-   TMyCommand = class(TScriptCommand)
-   public
-     procedure Run(AManifest: TManifest; AArgs, AEnvironmentVariables: TStrings); override;
-   end;
-   ```
+| Arg               | Required | Meaning                                                                          |
+|-------------------|----------|----------------------------------------------------------------------------------|
+| 1 (positional)    | yes      | Path to the `.dproj` to build, relative to `%PROJECT_PATH%` (or absolute).        |
+| `/p:<platforms>`  | no       | Comma-separated platform list, e.g. `/p:win32,win64` (default `Win32`).           |
 
-   - `AArgs` are the script args, already `%VAR%`-expanded.
-   - `AEnvironmentVariables` holds the event variables (read extra ones directly,
-     e.g. `AEnvironmentVariables.Values['DCU_PATH']`).
-   - `AManifest` is the owning manifest, for commands that inspect it.
+The project is always built in the `Release` config. Every listed platform whose
+compiler is actually installed is built; platforms without a compiler are skipped
+(if none is available the command fails). Blocks injects the same output paths it
+uses for packages — the `.blocks\<platform>\dcp` directory is prepended to the
+unit search path, and `DCC_DcuOutput` / `DCC_ExeOutput` point at
+`.blocks\lib\<manifest name>\<platform>[\debug]`, so the produced binary lands
+next to its DCUs.
 
-2. Register it in the unit's `initialization` section. Pass a list of events to
-   restrict where it can be used; omit it to allow any event:
+Because the args are variable-expanded first, `%PACKAGE_VERSION%` can target a
+`.dproj` whose name embeds the IDE package suffix:
 
-   ```pascal
-   // valid for any event
-   TScriptCommand.RegisterCommand('mycmd', TMyCommand);
+```json
+{
+  "description": "Compile the Trysil helper",
+  "event": "afterInstall",
+  "command": "compile",
+  "args": ["Trysil.Helper\\Trysil.Helper%PACKAGE_VERSION%.dproj", "/p:win32,win64"]
+}
+```
 
-   // restricted to afterCompile
-   TScriptCommand.RegisterCommand('copyres', TCopyResCommand, [TScriptRunner.EventAfterCompile]);
-   ```
+### `expert`
 
-Validation (unknown command, wrong event) and `%VAR%` expansion are handled
-centrally by `TScriptRunner`, so commands only implement their own logic.
+Same arguments and build behaviour as [`compile`](#compile), but each compiled
+platform's output is treated as a design-time **IDE expert** `.dll` and
+registered so the IDE loads it on next start. Typical use is building an expert
+that depends on the runtime package just installed. **Bound to the install
+events.**
+
+After each successful platform build the produced `.dll` (named after the
+`.dproj`, in the output dir described above) is registered: a value named after
+the `.dll` is written under
+`HKCU\Software\Embarcadero\<regkey>\<bdsversion>\Experts` (Win32) or
+`...\Experts x64` (Win64), with the full `.dll` path as its value.
+
+On `uninstall` these registrations are removed automatically — no mirror script
+is needed. Blocks scans both `Experts` keys and deletes every value whose path
+points into this package's blocks lib folder
+(`<workspace>\.blocks\lib\<manifest name>\...`, matched both as the absolute path
+and as the `$(BLOCKSDIR)\lib\<manifest name>\...` macro form).
+
+```json
+{
+  "description": "Compile and register the Trysil expert",
+  "event": "afterInstall",
+  "command": "expert",
+  "args": ["Trysil.Expert\\Trysil.Expert%PACKAGE_VERSION%.dproj", "/p:win32,win64"]
+}
+```
+
