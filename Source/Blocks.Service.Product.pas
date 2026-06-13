@@ -808,6 +808,17 @@ procedure TProduct.RemovePackage(
       TConsole.WriteWarning(Format('Can''t delete file %s', [AFileName]));
   end;
 
+  // On POSIX a package also produces a <name>.imp.o import object next to the
+  // dcp; remove it too when present.
+  procedure SafeDeletePosixImportObject(const ADcpFileName: string);
+  begin
+    if not IsPosix(APlatformPair.Key) then
+      Exit;
+    var LImportObject := ChangeFileExt(ADcpFileName, '.imp.o');
+    if FileExists(LImportObject) then
+      SafeDeleteFile(LImportObject);
+  end;
+
 begin
   var LFileName := '';
 
@@ -817,21 +828,11 @@ begin
   SafeDeleteFile(LFileName);
   LFileName := GetPackageOutput(AWorkspaceDir, APackage, APlatformPair.Key, 'release', 'dcp');
   SafeDeleteFile(LFileName);
-  if IsPosix(APlatformPair.Key) then
-  begin
-    LFileName := ChangeFileExt(LFileName, '.imp.o');
-    if FileExists(LFileName) then
-      SafeDeleteFile(LFileName);
-  end;
+  SafeDeletePosixImportObject(LFileName);
 
   LFileName := GetPackageOutput(AWorkspaceDir, APackage, APlatformPair.Key, 'debug', 'dcp');
   SafeDeleteFile(LFileName);
-  if IsPosix(APlatformPair.Key) then
-  begin
-    LFileName := ChangeFileExt(LFileName, '.imp.o');
-    if FileExists(LFileName) then
-      SafeDeleteFile(LFileName);
-  end;
+  SafeDeletePosixImportObject(LFileName);
 
   if SameText(APlatformPair.Key, 'win64') then
   begin
@@ -1173,12 +1174,14 @@ begin
 
   if IsPosix(APlatform) and SameText(AOutputType, 'bpl') then
   begin
-    Result := ChangeFileExt(Result, '.so');
+    if IsApple(APlatform) then
+      Result := ChangeFileExt(Result, '.dylib')
+    else
+      Result := ChangeFileExt(Result, '.so');
     var LFileName := ExtractFileName(Result);
     var LFilePath := ExtractFilePath(Result);
     Result := TPath.Combine(LFilePath, 'bpl' + LFileName);
   end;
-
 end;
 
 function TProduct.GetBPLFileName(

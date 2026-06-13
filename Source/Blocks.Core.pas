@@ -120,6 +120,11 @@ function ExpandVariables(const AValue: string; AEnvironmentVariables: TStrings):
 ///   (Linux, Android or iOS/macOS), as opposed to a Windows target.</summary>
 function IsPosix(const APlatform: string): Boolean;
 
+/// <summary>Returns True if <paramref name="APlatform"/> is an Apple/Darwin
+///   target (macOS or iOS). These produce <c>.dylib</c> libraries instead of
+///   the <c>.so</c> used by the other POSIX targets.</summary>
+function IsApple(const APlatform: string): Boolean;
+
 type
   // -- Filesystem helpers (resilient to transient AV/indexer locks) -----------
   TFileUtils = class
@@ -197,17 +202,20 @@ end;
 
 function IsPosix(const APlatform: string): Boolean;
 const
-PosixPlatforms: array[0..5] of string = (
-    'Linux64',
-    'Android',
-    'Android64',
-    'iOSDevice32',
-    'iOSDevice64',
-    'OSXARM64'
-  );
+  PosixPlatforms: array[0..5] of string = ('Linux64', 'Android', 'Android64', 'iOSDevice64', 'OSX64', 'OSXARM64');
 begin
   Result := False;
   for var LPlatform in PosixPlatforms do
+    if SameText(APlatform, LPlatform) then
+      Exit(True);
+end;
+
+function IsApple(const APlatform: string): Boolean;
+const
+  ApplePlatforms: array[0..2] of string = ('OSX64', 'OSXARM64', 'iOSDevice64');
+begin
+  Result := False;
+  for var LPlatform in ApplePlatforms do
     if SameText(APlatform, LPlatform) then
       Exit(True);
 end;

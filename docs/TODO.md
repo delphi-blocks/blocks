@@ -6,9 +6,12 @@
 - [x] Add per package constraints (such as required Delphi version, ...)
 - [x] `build` command that recompiles an already installed package
 - [x] Change macros from %NAME% to $(NAME)
+- [x] Support for platforms other than Win32 and Win64
 - [ ] Import and export of the dependency database so the same environment can be recreated on another machine
-- [ ] Support for platforms other than Win32 and Win64
+- [ ] Test installation/uninstallation on macOS and mobile (Android, iOS): verify the
+      `bpl<name>.so`/`.dylib` output naming and the `.imp.o` import-object location
 - [ ] Ability to pass a custom DEFINE during installation or in the manifest
+- [ ] Should the `build` command act recursively on dependencies?
 - [ ] Dependency check during uninstall
 - [ ] Install "packageless" library (FastMM4, DUnitX, ...)
 - [ ] Handle naming conflicts (install folder, package names, DCU folder names)

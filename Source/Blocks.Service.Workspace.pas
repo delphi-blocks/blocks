@@ -690,9 +690,6 @@ begin
             if LPackage.IsDesignTime and (not LSelectedProduct.DesignTimeSupport(LPlatformPair.Key)) then
               Continue;
 
-            if not LPackage.SupportsProduct(LSelectedProduct.VersionName) then
-              Continue;
-
             if LPackage.IsDesignTime then
               LSelectedProduct.UninstallPackage(LPackage, WorkDir, DprojPath, LPlatformPair);
 
@@ -717,7 +714,7 @@ begin
     if TDirectory.Exists(LProjectDir) then
     begin
       TDirectory.Delete(LProjectDir, True);
-      TConsole.WriteLine('Removed: ' + LProjectDir, clYellow);
+      TConsole.WriteLine('Removed: ' + LProjectDir);
     end
     else
       TConsole.WriteLine('Directory not found: ' + LProjectDir, clYellow);
@@ -729,7 +726,7 @@ begin
     if TDirectory.Exists(LDcuDir) then
     begin
       TDirectory.Delete(LDcuDir, True);
-      TConsole.WriteLine('Removed: ' + LDcuDir, clYellow);
+      TConsole.WriteLine('Removed: ' + LDcuDir);
     end;
 
     // Step 7 — Remove from database
