@@ -35,6 +35,44 @@ Examples:
   Blocks help install
 ```
 
+## Common commands
+
+```bat
+REM Initialise the workspace in the current directory (prompts for Delphi version)
+blocks init
+
+REM Install a package (latest, or a specific version)
+blocks install owner.package
+blocks install owner.package@1.2.0
+
+REM Uninstall a package
+blocks uninstall owner.package
+
+REM List installed packages
+blocks list
+
+REM Show detected Delphi installations
+blocks product
+
+REM Show all properties for each installation (active platforms, search paths, running status)
+blocks product /detail
+
+REM Show details for a specific version (optionally with a registry profile)
+blocks product delphi13
+blocks product delphi13:blocks
+
+REM Show details for multiple versions at once
+blocks product delphi12 delphi13
+
+REM View package info
+blocks view owner.package@1.2.0
+blocks view owner.package /versions
+
+REM Manage repository sources
+blocks config sources
+blocks config /add sources=https://github.com/owner/my-repo
+```
+
 ## Install
 
 Downloads, compiles and registers a Delphi package into the active
