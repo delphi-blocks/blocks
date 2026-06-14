@@ -78,7 +78,7 @@ end;
 
 procedure TConfigPlatformsTest.TestSetPlatformsRestrictsToList;
 begin
-  FConfig.&Set('platforms', 'Win32,Win64');
+  FConfig.SetValue('platforms', 'Win32,Win64');
   Assert.IsTrue(FConfig.IsPlatformEnabled('Win32'));
   Assert.IsTrue(FConfig.IsPlatformEnabled('Win64'));
   Assert.IsFalse(FConfig.IsPlatformEnabled('Linux64'));
@@ -86,14 +86,14 @@ end;
 
 procedure TConfigPlatformsTest.TestIsPlatformEnabledIsCaseInsensitive;
 begin
-  FConfig.&Set('platforms', 'Win32');
+  FConfig.SetValue('platforms', 'Win32');
   Assert.IsTrue(FConfig.IsPlatformEnabled('win32'));
 end;
 
 procedure TConfigPlatformsTest.TestSetEmptyValueClearsPlatforms;
 begin
-  FConfig.&Set('platforms', 'Win32');
-  FConfig.&Set('platforms', '');
+  FConfig.SetValue('platforms', 'Win32');
+  FConfig.SetValue('platforms', '');
   Assert.AreEqual(0, FConfig.Platforms.Count);
   // An empty list means "all platforms" again.
   Assert.IsTrue(FConfig.IsPlatformEnabled('Win64'));
@@ -113,19 +113,19 @@ end;
 
 procedure TConfigPlatformsTest.TestGetPlatformsJoinsWithComma;
 begin
-  FConfig.&Set('platforms', 'Win32,Win64');
-  Assert.AreEqual('Win32,Win64', FConfig.Get('platforms'));
+  FConfig.SetValue('platforms', 'Win32,Win64');
+  Assert.AreEqual('Win32,Win64', FConfig.GetValue('platforms'));
 end;
 
 procedure TConfigPlatformsTest.TestSaveLoadRoundTrip;
 begin
-  FConfig.&Set('platforms', 'Win32,Win64');
+  FConfig.SetValue('platforms', 'Win32,Win64');
   FConfig.Save;
 
   var LLoaded := TConfig.Create(FWorkspaceDir);
   try
     LLoaded.Load;
-    Assert.AreEqual('Win32,Win64', LLoaded.Get('platforms'));
+    Assert.AreEqual('Win32,Win64', LLoaded.GetValue('platforms'));
     Assert.IsFalse(LLoaded.IsPlatformEnabled('Linux64'));
   finally
     LLoaded.Free;

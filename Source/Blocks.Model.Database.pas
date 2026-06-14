@@ -42,6 +42,7 @@ type
     FPackages: TDictionary<string, TInstalledPackage>;
     FDatabasePath: string;
     FRepositoryUpdated: TDateTime;
+    FReleaseChecked: TDateTime;
   public
     property Packages: TDictionary<string, TInstalledPackage> read FPackages;
 
@@ -56,6 +57,18 @@ type
     ///   <paramref name="AMaxAgeDays"/> days (or was never refreshed).</summary>
     /// <param name="AMaxAgeDays">Maximum acceptable age, expressed in days.</param>
     function IsRepositoryStale(AMaxAgeDays: Double): Boolean;
+
+    /// <summary>Timestamp of the last check for a newer blocks release on GitHub;
+    ///   zero when no check was ever performed.</summary>
+    property ReleaseChecked: TDateTime read FReleaseChecked write FReleaseChecked;
+
+    /// <summary>Records <c>Now</c> as the last release-check time and persists the database.</summary>
+    procedure TouchReleaseCheck;
+
+    /// <summary>Returns <c>True</c> when no release check has happened within the last
+    ///   <paramref name="AMaxAgeDays"/> days (or never happened).</summary>
+    /// <param name="AMaxAgeDays">Maximum acceptable age, expressed in days.</param>
+    function IsReleaseCheckStale(AMaxAgeDays: Double): Boolean;
 
     /// <summary>Removes the database entry for a package.</summary>
     /// <param name="LibraryId">Library identifier.</param>
@@ -168,6 +181,17 @@ end;
 function TDatabase.IsRepositoryStale(AMaxAgeDays: Double): Boolean;
 begin
   Result := (FRepositoryUpdated = 0) or (Now - FRepositoryUpdated > AMaxAgeDays);
+end;
+
+procedure TDatabase.TouchReleaseCheck;
+begin
+  FReleaseChecked := Now;
+  Save;
+end;
+
+function TDatabase.IsReleaseCheckStale(AMaxAgeDays: Double): Boolean;
+begin
+  Result := (FReleaseChecked = 0) or (Now - FReleaseChecked > AMaxAgeDays);
 end;
 
 constructor TDatabase.Create;

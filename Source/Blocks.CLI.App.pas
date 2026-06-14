@@ -40,6 +40,7 @@ type
     procedure WriteOption(const AOption, AText: string); overload;
     procedure WriteOption(const AText: string); overload;
     procedure CheckWorkspace;
+    procedure CheckLatestRelease;
   end;
 
   THelpCommand = class(TBaseCommand)
@@ -513,6 +514,9 @@ begin
     TConsole.WriteLine('Workspace initialised.', clGreen);
     TConsole.WriteLine;
   end;
+  // Once a day, check GitHub for a newer blocks release and suggest "upgrade".
+  if TSystemConfig.AutoUpdate and TWorkspace.Database.IsReleaseCheckStale(1) then
+    CheckLatestRelease;
 end;
 
 procedure TInitCommand.ShowHelp;
@@ -751,8 +755,6 @@ begin
       raise Exception.Create('Operation cancelled. Run "blocks Init" to initialise the workspace first.');
     TWorkspace.Initialize(TWorkspace.WorkDir, '', '');
     TConsole.WriteLine;
-    // Initialize already refreshed the repository, nothing more to do.
-    Exit;
   end;
 
   // Refresh the repository list when it has not been updated for more than a day.
@@ -762,6 +764,43 @@ begin
     TConsole.WriteLine('Repository list is more than a day old, updating...', clCyan);
     TWorkspace.Update(TWorkspace.WorkDir);
     TConsole.WriteLine;
+  end;
+
+  // Once a day, check GitHub for a newer blocks release and suggest "upgrade".
+  if TSystemConfig.AutoUpdate and TWorkspace.Database.IsReleaseCheckStale(1) then
+    CheckLatestRelease;
+end;
+
+procedure TBaseCommand.CheckLatestRelease;
+begin
+  try
+    try
+      var LReleases := TGitHub.GetGitHubReleases('delphi-blocks', 'blocks');
+      try
+        if LReleases.Count > 0 then
+        begin
+          var LLatest := TSemVer.Parse(ExtractVersionNumber(LReleases[0].Name));
+          var LCurrent := TAppVersion.GetCurrentVersion;
+          if LLatest.CompareTo(LCurrent) > 0 then
+          begin
+            TConsole.WriteLine;
+            TConsole.WriteWarning(
+                Format('A new version of blocks is available: %s (current: %s)', [LLatest.ToString, LCurrent.ToString])
+            );
+            TConsole.WriteLine('Run "' + AppExeName + ' upgrade" to update.', clYellow);
+            TConsole.WriteLine;
+          end;
+        end;
+      finally
+        LReleases.Free;
+      end;
+    finally
+      // Always record the attempt so the check is throttled to once a day even
+      // when offline; this keeps every command fast.
+      TWorkspace.Database.TouchReleaseCheck;
+    end;
+  except
+    // A GitHub/network failure must never break the user's command — ignore it.
   end;
 end;
 
@@ -844,7 +883,7 @@ begin
     WriteSectionTitle('Workspace configuration');
     WriteField('Product', TWorkspace.Config.Product);
     WriteField('RegistryKey', TWorkspace.Config.RegistryKey);
-    WriteField('UpdateDcpSearchPath', TWorkspace.Config.Get('updatedcpsearchpath'));
+    WriteField('UpdateDcpSearchPath', TWorkspace.Config.GetValue('updatedcpsearchpath'));
 
     WriteSectionTitle('Sources');
     if TWorkspace.Config.Sources.Count = 0 then
@@ -870,9 +909,9 @@ begin
     begin
       var LValue := '';
       if FSystem then
-        LValue := TSystemConfig.Get(LConfig)
+        LValue := TSystemConfig.GetValue(LConfig)
       else
-        LValue := TWorkspace.Config.Get(LConfig);
+        LValue := TWorkspace.Config.GetValue(LConfig);
 
       WriteField(LConfig, LValue);
     end
@@ -888,7 +927,7 @@ begin
         else if FDelete then
           TSystemConfig.Delete(LKey, LValue)
         else
-          TSystemConfig.Set(LKey, LValue);
+          TSystemConfig.SetValue(LKey, LValue);
       end
       else if SameText(LKey, 'platforms') and not FDelete then
       begin
@@ -901,7 +940,7 @@ begin
           for var LPlatform in LNormalized do
             TWorkspace.Config.Add(LKey, LPlatform)
         else
-          TWorkspace.Config.&Set(LKey, string.Join(',', LNormalized));
+          TWorkspace.Config.SetValue(LKey, string.Join(',', LNormalized));
         TWorkspace.Config.Save;
       end
       else
@@ -911,7 +950,7 @@ begin
         else if FDelete then
           TWorkspace.Config.Delete(LKey, LValue)
         else
-          TWorkspace.Config.&Set(LKey, LValue);
+          TWorkspace.Config.SetValue(LKey, LValue);
         TWorkspace.Config.Save;
       end;
       TConsole.WriteLine('Config applied');
@@ -958,6 +997,8 @@ begin
   WriteOption('', 'when multiple installations are present. This key is only ');
   WriteOption('', 'available when Blocks was installed using the setup package');
   WriteOption('', 'and requires the launcher to function.');
+  WriteOption('AutoUpdate', 'When true (the default), blocks checks GitHub once a day for');
+  WriteOption('', 'a newer release and suggests "upgrade" (true/false).');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' config');
@@ -973,6 +1014,8 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' config updatedcpsearchpath=true');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath=C:\Tools\Blocks');
+  TConsole.WriteLine('  ' + AppExeName + ' config /system AutoUpdate');
+  TConsole.WriteLine('  ' + AppExeName + ' config /system AutoUpdate=false');
   TConsole.WriteLine;
 end;
 

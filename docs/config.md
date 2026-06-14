@@ -130,9 +130,10 @@ System configuration is stored in the Windows registry under `Software\Blocks`
 and is shared by every workspace on the machine. Target it with the `/system`
 option.
 
-| Key           | Type   | Meaning                                                                                                   |
-|---------------|--------|-----------------------------------------------------------------------------------------------------------|
-| `InstallPath` | string | Directory containing the `blocks.exe` to launch when multiple installations are present.                  |
+| Key           | Type    | Meaning                                                                                                   |
+|---------------|---------|-----------------------------------------------------------------------------------------------------------|
+| `InstallPath` | string  | Directory containing the `blocks.exe` to launch when multiple installations are present.                  |
+| `AutoUpdate`  | boolean | Whether blocks checks GitHub once a day for a newer release. Defaults to `true` when unset.                |
 
 ### `InstallPath`
 
@@ -143,4 +144,17 @@ package and requires the launcher to function.
 ```
 blocks config /system InstallPath
 blocks config /system InstallPath=C:\Tools\Blocks
+```
+
+### `AutoUpdate`
+
+Controls the automatic update check. When enabled (the default), any command
+that opens the workspace checks GitHub at most once a day for a newer release
+and, if one is found, suggests running `blocks upgrade`. Set it to `false` to
+disable the check entirely; the value is read as `true` whenever it is absent
+from the registry.
+
+```
+blocks config /system AutoUpdate
+blocks config /system AutoUpdate=false
 ```

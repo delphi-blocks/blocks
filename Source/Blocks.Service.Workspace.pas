@@ -337,7 +337,7 @@ begin
   end;
 
   if ASources <> '' then
-    Config.&Set('sources', ASources);
+    Config.SetValue('sources', ASources);
 
   // Select Delphi version: explicit /product wins; else reuse the one already
   // saved in the workspace config; else prompt interactively.

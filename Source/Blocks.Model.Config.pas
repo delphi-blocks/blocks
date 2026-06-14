@@ -38,8 +38,8 @@ type
     procedure Save;
     function ToJson: string;
 
-    function Get(const AKey: string): string;
-    procedure &Set(const AKey, AValue: string);
+    function GetValue(const AKey: string): string;
+    procedure SetValue(const AKey, AValue: string);
     procedure Add(const AKey, AValue: string);
     procedure Delete(const AKey, AValue: string);
 
@@ -59,7 +59,7 @@ const
 
 { TConfig }
 
-procedure TConfig.&Set(const AKey, AValue: string);
+procedure TConfig.SetValue(const AKey, AValue: string);
 begin
   if SameText(AKey, 'sources') then
   begin
@@ -153,7 +153,7 @@ begin
   Result := PlatformInList(FPlatforms.ToStringArray, APlatform);
 end;
 
-function TConfig.Get(const AKey: string): string;
+function TConfig.GetValue(const AKey: string): string;
 begin
   if SameText(AKey, 'sources') then
     Result := string.Join(',', FSources.ToStringArray)
