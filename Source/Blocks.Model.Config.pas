@@ -12,6 +12,7 @@ type
   TConfig = class(TObject)
   private
     FSources: TStringList;
+    FPlatforms: TStringList;
     FProduct: string;
     FRegistryKey: string;
     FWorkspaceDir: string;
@@ -19,12 +20,19 @@ type
     function ConfigPath: string;
   public
     property Sources: TStringList read FSources;
+    /// <summary>Platforms this workspace targets. An empty list means "all platforms
+    ///   supported by the configured Delphi version" (see <c>IsPlatformEnabled</c>).</summary>
+    property Platforms: TStringList read FPlatforms;
 
     property Product: string read FProduct write FProduct;
     property RegistryKey: string read FRegistryKey write FRegistryKey;
     /// <summary>When True, "init" registers the blocks DCP output directory on the
     ///   Delphi library Search Path (see <c>TProduct.CheckDCPPath</c>). Default False.</summary>
     property UpdateDCPSearchPath: Boolean read FUpdateDCPSearchPath write FUpdateDCPSearchPath;
+
+    /// <summary>Returns True when <paramref name="APlatform"/> is enabled for this
+    ///   workspace, i.e. the <c>Platforms</c> list is empty (all) or contains it.</summary>
+    function IsPlatformEnabled(const APlatform: string): Boolean;
 
     procedure Load;
     procedure Save;
@@ -42,7 +50,8 @@ type
 implementation
 
 uses
-  Blocks.JSON;
+  Blocks.JSON,
+  Blocks.Core;
 
 const
   WorkspaceSchemaUrl = 'https://delphi-blocks.dev/schema/workspace.v1.json';
@@ -58,6 +67,14 @@ begin
     FSources.Clear;
     for var S in LSources do
       FSources.Add(S);
+  end
+  else if SameText(AKey, 'platforms') then
+  begin
+    FPlatforms.Clear;
+    // An empty value clears the list, restoring the "all platforms" default.
+    if AValue <> '' then
+      for var LPlatform in AValue.Split([',']) do
+        FPlatforms.Add(LPlatform);
   end
   else if SameText(AKey, 'product') then
     FProduct := AValue
@@ -80,6 +97,8 @@ procedure TConfig.Add(const AKey, AValue: string);
 begin
   if SameText(AKey, 'sources') then
     FSources.Add(AValue)
+  else if SameText(AKey, 'platforms') then
+    FPlatforms.Add(AValue)
   else
     raise Exception.CreateFmt('Config "%s" does not exists or doesn''t support /ADD', [AKey]);
 end;
@@ -93,14 +112,22 @@ begin
       raise Exception.CreateFmt('Value "%s" not found in "%s"', [AValue, AKey]);
     FSources.Delete(LIndex);
   end
+  else if SameText(AKey, 'platforms') then
+  begin
+    var LIndex := FPlatforms.IndexOf(AValue);
+    if LIndex < 0 then
+      raise Exception.CreateFmt('Value "%s" not found in "%s"', [AValue, AKey]);
+    FPlatforms.Delete(LIndex);
+  end
   else
     raise Exception.CreateFmt('Config "%s" does not exists or doesn''t support /DELETE', [AKey]);
 end;
 
 function TConfig.ConfigPath: string;
 begin
-  ForceDirectories(FWorkspaceDir);
-  Result := TPath.Combine(FWorkspaceDir, '.blocks', 'workspace.json');
+  var LBlocksDir := TPath.Combine(FWorkspaceDir, '.blocks');
+  ForceDirectories(LBlocksDir);
+  Result := TPath.Combine(LBlocksDir, 'workspace.json');
 end;
 
 constructor TConfig.Create(const AWorkspaceDir: string);
@@ -109,6 +136,7 @@ begin
   FWorkspaceDir := AWorkspaceDir;
   FSources := TStringList.Create;
   FSources.Add(DefaultBlocksRepositoryUrl);
+  FPlatforms := TStringList.Create;
   FRegistryKey := 'BDS';
   FUpdateDCPSearchPath := False;
 end;
@@ -116,13 +144,21 @@ end;
 destructor TConfig.Destroy;
 begin
   FSources.Free;
+  FPlatforms.Free;
   inherited;
+end;
+
+function TConfig.IsPlatformEnabled(const APlatform: string): Boolean;
+begin
+  Result := PlatformInList(FPlatforms.ToStringArray, APlatform);
 end;
 
 function TConfig.Get(const AKey: string): string;
 begin
   if SameText(AKey, 'sources') then
     Result := string.Join(',', FSources.ToStringArray)
+  else if SameText(AKey, 'platforms') then
+    Result := string.Join(',', FPlatforms.ToStringArray)
   else if SameText(AKey, 'product') then
     Result := FProduct
   else if SameText(AKey, 'registrykey') then
@@ -149,9 +185,7 @@ begin
     finally
       LJSON.Free;
     end;
-  end
-  else
-    Save;
+  end;
 end;
 
 procedure TConfig.Save;

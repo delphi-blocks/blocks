@@ -125,6 +125,11 @@ function IsPosix(const APlatform: string): Boolean;
 ///   the <c>.so</c> used by the other POSIX targets.</summary>
 function IsApple(const APlatform: string): Boolean;
 
+/// <summary>Returns True when <paramref name="APlatform"/> is allowed by the
+///   list <paramref name="AList"/>. An empty list means "all platforms", so it
+///   always returns True; otherwise the match is case-insensitive.</summary>
+function PlatformInList(const AList: TArray<string>; const APlatform: string): Boolean;
+
 type
   // -- Filesystem helpers (resilient to transient AV/indexer locks) -----------
   TFileUtils = class
@@ -216,6 +221,18 @@ const
 begin
   Result := False;
   for var LPlatform in ApplePlatforms do
+    if SameText(APlatform, LPlatform) then
+      Exit(True);
+end;
+
+function PlatformInList(const AList: TArray<string>; const APlatform: string): Boolean;
+begin
+  // An empty list is the "all platforms" sentinel.
+  if Length(AList) = 0 then
+    Exit(True);
+
+  Result := False;
+  for var LPlatform in AList do
     if SameText(APlatform, LPlatform) then
       Exit(True);
 end;

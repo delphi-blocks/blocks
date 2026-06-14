@@ -92,6 +92,8 @@ type
     FRegistryKey: string;
     [Param('source', 'sources')]
     FSource: string;
+    [Param('platforms', 'platform')]
+    FPlatforms: string;
   public
     procedure Execute; override;
     procedure ShowHelp; override;
@@ -507,7 +509,7 @@ begin
   begin
     TConsole.WriteLine('Initialising workspace: ' + GetCurrentDir, clWhite);
     TConsole.WriteLine;
-    TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey, FSource);
+    TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey, FSource, FPlatforms);
     TConsole.WriteLine('Workspace initialised.', clGreen);
     TConsole.WriteLine;
   end;
@@ -530,11 +532,15 @@ begin
   WriteOption('', 'Use this when Delphi is started with -r <key>.');
   WriteOption('/source <url>', 'Package source(s) to use instead of the default.');
   WriteOption('/sources <url>', 'Alias of /source. Separate multiple sources with commas.');
+  WriteOption('/platforms <list>', 'Comma-separated platforms to target (e.g. Win32,Win64).');
+  WriteOption('', 'If omitted, you will be prompted to choose; selecting none');
+  WriteOption('', 'targets all platforms supported by the Delphi version.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' init');
   TConsole.WriteLine('  ' + AppExeName + ' init /source https://github.com/owner/repo');
   TConsole.WriteLine('  ' + AppExeName + ' init /sources https://github.com/a/r1,https://github.com/b/r2');
+  TConsole.WriteLine('  ' + AppExeName + ' init /product delphi13 /platforms Win32,Win64');
   TConsole.WriteLine;
 end;
 
@@ -846,6 +852,13 @@ begin
     else
       for var LSource in TWorkspace.Config.Sources do
         TConsole.WriteLine('    ' + LSource);
+
+    WriteSectionTitle('Platforms');
+    if TWorkspace.Config.Platforms.Count = 0 then
+      TConsole.WriteLine('    (all)', clDkGray)
+    else
+      for var LPlatform in TWorkspace.Config.Platforms do
+        TConsole.WriteLine('    ' + LPlatform);
     TConsole.WriteLine;
     Exit;
   end;
@@ -876,6 +889,20 @@ begin
           TSystemConfig.Delete(LKey, LValue)
         else
           TSystemConfig.Set(LKey, LValue);
+      end
+      else if SameText(LKey, 'platforms') and not FDelete then
+      begin
+        // Validate platform names against the configured Delphi version and store
+        // them in canonical casing. Removals (/delete) fall through to the generic
+        // path so a platform that is no longer buildable can still be removed.
+        var LProduct := TProduct.Find(TWorkspace.Config.Product, TWorkspace.Config.RegistryKey);
+        var LNormalized := LProduct.NormalizePlatforms(LValue.Split([',']));
+        if FAdd then
+          for var LPlatform in LNormalized do
+            TWorkspace.Config.Add(LKey, LPlatform)
+        else
+          TWorkspace.Config.&Set(LKey, string.Join(',', LNormalized));
+        TWorkspace.Config.Save;
       end
       else
       begin
@@ -917,6 +944,9 @@ begin
   WriteOption('sources', 'Comma-separated list of repository URLs used by "init".');
   WriteOption('', 'After changing this key, run "' + AppExeName + ' init" to refresh');
   WriteOption('', 'the local repository.');
+  WriteOption('platforms', 'Comma-separated platforms this workspace targets (e.g. Win32,Win64).');
+  WriteOption('', 'Empty means all platforms supported by the Delphi version.');
+  WriteOption('', 'Supports /add and /delete for single platforms.');
   WriteOption('product', 'Target Delphi version name (e.g. delphi12, delphi13).');
   WriteOption('registrykey', 'Registry profile key for the target Delphi IDE (default: BDS).');
   WriteOption('updatedcpsearchpath', 'When true, "init" adds the blocks DCP output directory to the');
@@ -936,6 +966,9 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' config /add sources=https://github.com/owner/other-repo');
   TConsole.WriteLine('  ' + AppExeName + ' config /delete sources=https://github.com/owner/other-repo');
   TConsole.WriteLine('  ' + AppExeName + ' config product');
+  TConsole.WriteLine('  ' + AppExeName + ' config platforms=Win32,Win64');
+  TConsole.WriteLine('  ' + AppExeName + ' config /add platforms=Win64');
+  TConsole.WriteLine('  ' + AppExeName + ' config /delete platforms=Win64');
   TConsole.WriteLine('  ' + AppExeName + ' config registrykey=myprofile');
   TConsole.WriteLine('  ' + AppExeName + ' config updatedcpsearchpath=true');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath');

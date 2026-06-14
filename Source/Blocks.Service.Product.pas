@@ -136,6 +136,20 @@ type
     /// <param name="APlatform">Platform identifier, e.g. <c>Win32</c>.</param>
     function IsPlatformBuildable(const APlatform: string): Boolean;
 
+    /// <summary>The product platforms that are buildable (see <see cref="IsPlatformBuildable"/>),
+    ///   in the product's canonical casing. Used to offer/validate workspace platforms.</summary>
+    function BuildablePlatforms: TArray<string>;
+
+    /// <summary>Prompts the user to pick a subset of <see cref="BuildablePlatforms"/>.</summary>
+    /// <returns>The selected platform names (canonical casing), or an empty array when the
+    ///   user selects none (ENTER), meaning "all platforms".</returns>
+    function ChoosePlatforms: TArray<string>;
+
+    /// <summary>Maps each entry of <paramref name="APlatforms"/> to its canonical
+    ///   <see cref="BuildablePlatforms"/> name (case-insensitively).</summary>
+    /// <exception cref="Exception">Raised when an entry is not a buildable platform.</exception>
+    function NormalizePlatforms(const APlatforms: TArray<string>): TArray<string>;
+
     /// <summary>Resolves the best matching package folder key for this Delphi version.</summary>
     /// <param name="APackageFolders">Dictionary mapping version-name keys (optionally suffixed
     ///   with <c>+</c>) to folder name values, as declared in the package manifest.</param>
@@ -162,10 +176,15 @@ type
 
     /// <summary>Compiles all declared packages and updates the Delphi library registry paths.</summary>
     /// <param name="AProjectDir">Root directory of the extracted project.</param>
-    /// <param name="APackages">Package descriptors from the manifest, one per <c>.dproj</c> file.</param>
-    /// <param name="APlatforms">Target platform configurations from the manifest.</param>
+    /// <param name="AManifest">The package manifest providing packages and platforms.</param>
+    /// <param name="AEnabledPlatforms">Workspace platform filter; an empty array means "all".
+    ///   Platforms not in the list are skipped (see <c>PlatformInList</c>).</param>
     /// <exception cref="Exception">Raised when a platform is not installed or a package fails to compile.</exception>
-    procedure BuildPackages(const AWorkspaceDir, AProjectDir: string; const AManifest: TManifest);
+    procedure BuildPackages(
+        const AWorkspaceDir, AProjectDir: string;
+        const AManifest: TManifest;
+        const AEnabledPlatforms: TArray<string>
+    );
 
     /// <summary>Delete package (bpl and dcp).</summary>
     procedure RemovePackage(
@@ -882,6 +901,73 @@ begin
 
   TConsole.WriteLine('Invalid selection, using default.', clYellow);
   Result := FProducts[0];
+end;
+
+function TProduct.BuildablePlatforms: TArray<string>;
+begin
+  Result := [];
+  for var LPlatform in Platforms.Keys do
+    if IsPlatformBuildable(LPlatform) then
+      Result := Result + [LPlatform];
+end;
+
+function TProduct.ChoosePlatforms: TArray<string>;
+begin
+  var LBuildable := BuildablePlatforms;
+  Result := [];
+
+  if Length(LBuildable) = 0 then
+    Exit;
+
+  TConsole.WriteLine('Available platforms:', clGreen);
+  for var I := 0 to High(LBuildable) do
+    TConsole.WriteLine(Format('  [%d] %s', [I + 1, LBuildable[I]]));
+  TConsole.WriteLine;
+
+  TConsole.Write(Format('Select platforms [1-%d], comma separated (ENTER for all): ', [Length(LBuildable)]));
+  var LInput := Trim(TConsole.ReadLine);
+  if LInput = '' then
+    Exit;
+
+  for var LToken in LInput.Split([','], TStringSplitOptions.ExcludeEmpty) do
+  begin
+    var LIndex: Integer;
+    if not (TryStrToInt(Trim(LToken), LIndex) and (LIndex >= 1) and (LIndex <= Length(LBuildable))) then
+      raise Exception.CreateFmt('Invalid platform selection "%s".', [Trim(LToken)]);
+
+    var LPlatform := LBuildable[LIndex - 1];
+    Result := Result + [LPlatform];
+  end;
+end;
+
+function TProduct.NormalizePlatforms(const APlatforms: TArray<string>): TArray<string>;
+begin
+  var LBuildable := BuildablePlatforms;
+  Result := [];
+
+  for var LRequested in APlatforms do
+  begin
+    var LTrimmed := Trim(LRequested);
+    if LTrimmed = '' then
+      Continue;
+
+    var LCanonical := '';
+    for var LPlatform in LBuildable do
+      if SameText(LPlatform, LTrimmed) then
+      begin
+        LCanonical := LPlatform;
+        Break;
+      end;
+
+    if LCanonical = '' then
+      raise Exception.CreateFmt(
+          'Platform "%s" is not buildable on %s. Available: %s',
+          [LTrimmed, FDisplayName, string.Join(', ', LBuildable)]);
+
+    // Skip duplicates so the stored list stays unique (case-insensitive).
+    if not TArray.Contains<string>(Result, LCanonical, TIStringComparer.Ordinal) then
+      Result := Result + [LCanonical];
+  end;
 end;
 
 procedure TProduct.InstallPackage(
@@ -1602,7 +1688,11 @@ begin
   end;
 end;
 
-procedure TProduct.BuildPackages(const AWorkspaceDir, AProjectDir: string; const AManifest: TManifest);
+procedure TProduct.BuildPackages(
+    const AWorkspaceDir, AProjectDir: string;
+    const AManifest: TManifest;
+    const AEnabledPlatforms: TArray<string>
+);
 begin
   var BuildConfigs := ['debug', 'release'];
   var PackagesPath := GetPackagesPath(AProjectDir, AManifest);
@@ -1611,6 +1701,9 @@ begin
   try
     for var LPlatformPair in AManifest.Platforms do
     begin
+      // Honour the workspace platform filter (empty = all).
+      if not PlatformInList(AEnabledPlatforms, LPlatformPair.Key) then
+        Continue;
       var LProductPlatform: TProductPlatform;
       if not (Platforms.TryGetValue(LPlatformPair.Key, LProductPlatform) and LProductPlatform.Active) then
         Continue;
@@ -1648,6 +1741,9 @@ begin
   for var LPlatformPair in AManifest.Platforms do
   begin
     var LPlatform := LPlatformPair.Key;
+    // Honour the workspace platform filter (empty = all).
+    if not PlatformInList(AEnabledPlatforms, LPlatform) then
+      Continue;
     var LProductPlatform: TProductPlatform;
     if not (Platforms.TryGetValue(LPlatform, LProductPlatform) and LProductPlatform.Active) then
       Continue;

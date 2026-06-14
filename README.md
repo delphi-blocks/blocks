@@ -65,7 +65,7 @@ For an annotated example and a full field-by-field reference, see [docs/manifest
 
 ## Building from source
 
-All source files are under `Source/`. The project has no external dependencies: open `Source\Blocks.dproj` in Delphi / RAD Studio and compile. The compiled executable (`Blocks.exe`) is placed in the project root.
+All source files are under `Source/`. **Building requires Delphi 13 or later**. The project has no external dependencies: open `Source\Blocks.dproj` in Delphi / RAD Studio and compile. The compiled executable (`Blocks.exe`) is placed in the project root.
 
 ## License
 

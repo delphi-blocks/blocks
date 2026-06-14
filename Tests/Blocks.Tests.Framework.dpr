@@ -47,7 +47,9 @@ uses
   Blocks.Service.Script in '..\Source\Blocks.Service.Script.pas',
   Blocks.Tests.Script in 'Blocks.Tests.Script.pas',
   Blocks.Bitbucket in '..\Source\Blocks.Bitbucket.pas',
-  Blocks.Tests.Bitbucket in 'Blocks.Tests.Bitbucket.pas';
+  Blocks.Tests.Bitbucket in 'Blocks.Tests.Bitbucket.pas',
+  Blocks.Model.Config in '..\Source\Blocks.Model.Config.pas',
+  Blocks.Tests.Config in 'Blocks.Tests.Config.pas';
 
 var
   runner : ITestRunner;

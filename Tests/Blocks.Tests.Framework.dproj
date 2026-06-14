@@ -149,6 +149,8 @@
         <DCCReference Include="Blocks.Tests.Script.pas"/>
         <DCCReference Include="..\Source\Blocks.Bitbucket.pas"/>
         <DCCReference Include="Blocks.Tests.Bitbucket.pas"/>
+        <DCCReference Include="..\Source\Blocks.Model.Config.pas"/>
+        <DCCReference Include="Blocks.Tests.Config.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

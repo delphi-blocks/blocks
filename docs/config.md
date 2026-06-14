@@ -29,6 +29,7 @@ workspace.
 | Key                   | Type    | Default | Meaning                                                                                  |
 |-----------------------|---------|---------|------------------------------------------------------------------------------------------|
 | `sources`             | list    | the official `blocks-repository` | Comma-separated list of repository URLs `init` downloads the package index from. |
+| `platforms`           | list    | *(empty = all)* | Platforms this workspace targets when installing/uninstalling packages.         |
 | `product`             | string  | *(set by `init`)* | Target Delphi version name (e.g. `delphi12`, `delphi13`).                       |
 | `registrykey`         | string  | `BDS`   | Registry profile key for the target Delphi IDE, matching `bds.exe -r <key>`.            |
 | `updatedcpsearchpath` | boolean | `false` | Whether `init` adds the Blocks DCP output directory to the Delphi library Search Path.  |
@@ -63,6 +64,29 @@ blocks config /add sources=C:\path\to\local-repository
 
 After changing `sources`, run `blocks init` to refresh the local repository
 index.
+
+### `platforms`
+
+The platforms this workspace builds and registers packages for. When **empty**
+(the default), a package is installed for every platform it supports that is also
+active and buildable in the configured Delphi version — the original behaviour.
+When the list is **not empty**, install, build and uninstall skip any platform
+that is not in it.
+
+`init` offers to set this interactively (after choosing the Delphi version), or
+you can pass it non-interactively with `init /platforms Win32,Win64`. Edit it
+later with `config`, using `/add` and `/delete` for single platforms:
+
+```
+blocks config platforms=Win32,Win64
+blocks config /add platforms=Win64
+blocks config /delete platforms=Win64
+blocks config platforms=                 # clear the list (target all platforms again)
+```
+
+Platform names are validated against — and stored in the canonical casing of —
+the buildable platforms of the configured Delphi version, so an unknown or
+non-installed platform is rejected.
 
 ### `product` and `registrykey`
 

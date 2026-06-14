@@ -57,6 +57,17 @@ type
     procedure TestVariableWithEmptyValueResolvesToEmpty;
   end;
 
+  [TestFixture]
+  TPlatformInListTest = class(TObject)
+  public
+    [Test]
+    procedure TestEmptyListMeansAll;
+    [Test]
+    procedure TestMatchIsCaseInsensitive;
+    [Test]
+    procedure TestPlatformNotInListReturnsFalse;
+  end;
+
 implementation
 
 procedure TExpandVariablesTest.Setup;
@@ -138,7 +149,26 @@ begin
   Assert.AreEqual('[]', ExpandVariables('[%EMPTY%]', FEnv));
 end;
 
+{ TPlatformInListTest }
+
+procedure TPlatformInListTest.TestEmptyListMeansAll;
+begin
+  // An empty list is the "all platforms" sentinel, so anything matches.
+  Assert.IsTrue(PlatformInList([], 'Win32'));
+end;
+
+procedure TPlatformInListTest.TestMatchIsCaseInsensitive;
+begin
+  Assert.IsTrue(PlatformInList(['Win32', 'Win64'], 'win64'));
+end;
+
+procedure TPlatformInListTest.TestPlatformNotInListReturnsFalse;
+begin
+  Assert.IsFalse(PlatformInList(['Win32'], 'Win64'));
+end;
+
 initialization
   TDUnitX.RegisterTestFixture(TExpandVariablesTest);
+  TDUnitX.RegisterTestFixture(TPlatformInListTest);
 
 end.

@@ -152,11 +152,15 @@ Options:
                          Use this when Delphi is started with -r <key>.
   /source <url>          Package source(s) to use instead of the default.
   /sources <url>         Alias of /source. Separate multiple sources with commas.
+  /platforms <list>      Comma-separated platforms to target (e.g. Win32,Win64).
+                         If omitted, you will be prompted to choose; selecting
+                         none targets all platforms supported by the version.
 
 Examples:
   Blocks init
   Blocks init /source https://github.com/owner/repo
   Blocks init /sources https://github.com/a/r1,https://github.com/b/r2
+  Blocks init /product delphi13 /platforms Win32,Win64
 ```
 
 ## List
@@ -231,6 +235,9 @@ Workspace keys:
   sources                Comma-separated list of repository URLs used by "init".
                          After changing this key, run "Blocks init" to refresh
                          the local repository.
+  platforms              Comma-separated platforms this workspace targets (e.g.
+                         Win32,Win64). Empty means all platforms supported by the
+                         Delphi version. Supports /add and /delete.
   product                Target Delphi version name (e.g. delphi12, delphi13).
   registrykey            Registry profile key for the target Delphi IDE (default: BDS).
   updatedcpsearchpath    When true, "init" adds the blocks DCP output directory to the
@@ -250,6 +257,9 @@ Examples:
   Blocks config /add sources=https://github.com/owner/other-repo
   Blocks config /delete sources=https://github.com/owner/other-repo
   Blocks config product
+  Blocks config platforms=Win32,Win64
+  Blocks config /add platforms=Win64
+  Blocks config /delete platforms=Win64
   Blocks config registrykey=myprofile
   Blocks config updatedcpsearchpath=true
   Blocks config /system InstallPath

@@ -66,6 +66,8 @@ type
     /// <param name="AWorkDir">Directory to initialise as the workspace root.</param>
     /// <param name="AProduct">Target Delphi version name (e.g. <c>delphi13</c>); empty to select interactively.</param>
     /// <param name="ASources">Comma-separated package source URL(s) to use; empty keeps the configured/default source.</param>
+    /// <param name="APlatforms">Comma-separated platform names to target; empty means "all" (and, when the
+    ///   Delphi version is chosen interactively, the user is prompted to pick a subset).</param>
     /// <remarks>
     ///   Performs the following steps in order:
     ///   1. Sets <see cref="WorkDir"/> to <c>AWorkDir</c> and creates <see cref="BlocksDir"/> if absent.
@@ -75,7 +77,11 @@ type
     ///   4. Extracts the archive and installs <c>repository\</c> under <see cref="BlocksDir"/>.
     ///   Prompts the user before overwriting an existing repository folder.
     /// </remarks>
-    class procedure Initialize(const AWorkDir, AProduct, ARegistryKey: string; const ASources: string = ''); static;
+    class procedure Initialize(
+        const AWorkDir, AProduct, ARegistryKey: string;
+        const ASources: string = '';
+        const APlatforms: string = ''
+    ); static;
 
     /// <summary>Update the workspace by downloading the package list.</summary>
     class procedure Update(const AWorkDir: string); static;
@@ -316,7 +322,11 @@ begin
   end;
 end;
 
-class procedure TWorkspace.Initialize(const AWorkDir, AProduct, ARegistryKey: string; const ASources: string);
+class procedure TWorkspace.Initialize(
+    const AWorkDir, AProduct, ARegistryKey: string;
+    const ASources: string;
+    const APlatforms: string
+);
 begin
   SetWorkDir(AWorkDir);
 
@@ -340,8 +350,9 @@ begin
       LRegistryKey := Config.RegistryKey;
   end;
 
+  var LProductChosenInteractively := LProductName = '';
   var LSelectedProduct: TProduct;
-  if LProductName = '' then
+  if LProductChosenInteractively then
     LSelectedProduct := TProduct.Choose
   else
     LSelectedProduct :=
@@ -352,10 +363,34 @@ begin
         );
   Config.Product := LSelectedProduct.VersionName;
   Config.RegistryKey := LSelectedProduct.RegistryKey;
-  Config.Save;
   TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
   if not SameText(LSelectedProduct.RegistryKey, 'BDS') then
     TConsole.WriteLine('Registry key    : ' + LSelectedProduct.RegistryKey, clGreen);
+  TConsole.WriteLine;
+
+  // Select target platforms: explicit /platforms wins; otherwise, when the Delphi
+  // version was chosen interactively and no platforms are configured yet, prompt
+  // for a subset. An empty list means "all platforms".
+  if APlatforms <> '' then
+  begin
+    var LPlatforms := LSelectedProduct.NormalizePlatforms(APlatforms.Split([',']));
+    Config.Platforms.Clear;
+    for var LPlatform in LPlatforms do
+      Config.Platforms.Add(LPlatform);
+  end
+  else if LProductChosenInteractively and (Config.Platforms.Count = 0) then
+  begin
+    var LPlatforms := LSelectedProduct.ChoosePlatforms;
+    Config.Platforms.Clear;
+    for var LPlatform in LPlatforms do
+      Config.Platforms.Add(LPlatform);
+    TConsole.WriteLine;
+  end;
+
+  if Config.Platforms.Count = 0 then
+    TConsole.WriteLine('Selected platforms: all', clGreen)
+  else
+    TConsole.WriteLine('Selected platforms: ' + string.Join(', ', Config.Platforms.ToStringArray), clGreen);
   TConsole.WriteLine;
 
   if Config.Sources.Count = 0 then
@@ -378,6 +413,7 @@ begin
 
   LSelectedProduct.CheckEnvironment(AWorkDir);
 
+  Config.Save;
   Database.TouchRepository;
 end;
 
@@ -579,8 +615,8 @@ begin
       TConsole.WriteLine;
     end;
 
-    // Step 8 — Compile
-    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LManifest);
+    // Step 8 — Compile (restricted to the workspace's enabled platforms, if any)
+    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LManifest, Config.Platforms.ToStringArray);
 
     // Step 9 — Update product paths
     var LEnvironmentVariables := TStringList.Create;
@@ -588,6 +624,10 @@ begin
       LSelectedProduct.FillEnvironmentVariables(LEnvironmentVariables);
       for var LPlatformPair in LManifest.Platforms do
       begin
+        // Skip platforms the workspace does not target (empty filter = all).
+        if not Config.IsPlatformEnabled(LPlatformPair.Key) then
+          Continue;
+
         var LPackagesPath := LSelectedProduct.GetPackagesPath(LProjectDir, LManifest);
 
         for var LPackage in LManifest.Packages do
@@ -681,6 +721,11 @@ begin
         try
           for var LPlatformPair in LManifest.Platforms do
           begin
+            // Skip platforms the workspace does not target (empty filter = all),
+            // mirroring the install-time filter so we only clean what we built.
+            if not Config.IsPlatformEnabled(LPlatformPair.Key) then
+              Continue;
+
             // Mirror the install/build filter: only platforms that were actually
             // buildable (active + compiler installed) ever produced output to
             // clean up, so skip the rest to avoid spurious delete warnings.
