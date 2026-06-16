@@ -84,6 +84,10 @@ type
         const APlatform, AConfig, AOutputType: string
     ): string;
 
+    /// <summary>Reads rsvars.bat (or rsvars64.bat on Win64/Delphi 13+) and applies
+    ///   each <c>SET NAME=VALUE</c> entry to the current process environment.</summary>
+    procedure LoadRsVarsEnvironment(const APlatform: string);
+
     /// <summary>Locates MSBuild, sets the Delphi build environment variables, and
     ///   compiles a single project (<c>.dproj</c>) for one config/platform.</summary>
     /// <param name="AProjectFileName">Full path to the <c>.dproj</c> to build.</param>
@@ -300,6 +304,7 @@ implementation
 
 uses
   System.Win.Registry,
+  System.RegularExpressions,
   Winapi.Windows,
   Winapi.TlHelp32,
   Blocks.Core,
@@ -335,48 +340,6 @@ type
     MaximumLength: Word;
     Buffer: PWideChar;
   end;
-
-// -- MSBuild location ----------------------------------------------------------
-
-function GetMsBuildPath: string;
-begin
-  // 1. Already on PATH
-  for var Candidate in GetEnvironmentVariable('PATH').Split([';']) do
-  begin
-    var Exe := IncludeTrailingPathDelimiter(Candidate) + 'MSBuild.exe';
-    if TFile.Exists(Exe) then
-      Exit(Exe);
-  end;
-
-  // 2. .NET Framework standard locations (used by Delphi build scripts)
-  for var Candidate
-      in [
-          GetEnvironmentVariable('SystemRoot') + '\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe',
-          GetEnvironmentVariable('SystemRoot') + '\Microsoft.NET\Framework\v3.5\MSBuild.exe'] do
-    if TFile.Exists(Candidate) then
-      Exit(Candidate);
-
-  // 3. MSBuild registry ToolsVersions
-  var Reg := TRegistry.Create(KEY_READ);
-  try
-    Reg.RootKey := HKEY_LOCAL_MACHINE;
-    if Reg.OpenKeyReadOnly('SOFTWARE\Microsoft\MSBuild\ToolsVersions\4.0') then
-    begin
-      var ToolsPath := Reg.ReadString('MSBuildToolsPath');
-      Reg.CloseKey;
-      if ToolsPath <> '' then
-      begin
-        var Candidate := IncludeTrailingPathDelimiter(ToolsPath) + 'MSBuild.exe';
-        if TFile.Exists(Candidate) then
-          Exit(Candidate);
-      end;
-    end;
-  finally
-    Reg.Free;
-  end;
-
-  raise Exception.Create('MSBuild not found. Please install .NET Framework SDK or Visual Studio Build Tools.');
-end;
 
 // -- Compiler location ---------------------------------------------------------
 
@@ -1360,6 +1323,60 @@ begin
   end;
 end;
 
+procedure TProduct.LoadRsVarsEnvironment(const APlatform: string);
+
+  function ExpandValue(const AValue: string): string;
+  var
+    LSize: DWORD;
+  begin
+    if AValue = '' then
+      Exit('');
+
+    LSize := ExpandEnvironmentStrings(PChar(AValue), nil, 0);
+    if LSize = 0 then
+      Exit(AValue);
+    SetLength(Result, LSize - 1);
+    ExpandEnvironmentStrings(PChar(AValue), PChar(Result), LSize);
+  end;
+
+var
+  LBatFile: string;
+  LLines: TStringList;
+  LRegEx: TRegEx;
+  LMatch: TMatch;
+begin
+  LBatFile := TPath.Combine(FRootDir, 'bin\rsvars.bat');
+
+  // From Delphi 13 (BDS 37.0) onwards, Win64 uses a dedicated rsvars64.bat in bin64.
+  if SameText(APlatform, 'Win64') and (TSemVer(FBdsVersion) >= TSemVer('37.0')) then
+  begin
+    var LBat64 := TPath.Combine(FRootDir, 'bin64\rsvars64.bat');
+    if TFile.Exists(LBat64) then
+      LBatFile := LBat64;
+  end;
+
+  if not TFile.Exists(LBatFile) then
+    Exit;
+
+  LRegEx := TRegEx.Create('^\s*@?\s*SET\s+(\w+)\s*=(.*)', [roIgnoreCase]);
+
+  LLines := TStringList.Create;
+  try
+    LLines.LoadFromFile(LBatFile);
+    for var LLine in LLines do
+    begin
+      LMatch := LRegEx.Match(LLine);
+      if not LMatch.Success then
+        Continue;
+      var LName := LMatch.Groups[1].Value;
+      var LValue := ExpandValue(LMatch.Groups[2].Value);
+      SetEnvironmentVariable(PChar(LName), PChar(LValue));
+    end;
+  finally
+    LLines.Free;
+  end;
+end;
+
 class function TProduct.GetProductNames: TArray<string>;
 begin
   Result := [];
@@ -1605,6 +1622,8 @@ function TProduct.CompileProject(
     AConfig,
     APlatform: string
 ): string;
+const
+  MsBuild = 'msbuild.exe';
 begin
   var LPackageProject := TPackageProject.LoadFromFile(AProjectFileName);
   try
@@ -1627,26 +1646,8 @@ begin
     if LSuffix <> '' then
       LDcuOutput := TPath.Combine(LDcuOutput, LSuffix);
 
-    var LBdsDir := FRootDir;
-    var LBdsCommonDir :=
-        TPath.Combine(GetEnvironmentVariable('PUBLIC'), TPath.Combine('Documents\Embarcadero\Studio', FBdsVersion));
-    var LMsBuild := GetMsBuildPath;
-
-    // Set Delphi environment variables inherited by child processes
-    SetEnvironmentVariable('BDS', PChar(LBdsDir));
-    SetEnvironmentVariable('BDSINCLUDE', PChar(LBdsDir + '\include'));
-    SetEnvironmentVariable('BDSCOMMONDIR', PChar(LBdsCommonDir));
-    SetEnvironmentVariable('LANGDIR', 'EN');
-    SetEnvironmentVariable('PLATFORM', '');
-
-    // Prepend BDS bin dirs to PATH (no duplicates)
-    var LCurPath := GetEnvironmentVariable('PATH');
-    var LNewPath := LCurPath;
-    for var LBinDir in [LBdsDir + '\bin64', LBdsDir + '\bin'] do
-      if Pos(LBinDir, LNewPath) = 0 then
-        LNewPath := LBinDir + ';' + LNewPath;
-    if LNewPath <> LCurPath then
-      SetEnvironmentVariable('PATH', PChar(LNewPath));
+    // Set Delphi environment variables from rsvars.bat
+    LoadRsVarsEnvironment(APlatform);
 
     // Only emit a /p:DCC_* override when a value is supplied: passing it empty would
     // wipe the path the project author declared. This lets a bare compile (e.g. an
@@ -1666,7 +1667,7 @@ begin
     var LCmdLine :=
         Format(
             '"%s" "%s" /t:Make /p:config=%s /p:platform=%s %s /nologo /v:quiet',
-            [LMsBuild, AProjectFileName, AConfig, APlatform, LMSBuildParams]
+            [MsBuild, AProjectFileName, AConfig, APlatform, LMSBuildParams]
         );
 
     var LExitCode := RunProcessWithOutput(LCmdLine, Result);
@@ -1730,8 +1731,8 @@ begin
     end;
 
     TConsole.WriteLine('Compiling packages...', clCyan);
+    TConsole.WriteLine('  Product   : ' + Format('%s (%s)', [FDisplayName, FRegistryKey]));
     TConsole.WriteLine('  BDS       : ' + FRootDir);
-    TConsole.WriteLine('  Packages  : ' + PackagesPath);
     TConsole.WriteLine('  Platforms : ' + PlatformNames.CommaText);
     TConsole.WriteLine;
   finally

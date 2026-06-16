@@ -60,7 +60,8 @@ __recovery/
 *.stat
 
 nul
-.claude/
+.claude/*
+!.claude/skills/
 .blocks/
 /AGENTS.md
 Demo/Workspace/workspace.json

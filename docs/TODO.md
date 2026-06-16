@@ -7,6 +7,8 @@
 - [x] `build` command that recompiles an already installed package
 - [x] Change macros from %NAME% to $(NAME)
 - [x] Support for platforms other than Win32 and Win64
+- [x] Set up the MSBuild environment by reading `rsvars.bat` (or `rsvars64.bat` on Win64/Delphi 13+) instead of hardcoded paths
+- [ ] Add an application icon to the executable
 - [ ] Import and export of the dependency database so the same environment can be recreated on another machine
 - [ ] Test installation/uninstallation on macOS and mobile (Android, iOS): verify the
       `bpl<name>.so`/`.dylib` output naming and the `.imp.o` import-object location
