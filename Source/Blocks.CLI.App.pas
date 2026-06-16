@@ -832,7 +832,9 @@ begin
       ' ╚═════╝ ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚══════╝',
       clDkCyan
   );
+  var LVersion := TAppVersion.GetCurrentVersion;
   TConsole.WriteLine('   ▸  Delphi Package Installer', clDkCyan);
+  TConsole.WriteLine('   ▸  Version: ' + LVersion, clDkCyan);
   TConsole.WriteLine;
 
   if AppName <> '' then
