@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="470pt" height="470pt" preserveAspectRatio="xMidYMid" version="1.0" viewBox="0 0 470 470" xml:space="preserve" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle left -->
+  <path d="m470 235a235 235 0 0 1-235 235 235 235 0 0 1-235-235 235 235 0 0 1 235-235 235 235 0 0 1 235 235z" fill="#e82331"/>
+  <!-- Background circle right -->
+  <path d="m469.94 235c-2e-5 129.79-105.21 235-235 235v-470c129.79 0 235 105.21 235 235z" fill="#960b20"/>
+  <!-- top cube top face and arrow -->
+  <path fill="#fff" d="m234.94 50.944 111.56 51.337v89.438l28.5-4.5-51.75 75.75-52.031-55.781 28.5-6-0.0937-69.656-28.031-13.5-36.662 17.887-86.526-44.418z"/>
+  <!-- top cube left face -->
+  <path fill="#BFBDBD" d="m140.62 102.66v98.344l88.5 45.75v-99.75z"/>
+  <!-- top cube right face -->
+  <path fill="#E0E0E0" d="m241.31 147 30.188-14.906 16.688 7.6875v50.625l-41.532 8.8128 27.375 31.312-32.719 16.219z"/>
+  <!-- right cube top face -->
+  <path fill="#fff" d="m283.4 239.84-34.074 17.766 74.114 44.08 75.638-43.407-39.311-25.731-35.532 50.116z"/>
+  <!-- right cube right face -->
+  <path fill="#E0E0E0" d="m330.6 312.19 75.572-43.313v86.531l-75.572 48.563z"/>
+  <!-- right cube left face -->
+  <path fill="#BFBDBD" d="m317 312.19v91.781l-75.307-48.563v-86.531z"/>
+  <!-- left cube top face -->
+  <path fill="#fff" d="m139.97 214.59 81.984 43.687-74.297 43.407-76.725-44.08z"/>
+  <!-- left cube left face -->
+  <path fill="#BFBDBD" d="m64.219 268.88 76.5 43.313v91.781l-76.5-48.563z"/>
+  <!-- top cube right face -->
+  <path fill="#E0E0E0" d="m153.09 312.19 75.656-43.313v86.531l-75.656 48.563z"/>
+</svg>

@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="blocks.png" alt="MCPConnect" width="300" height="300" />
+</p>
+
+
 # DelphiBlocks
 
 > **Early preview — work in progress.**
