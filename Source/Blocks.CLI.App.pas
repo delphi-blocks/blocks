@@ -1316,6 +1316,12 @@ begin
 end;
 
 function TUpgradeCommand.SelectSetup(AAssets: TGitHubReleaseAssets): string;
+const
+  {$IFDEF WIN64}
+  PlatformSetupName = 'setup-x64';
+  {$ELSE}
+  PlatformSetupName = 'setup-x32';
+  {$ENDIF}
 begin
   // If there are no assets, exit
   if AAssets.Count <= 0 then
@@ -1332,8 +1338,24 @@ begin
 
   TConsole.WriteLine;
 
-  // If there is more than one setup, ask the user
+  // If there is more than one setup search for a specific platform
   var LBrowserDownloadUrlList: TArray<string> := [];
+  for var LAsset in AAssets do
+  begin
+    if LAsset.BrowserDownloadUrl.Contains(PlatformSetupName, True) then
+    begin
+      LBrowserDownloadUrlList := LBrowserDownloadUrlList + [LAsset.BrowserDownloadUrl];
+    end;
+  end;
+
+  // If there is only one setup, exit
+  if Length(LBrowserDownloadUrlList) = 1 then
+  begin
+    Exit(LBrowserDownloadUrlList[0]);
+  end;
+
+  // Else ask the user
+  LBrowserDownloadUrlList := [];
   for var LAsset in AAssets do
   begin
     if LAsset.BrowserDownloadUrl.Contains('setup', True) then
@@ -1341,10 +1363,9 @@ begin
       LBrowserDownloadUrlList := LBrowserDownloadUrlList + [LAsset.BrowserDownloadUrl];
     end;
   end;
-
-  if Length(LBrowserDownloadUrlList) = 0 then
+  if Length(LBrowserDownloadUrlList) <= 0 then
   begin
-    TConsole.WriteError('No setup package found in release assets');
+    TConsole.WriteError('Setup package not found in release assets');
     Exit('');
   end;
 

@@ -2,15 +2,7 @@
 
 :: Delphi 13.0 Florence
 @SET BDS=C:\Program Files (x86)\Embarcadero\Studio\37.0
-@SET BDSINCLUDE=%BDS%\include
-@SET BDSCOMMONDIR=C:\Users\Public\Documents\Embarcadero\Studio\37.0
-@SET FrameworkDir=C:\Windows\Microsoft.NET\Framework\v4.0.30319
-@SET FrameworkVersion=v4.5
-@SET FrameworkSDKDir=
-@SET PATH=%FrameworkDir%;%FrameworkSDKDir%;%BDS%\bin;%BDS%\bin64;%PATH%
-@SET LANGDIR=EN
-@SET PLATFORM=
-@SET PlatformSDK=
+CALL "%BDS%\bin\rsvars.bat"
 ::::::::::::::::::::::::::::::::
 
 :: Set Target, config and platform
@@ -26,16 +18,17 @@ IF [%3] == [] (SET _PLATFORM="Win32")
 SET BUILDTARGET="/t:%_TARGET%"
 SET BUILDCONFIG="/p:config=%_CONFIG%"
 SET BUILDPLATFORM="/p:platform=%_PLATFORM%"
+SET EXEOUTPUT="/p:DCC_ExeOutput=..\\setup\\%_PLATFORM%"
 
 SET "ERRORCOUNT=0"
 
 @ECHO OFF
 :: Build BLOCKS.EXE
-msbuild ..\Source\Blocks.dproj %BUILDTARGET% %BUILDCONFIG% %BUILDPLATFORM% 
+msbuild ..\Source\Blocks.dproj /t:Rebuild %BUILDTARGET% %BUILDCONFIG% %BUILDPLATFORM% %EXEOUTPUT%
 IF %ERRORLEVEL% NEQ 0 set /a ERRORCOUNT+=1
 
 :: Build LAUNCHER.EXE
-msbuild ..\Source\Launcher.dproj %BUILDTARGET% %BUILDCONFIG% %BUILDPLATFORM% 
+msbuild ..\Source\Launcher.dproj /t:Rebuild %BUILDTARGET% %BUILDCONFIG% %BUILDPLATFORM% %EXEOUTPUT%
 IF %ERRORLEVEL% NEQ 0 set /a ERRORCOUNT+=1
 
 
@@ -77,4 +70,4 @@ if not defined INNO_PATH (
 if "%INNO_PATH:~-1%"=="\" set "INNO_PATH=%INNO_PATH:~0,-1%"
 
 :: Run InnoSetup compiler
-"%INNO_PATH%\ISCC.exe" blocks.iss
+"%INNO_PATH%\ISCC.exe" blocks.iss /DPlatform=%_PLATFORM%

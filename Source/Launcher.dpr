@@ -1,6 +1,8 @@
 program Launcher;
 
 {$APPTYPE CONSOLE}
+{$R *.res}
+
 {$R 'blocks_version.res' 'blocks_version.rc'}
 
 uses
