@@ -9,6 +9,15 @@ uses
   System.JSON;
 
 type
+  {$SCOPEDENUMS ON}
+  /// <summary>Compiler tools architecture MSBuild should use (Delphi 13+). Maps to the
+  ///   <c>DCC_PreferredToolArchitecture</c> MSBuild property: <c>x32</c> uses the 32-bit
+  ///   compiler tools, <c>x64</c> the 64-bit ones (which give the compiler more memory).
+  ///   It only affects the tools, not the produced binary. <c>default</c> (the default)
+  ///   leaves the choice to Delphi: the property is not passed to MSBuild at all.</summary>
+  TToolArchitecture = (default, x32, x64);
+  {$SCOPEDENUMS OFF}
+
   TConfig = class(TObject)
   private
     FSources: TStringList;
@@ -17,6 +26,7 @@ type
     FRegistryKey: string;
     FWorkspaceDir: string;
     FUpdateDCPSearchPath: Boolean;
+    FToolArchitecture: TToolArchitecture;
     function ConfigPath: string;
   public
     property Sources: TStringList read FSources;
@@ -29,6 +39,10 @@ type
     /// <summary>When True, "init" registers the blocks DCP output directory on the
     ///   Delphi library Search Path (see <c>TProduct.CheckDCPPath</c>). Default False.</summary>
     property UpdateDCPSearchPath: Boolean read FUpdateDCPSearchPath write FUpdateDCPSearchPath;
+    /// <summary>Tools architecture passed to MSBuild as
+    ///   <c>/p:DCC_PreferredToolArchitecture=&lt;x32|x64&gt;</c> (Delphi 13+). When
+    ///   <c>default</c> (the default) the property is not passed to MSBuild at all.</summary>
+    property ToolArchitecture: TToolArchitecture read FToolArchitecture write FToolArchitecture;
 
     /// <summary>Returns True when <paramref name="APlatform"/> is enabled for this
     ///   workspace, i.e. the <c>Platforms</c> list is empty (all) or contains it.</summary>
@@ -47,6 +61,12 @@ type
     destructor Destroy; override;
   end;
 
+/// <summary>Returns the MSBuild value (<c>x32</c>/<c>x64</c>) for an architecture.</summary>
+function ToolArchitectureToStr(const AValue: TToolArchitecture): string;
+
+/// <summary>Parses <c>x32</c>/<c>x64</c> (case-insensitive); raises on anything else.</summary>
+function StrToToolArchitecture(const AValue: string): TToolArchitecture;
+
 implementation
 
 uses
@@ -56,6 +76,28 @@ uses
 const
   WorkspaceSchemaUrl = 'https://delphi-blocks.dev/schema/workspace.v1.json';
   DefaultBlocksRepositoryUrl = 'https://github.com/delphi-blocks/blocks-repository';
+
+function ToolArchitectureToStr(const AValue: TToolArchitecture): string;
+begin
+  case AValue of
+    TToolArchitecture.x32: Result := 'x32';
+    TToolArchitecture.x64: Result := 'x64';
+  else
+    Result := 'default';
+  end;
+end;
+
+function StrToToolArchitecture(const AValue: string): TToolArchitecture;
+begin
+  if SameText(AValue, 'default') then
+    Result := TToolArchitecture.default
+  else if SameText(AValue, 'x32') then
+    Result := TToolArchitecture.x32
+  else if SameText(AValue, 'x64') then
+    Result := TToolArchitecture.x64
+  else
+    raise Exception.CreateFmt('Invalid value "%s" for "toolArchitecture" (use default, x32 or x64)', [AValue]);
+end;
 
 { TConfig }
 
@@ -89,6 +131,8 @@ begin
     else
       raise Exception.CreateFmt('Invalid boolean value "%s" for "%s" (use true or false)', [AValue, AKey]);
   end
+  else if SameText(AKey, 'toolarchitecture') then
+    FToolArchitecture := StrToToolArchitecture(AValue)
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;
@@ -139,6 +183,7 @@ begin
   FPlatforms := TStringList.Create;
   FRegistryKey := 'BDS';
   FUpdateDCPSearchPath := False;
+  FToolArchitecture := TToolArchitecture.default;
 end;
 
 destructor TConfig.Destroy;
@@ -170,6 +215,8 @@ begin
     else
       Result := 'false';
   end
+  else if SameText(AKey, 'toolarchitecture') then
+    Result := ToolArchitectureToStr(FToolArchitecture)
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;

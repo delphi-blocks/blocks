@@ -534,7 +534,19 @@ begin
     tkWString: AValue := TJSONHelper.ValueAs<string>(AJSON, '');
     tkUString: AValue := TJSONHelper.ValueAs<string>(AJSON, '');
     tkString: AValue := TJSONHelper.ValueAs<string>(AJSON, '');
-    tkEnumeration: AValue := TJSONHelper.ValueAs<Boolean>(AJSON, False);
+    tkEnumeration:
+    begin
+      if AType.Handle = System.TypeInfo(Boolean) then
+        AValue := TJSONHelper.ValueAs<Boolean>(AJSON, False)
+      else if AJSON is TJSONString then
+      begin
+        // Non-boolean enums are stored by their identifier name; an unknown name
+        // (GetEnumValue returns -1) leaves the property at its existing default.
+        var LOrdinal := GetEnumValue(AType.Handle, TJSONString(AJSON).Value);
+        if LOrdinal >= 0 then
+          AValue := TValue.FromOrdinal(AType.Handle, LOrdinal);
+      end;
+    end;
     tkClass:
     begin
       var LPropInstance := AValue.AsObject;
@@ -809,10 +821,12 @@ begin
     tkString: Result := TJSONString.Create(AValue.AsString);
     tkEnumeration:
     begin
-      if not AValue.IsType<Boolean> then
-        raise EJSONSerializerError.Create('Only boolean enum supported');
-
-      Result := TJSONBool.Create(AValue.AsBoolean);
+      // Booleans stay JSON booleans for backward compatibility; every other enum
+      // is written as its identifier name (e.g. "x32").
+      if AValue.IsType<Boolean> then
+        Result := TJSONBool.Create(AValue.AsBoolean)
+      else
+        Result := TJSONString.Create(GetEnumName(AValue.TypeInfo, AValue.AsOrdinal));
     end;
     tkClass:
     begin

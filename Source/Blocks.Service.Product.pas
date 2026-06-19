@@ -25,6 +25,7 @@ uses
   Blocks.Model.Package,
   Blocks.Model.Database,
   Blocks.Model.Manifest,
+  Blocks.Model.Config,
   Blocks.Service.Script;
 
 type
@@ -91,13 +92,14 @@ type
     /// <summary>Locates MSBuild, sets the Delphi build environment variables, and
     ///   compiles a single project (<c>.dproj</c>) for one config/platform.</summary>
     /// <param name="AProjectFileName">Full path to the <c>.dproj</c> to build.</param>
-    /// <param name="AConfig">Build configuration (e.g. <c>Debug</c> or <c>Release</c>).</param>
-    /// <param name="APlatform">Target platform (e.g. <c>Win32</c>).</param>
-    /// <param name="AOptions">DCC_* output/search-path overrides for this compilation.</param>
+    /// <param name="AOptions">Compilation options (config, platform, tool architecture).</param>
     /// <returns>The captured MSBuild stdout/stderr on success.</returns>
     /// <exception cref="Exception">Raised when MSBuild returns a non-zero exit code;
     ///   the error lines are printed to the console before the exception is raised.</exception>
-    function CompileProject(const AWorkspaceDir, AManifestName, AProjectFileName, AConfig, APlatform: string): string;
+    function CompileProject(
+        const AWorkspaceDir, AManifestName, AProjectFileName: string;
+        const AOptions: ICompilerOptions
+    ): string;
 
   public
     constructor Create(const ABdsVersion, AVersionName, ADisplayName, ARootDir, ARegistryKey: string);
@@ -181,13 +183,13 @@ type
     /// <summary>Compiles all declared packages and updates the Delphi library registry paths.</summary>
     /// <param name="AProjectDir">Root directory of the extracted project.</param>
     /// <param name="AManifest">The package manifest providing packages and platforms.</param>
-    /// <param name="AEnabledPlatforms">Workspace platform filter; an empty array means "all".
-    ///   Platforms not in the list are skipped (see <c>PlatformInList</c>).</param>
+    /// <param name="AConfig">Workspace configuration: supplies the platform filter
+    ///   (see <c>IsPlatformEnabled</c>) and the compiler tool architecture.</param>
     /// <exception cref="Exception">Raised when a platform is not installed or a package fails to compile.</exception>
     procedure BuildPackages(
         const AWorkspaceDir, AProjectDir: string;
         const AManifest: TManifest;
-        const AEnabledPlatforms: TArray<string>
+        const AConfig: TConfig
     );
 
     /// <summary>Delete package (bpl and dcp).</summary>
@@ -444,7 +446,8 @@ end;
 procedure RunCompileScripts(
     const AManifest: TManifest;
     const AEvent, AWorkspaceDir, AProjectDir, APlatform, AConfig, APackage: string;
-    const AHelper: IScriptHelper
+    const AHelper: IScriptHelper;
+    const AWorkspaceConfig: TConfig
 );
 begin
   var LBlocksDir := TPath.Combine(AWorkspaceDir, '.blocks');
@@ -472,7 +475,7 @@ begin
       LDcuPath := TPath.Combine(LDcuPath, LSuffix);
     LEnv.Values['DCU_PATH'] := LDcuPath;
 
-    TScriptRunner.RunEvent(AManifest, AEvent, LEnv, AHelper);
+    TScriptRunner.RunEvent(AManifest, AEvent, LEnv, AHelper, AWorkspaceConfig);
   finally
     LEnv.Free;
   end;
@@ -1616,15 +1619,14 @@ begin
 end;
 
 function TProduct.CompileProject(
-    const AWorkspaceDir,
-    AManifestName,
-    AProjectFileName,
-    AConfig,
-    APlatform: string
+    const AWorkspaceDir, AManifestName, AProjectFileName: string;
+    const AOptions: ICompilerOptions
 ): string;
 const
   MsBuild = 'msbuild.exe';
 begin
+  var AConfig := AOptions.Config;
+  var APlatform := AOptions.Platform;
   var LPackageProject := TPackageProject.LoadFromFile(AProjectFileName);
   try
     var LBlocksDir := TPath.Combine(AWorkspaceDir, '.blocks');
@@ -1664,6 +1666,14 @@ begin
       if LOverride.Value <> '' then
         LMSBuildParams := LMSBuildParams + Format(' /p:%s="%s"', [LOverride.Key, LOverride.Value]);
 
+    // Delphi 13+ lets you pick the compiler tools architecture (32/64-bit) without
+    // changing the produced binary. "default" leaves the choice to Delphi, so the
+    // property is not passed at all; older versions ignore it anyway.
+    if AOptions.ToolArchitecture <> TToolArchitecture.default then
+      LMSBuildParams :=
+          LMSBuildParams
+              + Format(' /p:DCC_PreferredToolArchitecture=%s', [ToolArchitectureToStr(AOptions.ToolArchitecture)]);
+
     var LCmdLine :=
         Format(
             '"%s" "%s" /t:Make /p:config=%s /p:platform=%s %s /nologo /v:quiet',
@@ -1692,7 +1702,7 @@ end;
 procedure TProduct.BuildPackages(
     const AWorkspaceDir, AProjectDir: string;
     const AManifest: TManifest;
-    const AEnabledPlatforms: TArray<string>
+    const AConfig: TConfig
 );
 begin
   var BuildConfigs := ['debug', 'release'];
@@ -1703,7 +1713,7 @@ begin
     for var LPlatformPair in AManifest.Platforms do
     begin
       // Honour the workspace platform filter (empty = all).
-      if not PlatformInList(AEnabledPlatforms, LPlatformPair.Key) then
+      if not AConfig.IsPlatformEnabled(LPlatformPair.Key) then
         Continue;
       var LProductPlatform: TProductPlatform;
       if not (Platforms.TryGetValue(LPlatformPair.Key, LProductPlatform) and LProductPlatform.Active) then
@@ -1743,7 +1753,7 @@ begin
   begin
     var LPlatform := LPlatformPair.Key;
     // Honour the workspace platform filter (empty = all).
-    if not PlatformInList(AEnabledPlatforms, LPlatform) then
+    if not AConfig.IsPlatformEnabled(LPlatform) then
       Continue;
     var LProductPlatform: TProductPlatform;
     if not (Platforms.TryGetValue(LPlatform, LProductPlatform) and LProductPlatform.Active) then
@@ -1811,12 +1821,22 @@ begin
               LPlatform,
               LBuildConfig,
               PkgName,
-              Self
+              Self,
+              AConfig
           );
 
           TConsole.Write(Format('    Building %s [%s/%s]...', [PkgName, TypeStr, LBuildConfig]));
 
-          CompileProject(AWorkspaceDir, AManifest.Name, DprojPath, LBuildConfig, LPlatform);
+          CompileProject(
+              AWorkspaceDir,
+              AManifest.Name,
+              DprojPath,
+              TCompilerOptions
+                  .New
+                  .SetConfig(LBuildConfig)
+                  .SetPlatform(LPlatform)
+                  .SetToolArchitecture(AConfig.ToolArchitecture)
+          );
           TConsole.WriteLine(' OK', clGreen);
 
           RunCompileScripts(
@@ -1827,7 +1847,8 @@ begin
               LPlatform,
               LBuildConfig,
               PkgName,
-              Self
+              Self,
+              AConfig
           );
         end;
       finally

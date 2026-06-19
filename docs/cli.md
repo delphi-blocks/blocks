@@ -243,6 +243,10 @@ Workspace keys:
   updatedcpsearchpath    When true, "init" adds the blocks DCP output directory to the
                          Delphi library Search Path (true/false, default: false).
                          After changing this key, run "Blocks init" to apply.
+  toolarchitecture       Compiler tools architecture MSBuild uses (Delphi 13+):
+                         default (don't pass the flag), x32 (32-bit tools) or
+                         x64 (64-bit tools, more memory). Default: default.
+                         Does not change the produced binary.
 
 System keys:
   InstallPath            Specifies the directory containing the blocks.exe to launch
@@ -262,6 +266,7 @@ Examples:
   Blocks config /delete platforms=Win64
   Blocks config registrykey=myprofile
   Blocks config updatedcpsearchpath=true
+  Blocks config toolarchitecture=x64
   Blocks config /system InstallPath
   Blocks config /system InstallPath=C:\Tools\Blocks
 ```

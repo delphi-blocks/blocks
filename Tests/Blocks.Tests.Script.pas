@@ -11,6 +11,7 @@ uses
   Blocks.Core,
   Blocks.JSON,
   Blocks.Model.Manifest,
+  Blocks.Model.Config,
   Blocks.Service.Script;
 
 type
@@ -25,7 +26,8 @@ type
         AHelper: IScriptHelper;
         AManifest: TManifest;
         AArgs: TManifestScriptArguments;
-        AEnvironmentVariables: TStrings
+        AEnvironmentVariables: TStrings;
+        AConfig: TConfig
     ); override;
   end;
 
@@ -73,7 +75,8 @@ procedure TFakeCommand.Run(
     AHelper: IScriptHelper;
     AManifest: TManifest;
     AArgs: TManifestScriptArguments;
-    AEnvironmentVariables: TStrings
+    AEnvironmentVariables: TStrings;
+    AConfig: TConfig
 );
 begin
   LastManifest := AManifest;

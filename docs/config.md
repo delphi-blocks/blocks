@@ -33,6 +33,7 @@ workspace.
 | `product`             | string  | *(set by `init`)* | Target Delphi version name (e.g. `delphi12`, `delphi13`).                       |
 | `registrykey`         | string  | `BDS`   | Registry profile key for the target Delphi IDE, matching `bds.exe -r <key>`.            |
 | `updatedcpsearchpath` | boolean | `false` | Whether `init` adds the Blocks DCP output directory to the Delphi library Search Path.  |
+| `toolarchitecture` | `default` \| `x32` \| `x64` | `default` | Architecture of the compiler tools MSBuild uses to build packages (Delphi 13+). |
 
 ### `sources`
 
@@ -123,6 +124,31 @@ blocks init
 > **Note:** registering the workspace's `.blocks` directory as the `$(BLOCKSDIR)`
 > environment variable always happens during `init`; it is not controlled by
 > this flag.
+
+### `toolarchitecture`
+
+Selects which build of the Delphi command-line compiler MSBuild runs when Blocks
+compiles a package. It maps directly to the MSBuild
+`DCC_PreferredToolArchitecture` property:
+
+- `default` (the default) leaves the choice to Delphi: the
+  `/p:DCC_PreferredToolArchitecture` property is **not passed to MSBuild at all**,
+  so the IDE/project's own behaviour applies.
+- `x32` uses the 32-bit compiler tools (`bin\DCC32` / `bin\DCC64`).
+- `x64` uses the 64-bit compiler tools (`bin64\DCC32` / `bin64\DCC64`), which
+  give the compiler a larger memory space — useful for large packages that
+  exhaust the 32-bit compiler's memory.
+
+This option only changes which *tools* run; it does **not** change the produced
+binary, so the output of a package is identical either way. It is only available
+from **Delphi 13 (BDS 37.0)** onwards and applies to the Delphi Windows 32-bit
+and 64-bit target compilers; older versions simply ignore the property.
+
+`init` sets it to the default (`default`). Change it with `config`:
+
+```
+blocks config toolarchitecture=x64
+```
 
 ## System configuration
 

@@ -19,10 +19,50 @@ uses
   System.SysUtils,
   System.Rtti,
   System.Generics.Collections,
-  Blocks.Model.Manifest;
+  Blocks.Model.Manifest,
+  Blocks.Model.Config;
 
 type
   EScriptError = class(Exception)
+  end;
+
+  // -----------------------------------------------------------------------
+  // Options for a single project compilation. Built with a fluent API:
+  //   TCompilerOptions.New.SetPlatform('Win32').SetConfig('Release')...
+  // Interface-based (TInterfacedObject) so callers don't manage its lifetime;
+  // a temporary created inline lives for the duration of the call it is passed to.
+  // -----------------------------------------------------------------------
+  ICompilerOptions = interface
+    ['{6E2B1F0A-9C4D-4E1B-8A77-2C3F5B9D1E64}']
+    function GetPlatform: string;
+    function GetConfig: string;
+    function GetToolArchitecture: TToolArchitecture;
+
+    function SetPlatform(const AValue: string): ICompilerOptions;
+    function SetConfig(const AValue: string): ICompilerOptions;
+    function SetToolArchitecture(const AValue: TToolArchitecture): ICompilerOptions;
+
+    property Platform: string read GetPlatform;
+    property Config: string read GetConfig;
+    /// <summary>Compiler tools architecture; <c>default</c> means "do not pass
+    ///   <c>/p:DCC_PreferredToolArchitecture</c> to MSBuild".</summary>
+    property ToolArchitecture: TToolArchitecture read GetToolArchitecture;
+  end;
+
+  TCompilerOptions = class(TInterfacedObject, ICompilerOptions)
+  private
+    FPlatform: string;
+    FConfig: string;
+    FToolArchitecture: TToolArchitecture;
+    function GetPlatform: string;
+    function GetConfig: string;
+    function GetToolArchitecture: TToolArchitecture;
+  public
+    /// <summary>Creates an empty options object (ToolArchitecture = default).</summary>
+    class function New: ICompilerOptions; static;
+    function SetPlatform(const AValue: string): ICompilerOptions;
+    function SetConfig(const AValue: string): ICompilerOptions;
+    function SetToolArchitecture(const AValue: TToolArchitecture): ICompilerOptions;
   end;
 
   ScriptManifestAttribute = class(TCustomAttribute)
@@ -43,7 +83,10 @@ type
   // -----------------------------------------------------------------------
   IScriptHelper = interface
     ['{B6A1F3C2-4D2E-4F8A-9C3B-7E1D2A5F8C40}']
-    function CompileProject(const AWorkspaceDir, AManifestName, AProjectFileName, AConfig, APlatform: string): string;
+    function CompileProject(
+        const AWorkspaceDir, AManifestName, AProjectFileName: string;
+        const AOptions: ICompilerOptions
+    ): string;
     function HasCompiler(const APlatform: string): Boolean;
     /// <summary>Registers an IDE expert (a compiled <c>.dll</c>) so the IDE loads it on start.</summary>
     /// <param name="AExpertPath">Full path to the expert <c>.dll</c>.</param>
@@ -104,11 +147,14 @@ type
     ///   Not pre-expanded: each command expands the <c>$(VAR)</c> macros in the fields
     ///   it actually uses against <paramref name="AEnvironmentVariables"/>.</param>
     /// <param name="AEnvironmentVariables">The event variables (name=value pairs).</param>
+    /// <param name="AConfig">Workspace configuration; may be <c>nil</c>. Commands that build
+    ///   a project read the tool architecture from it. Commands that need it must guard.</param>
     procedure Run(
         AHelper: IScriptHelper;
         AManifest: TManifest;
         AArgs: TManifestScriptArguments;
-        AEnvironmentVariables: TStrings
+        AEnvironmentVariables: TStrings;
+        AConfig: TConfig
     ); virtual; abstract;
   end;
 
@@ -123,7 +169,8 @@ type
         AHelper: IScriptHelper;
         AManifest: TManifest;
         AArgs: TManifestScriptArguments;
-        AEnvironmentVariables: TStrings
+        AEnvironmentVariables: TStrings;
+        AConfig: TConfig
     ); override;
   end;
 
@@ -151,7 +198,8 @@ type
         AHelper: IScriptHelper;
         AManifest: TManifest;
         AArgs: TManifestScriptArguments;
-        AEnvironmentVariables: TStrings
+        AEnvironmentVariables: TStrings;
+        AConfig: TConfig
     ); override;
   end;
 
@@ -183,7 +231,8 @@ type
         AHelper: IScriptHelper;
         AManifest: TManifest;
         AArgs: TManifestScriptArguments;
-        AEnvironmentVariables: TStrings
+        AEnvironmentVariables: TStrings;
+        AConfig: TConfig
     ); override;
   end;
 
@@ -218,7 +267,8 @@ type
         AManifest: TManifest;
         AScript: TManifestScript;
         AEnvironmentVariables: TStrings;
-        AHelper: IScriptHelper = nil
+        AHelper: IScriptHelper = nil;
+        AConfig: TConfig = nil
     ); static;
 
     /// <summary>Runs, in declaration order, every manifest script registered for
@@ -232,7 +282,8 @@ type
         AManifest: TManifest;
         const AEvent: string;
         AEnvironmentVariables: TStrings;
-        AHelper: IScriptHelper = nil
+        AHelper: IScriptHelper = nil;
+        AConfig: TConfig = nil
     ); static;
   end;
 
@@ -244,6 +295,46 @@ uses
   System.IOUtils,
   Blocks.Core,
   Blocks.Console;
+
+{ TCompilerOptions }
+
+class function TCompilerOptions.New: ICompilerOptions;
+begin
+  Result := TCompilerOptions.Create;
+end;
+
+function TCompilerOptions.GetPlatform: string;
+begin
+  Result := FPlatform;
+end;
+
+function TCompilerOptions.GetConfig: string;
+begin
+  Result := FConfig;
+end;
+
+function TCompilerOptions.GetToolArchitecture: TToolArchitecture;
+begin
+  Result := FToolArchitecture;
+end;
+
+function TCompilerOptions.SetPlatform(const AValue: string): ICompilerOptions;
+begin
+  FPlatform := AValue;
+  Result := Self;
+end;
+
+function TCompilerOptions.SetConfig(const AValue: string): ICompilerOptions;
+begin
+  FConfig := AValue;
+  Result := Self;
+end;
+
+function TCompilerOptions.SetToolArchitecture(const AValue: TToolArchitecture): ICompilerOptions;
+begin
+  FToolArchitecture := AValue;
+  Result := Self;
+end;
 
 { TScriptCommand }
 
@@ -335,7 +426,8 @@ procedure TEchoCommand.Run(
     AHelper: IScriptHelper;
     AManifest: TManifest;
     AArgs: TManifestScriptArguments;
-    AEnvironmentVariables: TStrings
+    AEnvironmentVariables: TStrings;
+    AConfig: TConfig
 );
 begin
   var LMessagePattern := AArgs.GetAs<TManifestEchoArguments>().Message;
@@ -359,7 +451,8 @@ procedure TCompileCommand.Run(
     AHelper: IScriptHelper;
     AManifest: TManifest;
     AArgs: TManifestScriptArguments;
-    AEnvironmentVariables: TStrings
+    AEnvironmentVariables: TStrings;
+    AConfig: TConfig
 );
 begin
   var LCompileArgs := AArgs.GetAs<TManifestCompileArguments>;
@@ -400,7 +493,19 @@ begin
     end;
 
     TConsole.Write(Format('  Compiling %s [%s/%s]...', [TPath.GetFileName(LProjectFile), LConfig, LPlatform]));
-    AHelper.CompileProject(LWorkspace, AManifest.Name, LProjectFile, LConfig, LPlatform);
+    var LToolArch := TToolArchitecture.default;
+    if AConfig <> nil then
+      LToolArch := AConfig.ToolArchitecture;
+
+    AHelper.CompileProject(
+        LWorkspace,
+        AManifest.Name,
+        LProjectFile,
+        TCompilerOptions.New
+          .SetConfig(LConfig)
+          .SetPlatform(LPlatform)
+          .SetToolArchitecture(LToolArch)
+    );
     TConsole.WriteLine(' OK', clGreen);
     LCompiled := True;
 
@@ -450,7 +555,8 @@ procedure TCopyResCommand.Run(
     AHelper: IScriptHelper;
     AManifest: TManifest;
     AArgs: TManifestScriptArguments;
-    AEnvironmentVariables: TStrings
+    AEnvironmentVariables: TStrings;
+    AConfig: TConfig
 );
 begin
   var LPlatform := AEnvironmentVariables.Values['PLATFORM'];
@@ -491,7 +597,8 @@ class procedure TScriptRunner.Execute(
     AManifest: TManifest;
     AScript: TManifestScript;
     AEnvironmentVariables: TStrings;
-    AHelper: IScriptHelper
+    AHelper: IScriptHelper;
+    AConfig: TConfig
 );
 begin
   var LCommandName := ExpandVariables(AScript.Command, AEnvironmentVariables);
@@ -501,7 +608,7 @@ begin
 
   var LCommand := TScriptCommand.Create(LCommandName);
   try
-    LCommand.Run(AHelper, AManifest, AScript.Args, AEnvironmentVariables);
+    LCommand.Run(AHelper, AManifest, AScript.Args, AEnvironmentVariables, AConfig);
   finally
     LCommand.Free;
   end;
@@ -511,12 +618,13 @@ class procedure TScriptRunner.RunEvent(
     AManifest: TManifest;
     const AEvent: string;
     AEnvironmentVariables: TStrings;
-    AHelper: IScriptHelper
+    AHelper: IScriptHelper;
+    AConfig: TConfig
 );
 begin
   for var LScript in AManifest.Scripts do
     if SameText(LScript.Event, AEvent) then
-      Execute(AManifest, LScript, AEnvironmentVariables, AHelper);
+      Execute(AManifest, LScript, AEnvironmentVariables, AHelper, AConfig);
 end;
 
 procedure RegisterScripts;

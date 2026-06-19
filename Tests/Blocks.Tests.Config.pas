@@ -48,6 +48,17 @@ type
     procedure TestGetPlatformsJoinsWithComma;
     [Test]
     procedure TestSaveLoadRoundTrip;
+
+    [Test]
+    procedure TestDefaultToolArchitectureIsDefault;
+    [Test]
+    procedure TestSetToolArchitecture;
+    [Test]
+    procedure TestInvalidToolArchitectureRaises;
+    [Test]
+    procedure TestToolArchitectureRoundTrip;
+    [Test]
+    procedure TestToolArchitectureDefaultRoundTrip;
   end;
 
 implementation
@@ -127,6 +138,63 @@ begin
     LLoaded.Load;
     Assert.AreEqual('Win32,Win64', LLoaded.GetValue('platforms'));
     Assert.IsFalse(LLoaded.IsPlatformEnabled('Linux64'));
+  finally
+    LLoaded.Free;
+  end;
+end;
+
+procedure TConfigPlatformsTest.TestDefaultToolArchitectureIsDefault;
+begin
+  Assert.AreEqual('default', FConfig.GetValue('toolarchitecture'));
+  Assert.IsTrue(FConfig.ToolArchitecture = TToolArchitecture.default);
+end;
+
+procedure TConfigPlatformsTest.TestSetToolArchitecture;
+begin
+  FConfig.SetValue('toolarchitecture', 'x64');
+  Assert.IsTrue(FConfig.ToolArchitecture = TToolArchitecture.x64);
+  Assert.AreEqual('x64', FConfig.GetValue('toolarchitecture'));
+
+  // Case-insensitive parsing.
+  FConfig.SetValue('toolarchitecture', 'X32');
+  Assert.AreEqual('x32', FConfig.GetValue('toolarchitecture'));
+
+  FConfig.SetValue('toolarchitecture', 'DEFAULT');
+  Assert.IsTrue(FConfig.ToolArchitecture = TToolArchitecture.default);
+end;
+
+procedure TConfigPlatformsTest.TestInvalidToolArchitectureRaises;
+begin
+  Assert.WillRaise(procedure begin FConfig.SetValue('toolarchitecture', 'x86'); end, Exception);
+end;
+
+procedure TConfigPlatformsTest.TestToolArchitectureRoundTrip;
+begin
+  FConfig.SetValue('toolarchitecture', 'x64');
+  FConfig.Save;
+
+  var LLoaded := TConfig.Create(FWorkspaceDir);
+  try
+    LLoaded.Load;
+    Assert.AreEqual('x64', LLoaded.GetValue('toolarchitecture'));
+    Assert.IsTrue(LLoaded.ToolArchitecture = TToolArchitecture.x64);
+  finally
+    LLoaded.Free;
+  end;
+end;
+
+procedure TConfigPlatformsTest.TestToolArchitectureDefaultRoundTrip;
+begin
+  // The default value must survive a save/load cycle (serialized as "default").
+  FConfig.SetValue('toolarchitecture', 'x64');
+  FConfig.SetValue('toolarchitecture', 'default');
+  FConfig.Save;
+
+  var LLoaded := TConfig.Create(FWorkspaceDir);
+  try
+    LLoaded.Load;
+    Assert.AreEqual('default', LLoaded.GetValue('toolarchitecture'));
+    Assert.IsTrue(LLoaded.ToolArchitecture = TToolArchitecture.default);
   finally
     LLoaded.Free;
   end;

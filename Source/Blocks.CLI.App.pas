@@ -886,6 +886,7 @@ begin
     WriteField('Product', TWorkspace.Config.Product);
     WriteField('RegistryKey', TWorkspace.Config.RegistryKey);
     WriteField('UpdateDcpSearchPath', TWorkspace.Config.GetValue('updatedcpsearchpath'));
+    WriteField('ToolArchitecture', TWorkspace.Config.GetValue('toolarchitecture'));
 
     WriteSectionTitle('Sources');
     if TWorkspace.Config.Sources.Count = 0 then
@@ -993,6 +994,10 @@ begin
   WriteOption('updatedcpsearchpath', 'When true, "init" adds the blocks DCP output directory to the');
   WriteOption('', 'Delphi library Search Path (true/false, default: false).');
   WriteOption('', 'After changing this key, run "' + AppExeName + ' init" to apply.');
+  WriteOption('toolarchitecture', 'Compiler tools architecture MSBuild uses (Delphi 13+):');
+  WriteOption('', 'default (don''t pass the flag), x32 (32-bit tools) or');
+  WriteOption('', 'x64 (64-bit tools, more memory). Default: default.');
+  WriteOption('', 'Does not change the produced binary.');
   TConsole.WriteLine;
   TConsole.WriteLine('System keys:', clWhite);
   WriteOption('InstallPath', 'Specifies the directory containing the blocks.exe to launch');
@@ -1014,6 +1019,7 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' config /delete platforms=Win64');
   TConsole.WriteLine('  ' + AppExeName + ' config registrykey=myprofile');
   TConsole.WriteLine('  ' + AppExeName + ' config updatedcpsearchpath=true');
+  TConsole.WriteLine('  ' + AppExeName + ' config toolarchitecture=x64');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath=C:\Tools\Blocks');
   TConsole.WriteLine('  ' + AppExeName + ' config /system AutoUpdate');
@@ -1317,11 +1323,11 @@ end;
 
 function TUpgradeCommand.SelectSetup(AAssets: TGitHubReleaseAssets): string;
 const
-  {$IFDEF WIN64}
+{$IFDEF WIN64}
   PlatformSetupName = 'setup-x64';
-  {$ELSE}
+{$ELSE}
   PlatformSetupName = 'setup-x32';
-  {$ENDIF}
+{$ENDIF}
 begin
   // If there are no assets, exit
   if AAssets.Count <= 0 then

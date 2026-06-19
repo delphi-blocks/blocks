@@ -189,7 +189,8 @@ end;
 procedure RunManifestScripts(
     const AManifest: TManifest;
     const AEvent, AWorkspaceDir, AProjectDir: string;
-    AProduct: TProduct
+    AProduct: TProduct;
+    AConfig: TConfig
 );
 begin
   var LEnv := TStringList.Create;
@@ -199,8 +200,9 @@ begin
     // The package-version suffix lets scripts target .dproj names that embed it
     // (e.g. $(PACKAGE_VERSION) in the "compile" command's path).
     LEnv.Values['PACKAGE_VERSION'] := AProduct.PackageVersionSuffix;
-    // AProduct implements IScriptHelper, giving commands like "compile" a compiler.
-    TScriptRunner.RunEvent(AManifest, AEvent, LEnv, AProduct);
+    // AProduct implements IScriptHelper, giving commands like "compile" a compiler;
+    // AConfig carries the tool architecture a "compile" command needs.
+    TScriptRunner.RunEvent(AManifest, AEvent, LEnv, AProduct, AConfig);
   finally
     LEnv.Free;
   end;
@@ -595,7 +597,7 @@ begin
     var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
 
     // Step 6.5 — beforeInstall scripts
-    RunManifestScripts(LManifest, TScriptRunner.EventBeforeInstall, WorkDir, LProjectDir, LSelectedProduct);
+    RunManifestScripts(LManifest, TScriptRunner.EventBeforeInstall, WorkDir, LProjectDir, LSelectedProduct, Config);
 
     if not ABuildOnly then
     begin
@@ -616,7 +618,7 @@ begin
     end;
 
     // Step 8 — Compile (restricted to the workspace's enabled platforms, if any)
-    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LManifest, Config.Platforms.ToStringArray);
+    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LManifest, Config);
 
     // Step 9 — Update product paths
     var LEnvironmentVariables := TStringList.Create;
@@ -655,7 +657,7 @@ begin
       Database.Update(LManifest.Id, LManifest.Version);
 
     // Step 11 — afterInstall scripts
-    RunManifestScripts(LManifest, TScriptRunner.EventAfterInstall, WorkDir, LProjectDir, LSelectedProduct);
+    RunManifestScripts(LManifest, TScriptRunner.EventAfterInstall, WorkDir, LProjectDir, LSelectedProduct, Config);
 
     TConsole.WriteLine;
     TConsole.WriteLine('============================================', clGreen);
@@ -703,7 +705,7 @@ begin
     var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
 
     // Step 4.5 — beforeUninstall scripts (project files still present)
-    RunManifestScripts(LManifest, TScriptRunner.EventBeforeUninstall, WorkDir, LProjectDir, LSelectedProduct);
+    RunManifestScripts(LManifest, TScriptRunner.EventBeforeUninstall, WorkDir, LProjectDir, LSelectedProduct, Config);
 
     // Step 5 - Unregister all packages
     var LEnvironmentVariables := TStringList.Create;
@@ -778,7 +780,7 @@ begin
     Database.RemoveEntry(LManifest.Id);
 
     // Step 8 — afterUninstall scripts
-    RunManifestScripts(LManifest, TScriptRunner.EventAfterUninstall, WorkDir, LProjectDir, LSelectedProduct);
+    RunManifestScripts(LManifest, TScriptRunner.EventAfterUninstall, WorkDir, LProjectDir, LSelectedProduct, Config);
 
     TConsole.WriteLine;
     TConsole.WriteLine('Uninstalled: ' + LManifest.Name + ' ' + LInstalledVer, clGreen);
