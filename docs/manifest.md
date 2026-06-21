@@ -80,12 +80,31 @@ which other packages are required.
 | `keywords` | List of keywords used by `search`. |
 | `repository.type` | Source repository type: `github`, `bitbucket`, or `local`. |
 | `repository.url` | Repository URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. For `github` use a tree URL (`https://github.com/owner/repo/tree/<ref>`), for `bitbucket` a src URL (`https://bitbucket.org/owner/repo/src/<ref>`), for `local` a filesystem path. |
-| `platforms` | Per-platform `sourcePath` (registered in the Delphi "Browsing Path") and optional `releaseDCUPath` / `debugDCUPath`. Set `runtimeOnly: true` to skip design-time packages when installing that platform. |
+| `platforms` | Per-platform `sourcePath` (registered in the Delphi "Browsing Path") and optional `releaseDCUPath` / `debugDCUPath`. Set `runtimeOnly: true` to skip design-time packages when installing that platform. A key may list several platform names separated by commas (e.g. `"Win64,Linux64"`) as shorthand for declaring the same settings on each of them — available since v0.6.3. |
 | `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. A `name` may contain the `$(PACKAGE_VERSION)` placeholder — see below. An optional `products` list restricts the package to specific Delphi versions — see below. |
 | `packageOptions.rootFolder` | Directory (relative to the project root) that contains the package folders. Defaults to `packages`. |
 | `packageOptions.folders` | Maps Delphi version keys to the subfolder under `rootFolder` containing the `.dproj` files. A `+` suffix means "this version or newer". An entry of `.` (or an empty/absent `folders` map) means the `.dproj` files live directly under `rootFolder`, with no per-version subfolder. |
 | `dependencies` | Other packages that must be installed first, with their version constraints. See [versioning.md](versioning.md). |
 | `scripts` | Optional built-in commands run at lifecycle events (e.g. `afterCompile`). See [script.md](script.md). |
+
+## Shared platform settings
+
+*Available since v0.6.3.*
+
+When two or more platforms share the same `sourcePath` (and other settings),
+the `platforms` key can list their names separated by commas instead of
+repeating the same block:
+
+```jsonc
+"platforms": {
+  "Win64,Linux64": {
+    "sourcePath": ["Source\\Core"]
+  }
+}
+```
+
+This is equivalent to declaring `"Win64"` and `"Linux64"` separately with
+identical settings.
 
 ## Package name placeholder
 

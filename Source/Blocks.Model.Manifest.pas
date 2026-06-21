@@ -66,9 +66,17 @@ type
 
   // -----------------------------------------------------------------------
   // Platform map: name -> TManifestPlatform
+  //
+  // A manifest key may list two or more platform names separated by commas
+  // (e.g. "Win64,Linux64"); FromJSON expands such a key into one dictionary
+  // entry per platform name. ToJSON does not (yet) reverse this compaction:
+  // identical platforms are written back out as separate keys.
   // -----------------------------------------------------------------------
   TSupportedPlatforms = class(TObjectOrderedDictionary<string, TManifestPlatform>)
   public
+    function ToJSON: TJSONValue;
+    procedure FromJSON(AJSONObject: TJSONValue);
+
     constructor Create;
   end;
 
@@ -422,6 +430,42 @@ end;
 constructor TSupportedPlatforms.Create;
 begin
   inherited Create([doOwnsValues]);
+end;
+
+procedure TSupportedPlatforms.FromJSON(AJSONObject: TJSONValue);
+begin
+  if AJSONObject is TJSONObject then
+  begin
+    for var LJSONPair in TJSONObject(AJSONObject) do
+    begin
+      var LPlatforms := LJSONPair.JsonString.Value.Split([',']);
+      for var LPlatform in LPlatforms do
+      begin
+        Add(LPlatform, TJsonHelper.JSONToObject<TManifestPlatform>(LJSONPair.JsonValue));
+      end;
+    end;
+  end;
+end;
+
+function TSupportedPlatforms.ToJSON: TJSONValue;
+begin
+  // TODO: this method should compact the platform. If two platforms are
+  // identical is should create a single row both platforms:
+  // "win32,win64": {
+  //   ...
+  // }
+  // Now Blocks never write the manifest so this feature it's not yet implemented
+  var LJSONObject := TJSONObject.Create;
+  try
+    for var LPlatform in Self do
+    begin
+      LJSONObject.AddPair(LPlatform.Key, TJsonHelper.ObjectToJSON(LPlatform.Value));
+    end;
+  except
+    LJSONObject.Free;
+    raise;
+  end;
+  Result := LJSONObject;
 end;
 
 { TManifestPackage }
