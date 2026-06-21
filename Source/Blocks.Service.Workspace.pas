@@ -23,6 +23,7 @@ uses
   System.Zip,
   Blocks.Model.Database,
   Blocks.Model.Config,
+  Blocks.Model.Manifest,
   Blocks.JSON,
   Blocks.Core,
   Blocks.Service.Product;
@@ -55,6 +56,21 @@ type
     /// </remarks>
     class function ResolvePackageId(const AArg: string; ASilent: Boolean = False): string; static;
     class procedure TestDelphiRunning(AProduct: TProduct); static;
+    /// <summary>Resolves the Delphi product configured for the workspace, optionally prints its
+    ///   identity and checks whether the IDE is running. Shared by install/uninstall/update.</summary>
+    class function ResolveProduct(APrint: Boolean = True): TProduct; static;
+    /// <summary>Recursively installs the direct dependencies declared in a manifest.</summary>
+    class procedure ResolveDependencies(AManifest: TManifest; AOverwrite, ABuildOnly, ASilent, AForce: Boolean); static;
+    /// <summary>Fetches (unless build-only), compiles, registers the search paths and records
+    ///   in the database a single already-resolved package. Does NOT resolve dependencies.</summary>
+    class procedure BuildAndRegisterPackage(
+        AManifest: TManifest;
+        AProduct: TProduct;
+        AOverwrite, ABuildOnly, ASilent: Boolean
+    ); static;
+    /// <summary>Returns the ids of installed packages that declare <paramref name="APackageId"/>
+    ///   among their direct dependencies (reverse dependencies).</summary>
+    class function FindDependents(const APackageId: string): TArray<string>; static;
     class constructor Create;
     class destructor Destroy;
   public
@@ -83,8 +99,8 @@ type
         const APlatforms: string = ''
     ); static;
 
-    /// <summary>Update the workspace by downloading the package list.</summary>
-    class procedure Update(const AWorkDir: string); static;
+    /// <summary>Refreshes the local repository cache by re-downloading the package list.</summary>
+    class procedure UpdateRepositoryCache(const AWorkDir: string); static;
 
     /// <summary>Downloads, compiles and registers a package in the workspace.</summary>
     /// <param name="APackageName">Package id (<c>vendor.name</c>) or package name; resolved via the repository index.</param>
@@ -103,6 +119,15 @@ type
     /// <param name="AForce">When <c>True</c>, skip the confirmation prompt shown when other installed
     ///   packages still depend on this one, and remove it anyway.</param>
     class procedure Uninstall(const APackageName: string; AForce: Boolean = False); static;
+
+    /// <summary>Updates an already-installed package to a new version, then recompiles its
+    ///   dependents so their DCUs are rebuilt against the new version.</summary>
+    /// <param name="APackageName">Package id (<c>vendor.name</c>) or package name; must be installed.</param>
+    /// <param name="AVersionConstraint">Target version/constraint; empty proposes the highest release
+    ///   within the installed major version (interactively, unless <paramref name="ASilent"/>).</param>
+    /// <param name="ASilent">Skip the interactive version prompt, taking the proposed version.</param>
+    /// <param name="AForce">Update even when the compatibility checks report problems.</param>
+    class procedure Update(const APackageName, AVersionConstraint: string; ASilent, AForce: Boolean); static;
 
     /// <summary>Root directory of the current workspace.</summary>
     /// <remarks>
@@ -123,7 +148,6 @@ uses
   System.JSON,
   Blocks.Console,
   Blocks.Http,
-  Blocks.Model.Manifest,
   Blocks.GitHub,
   Blocks.Service.Fetcher,
   Blocks.Service.Script,
@@ -513,6 +537,130 @@ begin
   FDelphiRunningContinue := True;
 end;
 
+class function TWorkspace.ResolveProduct(APrint: Boolean): TProduct;
+begin
+  // Delphi version (read from workspace configuration)
+  var LProduct := Config.Product;
+  if LProduct = '' then
+    raise Exception.Create('No Delphi version configured. Run "blocks init /product <version>" first.');
+  Result := TProduct.Find(LProduct, Config.RegistryKey);
+  if APrint then
+  begin
+    TConsole.WriteLine('Selected version: ' + Result.DisplayName, clGreen);
+    if not SameText(Result.RegistryKey, 'BDS') then
+      TConsole.WriteLine('Registry key    : ' + Result.RegistryKey, clGreen);
+    TConsole.WriteLine;
+  end;
+  TestDelphiRunning(Result);
+end;
+
+class function TWorkspace.FindDependents(const APackageId: string): TArray<string>;
+begin
+  Result := [];
+  for var LEntry in Database.Packages do
+  begin
+    if SameText(LEntry.Key, APackageId) then
+      Continue;
+    for var LDependency in LEntry.Value.Dependencies.Keys do
+      if SameText(LDependency, APackageId) then
+      begin
+        Result := Result + [LEntry.Key];
+        Break;
+      end;
+  end;
+end;
+
+class procedure TWorkspace.ResolveDependencies(AManifest: TManifest; AOverwrite, ABuildOnly, ASilent, AForce: Boolean);
+begin
+  if AManifest.Dependencies.IsEmpty then
+    Exit;
+
+  TConsole.WriteLine('Resolving dependencies...', clCyan);
+  for var LDependency in AManifest.Dependencies do
+    TWorkspace.Install(LDependency.Key, LDependency.Value, AOverwrite, ABuildOnly, ASilent, AForce);
+  TConsole.WriteLine;
+end;
+
+class procedure TWorkspace.BuildAndRegisterPackage(
+    AManifest: TManifest;
+    AProduct: TProduct;
+    AOverwrite, ABuildOnly, ASilent: Boolean
+);
+begin
+  var LProjectDir := TPath.Combine(WorkDir, AManifest.Name);
+
+  // beforeInstall scripts
+  RunManifestScripts(AManifest, TScriptRunner.EventBeforeInstall, WorkDir, LProjectDir, AProduct, Config);
+
+  if not ABuildOnly then
+  begin
+    // Fetch the package sources according to the repository type
+    TConsole.WriteLine('--- ' + AManifest.Id + ' / ' + AManifest.Name + ' ---', clWhite);
+    TConsole.WriteLine('Version: ' + AManifest.Version, clCyan);
+    EnsureCleanDir(LProjectDir, AOverwrite, ASilent);
+    var LFetcher := TRepositoryFetcher.ForRepository(AManifest.Repository);
+    LFetcher.FetchTo(AManifest.Repository, LProjectDir);
+    TConsole.WriteLine('Project downloaded to: ' + LProjectDir, clGreen);
+    TConsole.WriteLine;
+  end
+  else
+  begin
+    if not TDirectory.Exists(LProjectDir) then
+      raise Exception.CreateFmt('Build-only mode: project directory not found: %s', [LProjectDir]);
+    TConsole.WriteLine;
+  end;
+
+  // Compile (restricted to the workspace's enabled platforms, if any)
+  AProduct.BuildPackages(WorkDir, LProjectDir, AManifest, Config);
+
+  // Update product paths
+  var LEnvironmentVariables := TStringList.Create;
+  try
+    AProduct.FillEnvironmentVariables(LEnvironmentVariables);
+    for var LPlatformPair in AManifest.Platforms do
+    begin
+      // Skip platforms the workspace does not target (empty filter = all).
+      if not Config.IsPlatformEnabled(LPlatformPair.Key) then
+        Continue;
+
+      var LPackagesPath := AProduct.GetPackagesPath(LProjectDir, AManifest);
+
+      for var LPackage in AManifest.Packages do
+      begin
+        // Packages that do not target this product were never built, so skip their paths too.
+        if not LPackage.SupportsProduct(AProduct.VersionName) then
+          Continue;
+
+        // Design-time packages are not built on runtime-only platforms, so skip their paths too.
+        if LPlatformPair.Value.RuntimeOnly and LPackage.IsDesignTime then
+          Continue;
+
+        var DprojPath := TPath.Combine(LPackagesPath, AProduct.ExpandPackageName(LPackage.Name) + '.dproj');
+        var LPlatformPaths :=
+            GetPlatformPaths(AManifest, DprojPath, LProjectDir, LPlatformPair.Key, LEnvironmentVariables);
+        AProduct.UpdateSearchPaths(LPlatformPair.Key, LProjectDir, LPlatformPaths);
+      end;
+    end;
+  finally
+    LEnvironmentVariables.Free;
+  end;
+
+  // Update database (record the direct dependencies too)
+  if not ABuildOnly then
+    Database.Update(AManifest.Id, AManifest.Version, AManifest.Dependencies);
+
+  // afterInstall scripts
+  RunManifestScripts(AManifest, TScriptRunner.EventAfterInstall, WorkDir, LProjectDir, AProduct, Config);
+
+  TConsole.WriteLine;
+  TConsole.WriteLine('============================================', clGreen);
+  TConsole.WriteLine('  Done!', clGreen);
+  TConsole.WriteLine('  Project  : ' + LProjectDir, clGreen);
+  TConsole.WriteLine('  Packages : ' + AProduct.GetPackagesPath(LProjectDir, AManifest), clGreen);
+  TConsole.WriteLine('============================================', clGreen);
+  TConsole.WriteLine;
+end;
+
 class procedure TWorkspace.Install(
     const APackageName, AVersionConstraint: string;
     AOverwrite, ABuildOnly, ASilent, AForce: Boolean
@@ -528,15 +676,7 @@ begin
     TConsole.WriteLine;
 
     // Step 3 — Delphi version (read from workspace configuration)
-    var LProduct := Config.Product;
-    if LProduct = '' then
-      raise Exception.Create('No Delphi version configured. Run "blocks init /product <version>" first.');
-    var LSelectedProduct := TProduct.Find(LProduct, Config.RegistryKey);
-    TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
-    if not SameText(LSelectedProduct.RegistryKey, 'BDS') then
-      TConsole.WriteLine('Registry key    : ' + LSelectedProduct.RegistryKey, clGreen);
-    TConsole.WriteLine;
-    TestDelphiRunning(LSelectedProduct);
+    var LSelectedProduct := ResolveProduct;
 
     // Step 4 — In build-only mode the package must already be installed
     if ABuildOnly then
@@ -588,86 +728,11 @@ begin
           .CreateFmt('No compatible package found for "%s". Delphi version too old?', [LSelectedProduct.DisplayName]);
 
     // Step 6 — Dependencies
-    if not LManifest.Dependencies.IsEmpty then
-    begin
-      TConsole.WriteLine('Resolving dependencies...', clCyan);
-      for var LDependency in LManifest.Dependencies do
-        TWorkspace.Install(LDependency.Key, LDependency.Value, AOverwrite, ABuildOnly, ASilent, AForce);
-      TConsole.WriteLine;
-    end;
+    ResolveDependencies(LManifest, AOverwrite, ABuildOnly, ASilent, AForce);
 
-    var LProjectDir := TPath.Combine(WorkDir, LManifest.Name);
-
-    // Step 6.5 — beforeInstall scripts
-    RunManifestScripts(LManifest, TScriptRunner.EventBeforeInstall, WorkDir, LProjectDir, LSelectedProduct, Config);
-
-    if not ABuildOnly then
-    begin
-      // Step 7 — Fetch the package sources according to the repository type
-      TConsole.WriteLine('--- ' + LManifest.Id + ' / ' + LManifest.Name + ' ---', clWhite);
-      TConsole.WriteLine('Version: ' + LManifest.Version, clCyan);
-      EnsureCleanDir(LProjectDir, AOverwrite, ASilent);
-      var LFetcher := TRepositoryFetcher.ForRepository(LManifest.Repository);
-      LFetcher.FetchTo(LManifest.Repository, LProjectDir);
-      TConsole.WriteLine('Project downloaded to: ' + LProjectDir, clGreen);
-      TConsole.WriteLine;
-    end
-    else
-    begin
-      if not TDirectory.Exists(LProjectDir) then
-        raise Exception.CreateFmt('Build-only mode: project directory not found: %s', [LProjectDir]);
-      TConsole.WriteLine;
-    end;
-
-    // Step 8 — Compile (restricted to the workspace's enabled platforms, if any)
-    LSelectedProduct.BuildPackages(WorkDir, LProjectDir, LManifest, Config);
-
-    // Step 9 — Update product paths
-    var LEnvironmentVariables := TStringList.Create;
-    try
-      LSelectedProduct.FillEnvironmentVariables(LEnvironmentVariables);
-      for var LPlatformPair in LManifest.Platforms do
-      begin
-        // Skip platforms the workspace does not target (empty filter = all).
-        if not Config.IsPlatformEnabled(LPlatformPair.Key) then
-          Continue;
-
-        var LPackagesPath := LSelectedProduct.GetPackagesPath(LProjectDir, LManifest);
-
-        for var LPackage in LManifest.Packages do
-        begin
-          // Packages that do not target this product were never built, so skip their paths too.
-          if not LPackage.SupportsProduct(LSelectedProduct.VersionName) then
-            Continue;
-
-          // Design-time packages are not built on runtime-only platforms, so skip their paths too.
-          if LPlatformPair.Value.RuntimeOnly and LPackage.IsDesignTime then
-            Continue;
-
-          var DprojPath := TPath.Combine(LPackagesPath, LSelectedProduct.ExpandPackageName(LPackage.Name) + '.dproj');
-          var LPlatformPaths :=
-              GetPlatformPaths(LManifest, DprojPath, LProjectDir, LPlatformPair.Key, LEnvironmentVariables);
-          LSelectedProduct.UpdateSearchPaths(LPlatformPair.Key, LProjectDir, LPlatformPaths);
-        end;
-      end;
-    finally
-      LEnvironmentVariables.Free;
-    end;
-
-    // Step 10 — Update database (record the direct dependencies too)
-    if not ABuildOnly then
-      Database.Update(LManifest.Id, LManifest.Version, LManifest.Dependencies);
-
-    // Step 11 — afterInstall scripts
-    RunManifestScripts(LManifest, TScriptRunner.EventAfterInstall, WorkDir, LProjectDir, LSelectedProduct, Config);
-
-    TConsole.WriteLine;
-    TConsole.WriteLine('============================================', clGreen);
-    TConsole.WriteLine('  Done!', clGreen);
-    TConsole.WriteLine('  Project  : ' + LProjectDir, clGreen);
-    TConsole.WriteLine('  Packages : ' + LSelectedProduct.GetPackagesPath(LProjectDir, LManifest), clGreen);
-    TConsole.WriteLine('============================================', clGreen);
-    TConsole.WriteLine;
+    // Steps 6.5–11 — fetch, compile, register search paths, record in database,
+    // run scripts and print the completion banner for this package.
+    BuildAndRegisterPackage(LManifest, LSelectedProduct, AOverwrite, ABuildOnly, ASilent);
   finally
     LManifest.Free;
   end;
@@ -683,15 +748,7 @@ begin
   TConsole.WriteLine;
 
   // Step 3 — Delphi version (read from workspace configuration)
-  var LProduct := Config.Product;
-  if LProduct = '' then
-    raise Exception.Create('No Delphi version configured. Run "blocks init /product <version>" first.');
-  var LSelectedProduct := TProduct.Find(LProduct, Config.RegistryKey);
-  TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
-  if not SameText(LSelectedProduct.RegistryKey, 'BDS') then
-    TConsole.WriteLine('Registry key    : ' + LSelectedProduct.RegistryKey, clGreen);
-  TConsole.WriteLine;
-  TestDelphiRunning(LSelectedProduct);
+  var LSelectedProduct := ResolveProduct;
 
   // Step 4 — Check that the package is actually installed
   var LInstalledVer := Database.InstalledVersion(LPackageId);
@@ -705,18 +762,7 @@ begin
   // Step 4.4 — Warn if other installed packages still depend on this one. The
   // dependency is removed anyway if the user confirms (or /force is given): a
   // dependency may also be used directly, so removal is always the user's call.
-  var LDependents: TArray<string> := [];
-  for var LEntry in Database.Packages do
-  begin
-    if SameText(LEntry.Key, LPackageId) then
-      Continue;
-    for var LDependency in LEntry.Value.Dependencies.Keys do
-      if SameText(LDependency, LPackageId) then
-      begin
-        LDependents := LDependents + [LEntry.Key];
-        Break;
-      end;
-  end;
+  var LDependents := FindDependents(LPackageId);
 
   if Length(LDependents) > 0 then
   begin
@@ -827,7 +873,212 @@ begin
   end;
 end;
 
-class procedure TWorkspace.Update(const AWorkDir: string);
+class procedure TWorkspace.Update(const APackageName, AVersionConstraint: string; ASilent, AForce: Boolean);
+begin
+  var LPackageId := ResolvePackageId(APackageName, ASilent);
+  TConsole.WriteLine('Config: ' + LPackageId, clDkGray);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Workspace: ' + WorkDir, clDkGray);
+  TConsole.WriteLine;
+
+  // Step 1 — The package must already be installed
+  var LInstalledVer := Database.InstalledVersion(LPackageId);
+  if LInstalledVer = '' then
+    raise Exception.CreateFmt(
+        'Cannot update %s: the package is not installed. Run "blocks install %s" first.',
+        [LPackageId, LPackageId]);
+  var LInstalledSemVer := TSemVer.Parse(LInstalledVer);
+
+  // Step 2 — Delphi version (resolved quietly; the delegated uninstall/install print it)
+  var LSelectedProduct := ResolveProduct(False);
+
+  // Step 3 — Determine the target version
+  var LTargetVer: string;
+  if AVersionConstraint <> '' then
+  begin
+    // Explicit @version/constraint: resolve to the best matching available version
+    // (a downgrade is allowed too).
+    var LResolved := TManifest.GetManifest(LPackageId, AVersionConstraint);
+    try
+      LTargetVer := LResolved.Version;
+    finally
+      LResolved.Free;
+    end;
+  end
+  else
+  begin
+    // No version given: propose the highest release within the installed major.
+    var LVersions := TManifest.GetVersions(LPackageId);
+    var LMaxSameMajor: TSemVer;
+    if not TSemVer.BestMatch(LVersions, IntToStr(LInstalledSemVer.Major) + '.*', LMaxSameMajor) then
+      LMaxSameMajor := LInstalledSemVer;
+
+    // Inform when a newer major exists, so the user can target it explicitly.
+    var LMaxOverall: TSemVer;
+    if TSemVer.BestMatch(LVersions, '*', LMaxOverall) and (LMaxOverall.Major > LInstalledSemVer.Major) then
+      TConsole.WriteWarning(
+          Format(
+              'A newer major version is available: %s. Use "%s@%s" to target it.',
+              [LMaxOverall.ToString, LPackageId, LMaxOverall.ToString]
+          )
+      );
+
+    TConsole.WriteLine(Format('Installed: %s %s', [LPackageId, LInstalledVer]), clCyan);
+
+    // Nothing newer within the installed major: don't prompt for a no-op update.
+    if LMaxSameMajor <= LInstalledSemVer then
+    begin
+      TConsole.WriteLine(
+          Format('Already at the latest version within major %d (%s).', [LInstalledSemVer.Major, LInstalledVer]),
+          clGreen
+      );
+      TConsole.WriteLine;
+      Exit;
+    end;
+
+    TConsole.WriteLine(Format('Latest within major %d: %s', [LInstalledSemVer.Major, LMaxSameMajor.ToString]), clCyan);
+
+    if ASilent then
+      LTargetVer := LMaxSameMajor.ToString
+    else
+    begin
+      TConsole.Write(Format('Update to %s? [Y to confirm / version / N to cancel]: ', [LMaxSameMajor.ToString]));
+      var LInput := Trim(TConsole.ReadLine);
+      if (LInput = '') or SameText(LInput, 'Y') then
+        LTargetVer := LMaxSameMajor.ToString
+      else if SameText(LInput, 'N') then
+      begin
+        TConsole.WriteLine('Cancelled.', clYellow);
+        TConsole.WriteLine;
+        Exit;
+      end
+      else
+      begin
+        // Treat the input as a manually typed version/constraint.
+        var LResolved := TManifest.GetManifest(LPackageId, LInput);
+        try
+          LTargetVer := LResolved.Version;
+        finally
+          LResolved.Free;
+        end;
+      end;
+    end;
+  end;
+
+  // Nothing to do when already at the target version.
+  if TSemVer.Parse(LTargetVer) = LInstalledSemVer then
+  begin
+    TConsole.WriteLine(Format('Already at version %s.', [LInstalledVer]), clGreen);
+    TConsole.WriteLine;
+    Exit;
+  end;
+  TConsole.WriteLine;
+
+  var LNewManifest := TManifest.GetManifest(LPackageId, LTargetVer);
+  try
+    // Step 4 — Compatibility checks (collect every problem before deciding)
+    var LProblems: TArray<string> := [];
+
+    // Downward: dependencies required by the new version. A missing dependency is
+    // fine (it will be installed); a present-but-incompatible one is a problem.
+    for var LDep in LNewManifest.Dependencies do
+    begin
+      var LDepInstalled := Database.InstalledVersion(LDep.Key);
+      if LDepInstalled = '' then
+        Continue;
+      var LDepSemVer: TSemVer;
+      if TSemVer.TryParse(LDepInstalled, LDepSemVer) and not LDepSemVer.MatchesConstraint(LDep.Value) then
+        LProblems :=
+            LProblems + [Format('  dependency %s %s does not satisfy %s', [LDep.Key, LDepInstalled, LDep.Value])];
+    end;
+
+    // Upward: installed packages that depend on this one and whose constraint the
+    // target version would no longer satisfy.
+    var LTargetSemVer := TSemVer.Parse(LTargetVer);
+    for var LDependent in FindDependents(LPackageId) do
+    begin
+      var LConstraint := '';
+      for var LDep in Database.Packages[LDependent].Dependencies do
+        if SameText(LDep.Key, LPackageId) then
+        begin
+          LConstraint := LDep.Value;
+          Break;
+        end;
+      if not LTargetSemVer.MatchesConstraint(LConstraint) then
+        LProblems :=
+            LProblems
+                + [
+                    Format(
+                        '  %s requires %s %s (not satisfied by %s)',
+                        [LDependent, LPackageId, LConstraint, LTargetVer]
+                    )];
+    end;
+
+    if Length(LProblems) > 0 then
+    begin
+      TConsole.WriteWarning(Format('Updating %s to %s has compatibility problems:', [LPackageId, LTargetVer]));
+      for var LProblem in LProblems do
+        TConsole.WriteLine(LProblem, clYellow);
+      if not AForce then
+      begin
+        TConsole.WriteLine;
+        TConsole.WriteLine('Update aborted. Use /force to update anyway.', clYellow);
+        TConsole.WriteLine;
+        Exit;
+      end;
+      TConsole.WriteLine('Proceeding anyway (/force).', clYellow);
+      TConsole.WriteLine;
+    end;
+
+    // Step 5 — Make sure the new version targets the selected Delphi version.
+    if not LNewManifest.IsProductSupported(LSelectedProduct.VersionName) then
+      raise Exception
+          .CreateFmt('No compatible package found for "%s". Delphi version too old?', [LSelectedProduct.DisplayName]);
+
+    TConsole.WriteLine(Format('Updating %s: %s -> %s', [LPackageId, LInstalledVer, LTargetVer]), clWhite);
+    TConsole.WriteLine;
+
+    // Step 6 — Remove the currently installed version first. A plain in-place
+    // rebuild would leave residues behind: version-suffixed artifacts
+    // (bpl/dcp/rsm), the IDE design-time registration and the DCU folder of the
+    // old version. Uninstalling (forced, so the dependents warning is skipped)
+    // gives a clean slate; the dependents are recompiled below.
+    Uninstall(LPackageId, True);
+
+    // Step 7 — Install the new version. Its missing dependencies are downloaded and
+    // already-compatible ones are skipped by the install gate; overwrite stays off
+    // so dependencies are not needlessly re-downloaded.
+    Install(LPackageId, LTargetVer, False, False, ASilent, AForce);
+
+    // Step 8 — Recompile the dependents so their DCUs are rebuilt against the new
+    // version (in Delphi DCUs are tied to the version they were compiled with).
+    var LDependents := FindDependents(LPackageId);
+    if Length(LDependents) > 0 then
+    begin
+      TConsole.WriteLine(Format('Recompiling dependents: %s', [string.Join(', ', LDependents)]), clCyan);
+      TConsole.WriteLine;
+      for var LDependent in LDependents do
+      begin
+        var LDependentManifest := TManifest.GetManifest(LDependent, Database.InstalledVersion(LDependent));
+        try
+          BuildAndRegisterPackage(LDependentManifest, LSelectedProduct, False, True, ASilent);
+        finally
+          LDependentManifest.Free;
+        end;
+      end;
+    end;
+
+    TConsole.WriteLine;
+    TConsole.WriteLine('============================================', clGreen);
+    TConsole.WriteLine(Format('  Updated: %s %s -> %s', [LPackageId, LInstalledVer, LTargetVer]), clGreen);
+    TConsole.WriteLine('============================================', clGreen);
+    TConsole.WriteLine;
+  finally
+    LNewManifest.Free;
+  end;
+end;
+
+class procedure TWorkspace.UpdateRepositoryCache(const AWorkDir: string);
 begin
   var RepoDir := TPath.Combine(GetBlocksDir, 'repository');
   if not TDirectory.Exists(RepoDir) then

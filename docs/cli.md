@@ -14,6 +14,7 @@ Usage: Blocks <command> [options]
 Commands:
   install <package>      Install a package by id (vendor.name) or name.
   build <package>        Recompile an already-installed package without downloading it.
+  update <package>       Update an installed package and recompile its dependents.
   uninstall <package>    Remove a package from the workspace and database.
   init                   Initialise the workspace and download the package repository.
   list                   List packages installed in the current workspace.
@@ -44,6 +45,10 @@ blocks init
 REM Install a package (latest, or a specific version)
 blocks install owner.package
 blocks install owner.package@1.2.0
+
+REM Update a package (proposes the latest within the installed major, or pick one)
+blocks update owner.package
+blocks update owner.package@2.0.0
 
 REM Uninstall a package
 blocks uninstall owner.package
@@ -118,6 +123,47 @@ Options:
 Examples:
   Blocks build owner.package
   Blocks build package /silent
+```
+
+## Update
+
+Updates an already-installed package to a newer version and recompiles the
+packages that depend on it (in Delphi their DCUs are tied to the version they were
+compiled against). With no version it proposes the highest release within the
+installed major version (interactively, unless `/silent`); append `@<version>` to
+target a specific one — a downgrade is allowed too.
+
+Before updating, two compatibility checks run and report **all** problems found:
+
+- **Downward** — the new version's dependencies against what is installed. A
+  missing dependency is fine (it will be installed); a present-but-incompatible one
+  is a problem.
+- **Upward** — the installed packages that depend on this one, against the new
+  version's number.
+
+On problems the update is aborted and `/force` is suggested; `/force` updates
+anyway.
+
+Once the checks pass, the currently installed version is **uninstalled first**
+(so version-suffixed artifacts, the IDE design-time registration and the DCU
+folder of the old version are not left behind), then the new version is installed
+and the dependents are recompiled.
+
+```
+Usage: Blocks update <package> [options]
+
+Arguments:
+  <package>              Package id (vendor.name) or package name.
+                         Append @<version> to target a specific version.
+
+Options:
+  /silent                Skip the version prompt, taking the proposed version.
+  /force                 Update even when the compatibility checks report problems.
+
+Examples:
+  Blocks update owner.package
+  Blocks update owner.package@2.0.0
+  Blocks update owner.package@2.0.0 /force
 ```
 
 ## Uninstall

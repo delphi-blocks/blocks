@@ -197,6 +197,19 @@ type
     procedure ShowHelp; override;
   end;
 
+  TUpdateCommand = class(TBaseCommand)
+  private
+    [Param('force')]
+    FForce: Boolean;
+    [Param('silent')]
+    FSilent: Boolean;
+    [Param]
+    FPackageName: string;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
 implementation
 
 uses
@@ -267,6 +280,7 @@ begin
   TConsole.WriteLine('Commands:', clWhite);
   WriteOption('install <package>', 'Install a package by id (vendor.name) or name.');
   WriteOption('build <package>', 'Recompile an already-installed package without downloading it.');
+  WriteOption('update <package>', 'Update an installed package and recompile its dependents.');
   WriteOption('uninstall <package>', 'Remove a package from the workspace and database.');
   WriteOption('init', 'Initialise the workspace and download the package repository.');
   WriteOption('list', 'List packages installed in the current workspace.');
@@ -506,7 +520,7 @@ begin
   ShowBanner('', '');
   if TWorkspace.Exists then
   begin
-    TWorkspace.Update(GetCurrentDir);
+    TWorkspace.UpdateRepositoryCache(GetCurrentDir);
   end
   else
   begin
@@ -628,6 +642,58 @@ begin
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' build owner.package');
   TConsole.WriteLine('  ' + AppExeName + ' build package /silent');
+  TConsole.WriteLine;
+end;
+
+{ TUpdateCommand }
+
+procedure TUpdateCommand.Execute;
+var
+  LPackageName: string;
+  LVersionConstraint: string;
+begin
+  inherited;
+  CheckWorkspace;
+  LPackageName := FPackageName;
+  LVersionConstraint := '';
+  if ContainsStr(FPackageName, '@') then
+  begin
+    var LParts := FPackageName.Split(['@'], 2);
+    LPackageName := Trim(LParts[0]);
+    LVersionConstraint := Trim(LParts[1]);
+  end;
+  if LPackageName = '' then
+    raise Exception.Create('Usage: ' + AppExeName + ' update <package>[@version]');
+  ShowBanner('', '');
+  TWorkspace.Update(LPackageName, LVersionConstraint, FSilent, FForce);
+end;
+
+procedure TUpdateCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Updates an already-installed package to a newer version and recompiles');
+  TConsole.WriteLine('the packages that depend on it. With no version, proposes the highest');
+  TConsole.WriteLine('release within the installed major version; append @<version> to pick a');
+  TConsole.WriteLine('specific one (a downgrade is allowed too).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Before updating, two compatibility checks run: the new version''s');
+  TConsole.WriteLine('dependencies against what is installed, and the installed dependents');
+  TConsole.WriteLine('against the new version. On problems the update is aborted unless /force.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' update <package> [options]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Arguments:', clWhite);
+  WriteOption('<package>', 'Package id (vendor.name) or package name.');
+  WriteOption('', 'Append @<version> to target a specific version (e.g. owner.pkg@2.0.0).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/silent', 'Skip the version prompt, taking the proposed version.');
+  WriteOption('/force', 'Update even when the compatibility checks report problems.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' update owner.package');
+  TConsole.WriteLine('  ' + AppExeName + ' update owner.package@2.0.0');
+  TConsole.WriteLine('  ' + AppExeName + ' update owner.package@2.0.0 /force');
   TConsole.WriteLine;
 end;
 
@@ -769,7 +835,7 @@ begin
   begin
     TConsole.WriteLine;
     TConsole.WriteLine('Repository list is more than a day old, updating...', clCyan);
-    TWorkspace.Update(TWorkspace.WorkDir);
+    TWorkspace.UpdateRepositoryCache(TWorkspace.WorkDir);
     TConsole.WriteLine;
   end;
 
@@ -1429,6 +1495,7 @@ initialization
   TCommand.RegisterCommand('init', TInitCommand);
   TCommand.RegisterCommand('install', TInstallCommand);
   TCommand.RegisterCommand('build', TBuildCommand);
+  TCommand.RegisterCommand('update', TUpdateCommand);
   TCommand.RegisterCommand('uninstall', TUninstallCommand);
   TCommand.RegisterCommand('search', TSearchCommand);
   TCommand.RegisterCommand('config', TConfigCommand);
