@@ -10,11 +10,11 @@
 - [x] Set up the MSBuild environment by reading `rsvars.bat` (or `rsvars64.bat` on Win64/Delphi 13+) instead of hardcoded paths
 - [x] Add an application icon to the executable
 - [x] Config variable to use `DCC_PreferredToolArchitecture` (`x32` or `x64`) with *msbuild* 
+- [x] Dependency check during uninstall
 - [ ] Import and export of the dependency database so the same environment can be recreated on another machine
 - [ ] Test installation/uninstallation on macOS and mobile (Android, iOS): verify the `bpl<name>.so`/`.dylib` output naming and the `.imp.o` import-object location
 - [ ] Ability to pass a custom DEFINE during installation or in the manifest
 - [ ] Should the `build` command act recursively on dependencies?
-- [ ] Dependency check during uninstall
 - [ ] Install "packageless" library (FastMM4, DUnitX, ...)
 - [ ] Handle naming conflicts (install folder, package names, DCU folder names)
 - [ ] New repository location (private repo? HTTP url? Authentication?)

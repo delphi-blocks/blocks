@@ -128,6 +128,8 @@ type
 
   TUninstallCommand = class(TBaseCommand)
   private
+    [Param('force')]
+    FForce: Boolean;
     [Param]
     FPackageName: string;
   public
@@ -636,7 +638,7 @@ begin
   inherited;
   CheckWorkspace;
   ShowBanner('', '');
-  TWorkspace.Uninstall(FPackageName);
+  TWorkspace.Uninstall(FPackageName, FForce);
 end;
 
 procedure TUninstallCommand.ShowHelp;
@@ -650,8 +652,13 @@ begin
   TConsole.WriteLine('Arguments:', clWhite);
   WriteOption('<package>', 'Package id (vendor.name) or package name.');
   TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/force', 'Remove without asking, even if other installed packages');
+  WriteOption('', 'still depend on this one.');
+  TConsole.WriteLine;
   TConsole.WriteLine('Example:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package');
+  TConsole.WriteLine('  ' + AppExeName + ' uninstall owner.package /force');
   TConsole.WriteLine;
 end;
 

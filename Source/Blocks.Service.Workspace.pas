@@ -100,7 +100,9 @@ type
 
     /// <summary>Removes a previously installed package from the workspace and the database.</summary>
     /// <param name="APackageName">Package id (<c>vendor.name</c>) or package name; resolved via the repository index.</param>
-    class procedure Uninstall(const APackageName: string); static;
+    /// <param name="AForce">When <c>True</c>, skip the confirmation prompt shown when other installed
+    ///   packages still depend on this one, and remove it anyway.</param>
+    class procedure Uninstall(const APackageName: string; AForce: Boolean = False); static;
 
     /// <summary>Root directory of the current workspace.</summary>
     /// <remarks>
@@ -652,9 +654,9 @@ begin
       LEnvironmentVariables.Free;
     end;
 
-    // Step 10 — Update database
+    // Step 10 — Update database (record the direct dependencies too)
     if not ABuildOnly then
-      Database.Update(LManifest.Id, LManifest.Version);
+      Database.Update(LManifest.Id, LManifest.Version, LManifest.Dependencies);
 
     // Step 11 — afterInstall scripts
     RunManifestScripts(LManifest, TScriptRunner.EventAfterInstall, WorkDir, LProjectDir, LSelectedProduct, Config);
@@ -671,7 +673,7 @@ begin
   end;
 end;
 
-class procedure TWorkspace.Uninstall(const APackageName: string);
+class procedure TWorkspace.Uninstall(const APackageName: string; AForce: Boolean);
 begin
   var LPackageId := ResolvePackageId(APackageName);
   TConsole.WriteLine('Config: ' + LPackageId, clDkGray);
@@ -698,6 +700,41 @@ begin
     TConsole.WriteWarning('Not installed: ' + LPackageId);
     TConsole.WriteLine;
     Exit;
+  end;
+
+  // Step 4.4 — Warn if other installed packages still depend on this one. The
+  // dependency is removed anyway if the user confirms (or /force is given): a
+  // dependency may also be used directly, so removal is always the user's call.
+  var LDependents: TArray<string> := [];
+  for var LEntry in Database.Packages do
+  begin
+    if SameText(LEntry.Key, LPackageId) then
+      Continue;
+    for var LDependency in LEntry.Value.Dependencies.Keys do
+      if SameText(LDependency, LPackageId) then
+      begin
+        LDependents := LDependents + [LEntry.Key];
+        Break;
+      end;
+  end;
+
+  if Length(LDependents) > 0 then
+  begin
+    TConsole.WriteWarning(Format('%s is required by: %s', [LPackageId, string.Join(', ', LDependents)]));
+    if AForce then
+      TConsole.WriteLine('Removing anyway (/force).', clYellow)
+    else
+    begin
+      TConsole.Write('Remove it anyway? [y/N]: ');
+      var LAnswer := Trim(TConsole.ReadLine);
+      if (LAnswer = '') or not SameText(Copy(LAnswer, 1, 1), 'y') then
+      begin
+        TConsole.WriteLine('Aborted.', clYellow);
+        TConsole.WriteLine;
+        Exit;
+      end;
+    end;
+    TConsole.WriteLine;
   end;
 
   var LManifest := TManifest.GetManifest(LPackageId, LInstalledVer);

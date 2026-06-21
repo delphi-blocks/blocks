@@ -18,6 +18,7 @@ uses
   System.SysUtils,
   System.IOUtils,
   System.Generics.Collections,
+  Blocks.Model.Manifest,
   Blocks.JSON;
 
 /// <summary>Manages the per-workspace package database.</summary>
@@ -31,10 +32,19 @@ type
     FId: string;
     FVersion: string;
     FTimestamp: TDateTime;
+    FDependencies: TDependencyMap;
   public
+    constructor Create;
+    destructor Destroy; override;
+
     property Id: string read FId write FId;
     property Version: string read FVersion write FVersion;
     property Timestamp: TDateTime read FTimestamp write FTimestamp;
+    /// <summary>Direct dependencies recorded at install time, as a map of
+    ///   <c>vendor.name -> version constraint</c> (a copy of the manifest's
+    ///   <c>dependencies</c>). Empty for entries written before this field
+    ///   existed; populated on the next install/build of the package.</summary>
+    property Dependencies: TDependencyMap read FDependencies;
   end;
 
   TDatabase = class
@@ -90,8 +100,10 @@ type
     /// <summary>Inserts or updates the package version entry in the database.</summary>
     /// <param name="LibraryId">Library identifier.</param>
     /// <param name="AVersion">Version string of the installed package.</param>
+    /// <param name="ADependencies">Direct dependencies to record (the manifest's
+    ///   <c>dependencies</c> map); copied into the entry. Pass <c>nil</c> for none.</param>
     /// <remarks>Any existing entry for the same package is replaced.</remarks>
-    procedure Update(const LibraryId, AVersion: string);
+    procedure Update(const LibraryId, AVersion: string; ADependencies: TDependencyMap);
 
     /// <summary>Load the package database from systems.</summary>
     procedure Load;
@@ -111,6 +123,20 @@ uses
 
 const
   DatabaseSchemaUrl = 'https://delphi-blocks.dev/schema/database.v1.json';
+
+// -- TInstalledPackage ---------------------------------------------------------
+
+constructor TInstalledPackage.Create;
+begin
+  inherited;
+  FDependencies := TDependencyMap.Create;
+end;
+
+destructor TInstalledPackage.Destroy;
+begin
+  FDependencies.Free;
+  inherited;
+end;
 
 // -- TDatabase -----------------------------------------------------------------
 
@@ -217,13 +243,16 @@ begin
     Result := '';
 end;
 
-procedure TDatabase.Update(const LibraryId, AVersion: string);
+procedure TDatabase.Update(const LibraryId, AVersion: string; ADependencies: TDependencyMap);
 begin
   var LInstalledPackage := TInstalledPackage.Create;
   try
     LInstalledPackage.Id := LibraryId;
     LInstalledPackage.Version := AVersion;
     LInstalledPackage.Timestamp := Now;
+    if Assigned(ADependencies) then
+      for var LDependency in ADependencies do
+        LInstalledPackage.Dependencies.Add(LDependency.Key, LDependency.Value);
     FPackages.AddOrSetValue(LibraryId, LInstalledPackage);
     TConsole.WriteLine('Database updated: ' + LibraryId + '@' + AVersion, clDkGray);
     Save;
