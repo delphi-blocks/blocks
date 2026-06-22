@@ -29,6 +29,20 @@ uses
   Blocks.Service.Product;
 
 type
+  /// <summary>Options shared by the install/build/update/uninstall pipeline. Passed as a set so
+  ///   call sites read as <c>[woOverwrite, woSilent]</c> instead of a row of positional booleans.
+  ///   Not every option is meaningful for every entry point (e.g. <c>woBuildOnly</c> only applies to
+  ///   install/build); the irrelevant ones are simply ignored.</summary>
+  /// <remarks>
+  ///   <c>woOverwrite</c>: replace the project directory if it already exists (propagates to dependencies).
+  ///   <c>woBuildOnly</c>: skip the download and compile the already-extracted project.
+  ///   <c>woSilent</c>: skip non-critical interactive prompts, taking the defaults.
+  ///   <c>woForce</c>: on install, skip a conflicting dependency instead of raising; on uninstall, skip the
+  ///   dependents confirmation prompt.
+  /// </remarks>
+  TWorkspaceOption = (woOverwrite, woBuildOnly, woSilent, woForce);
+  TWorkspaceOptions = set of TWorkspaceOption;
+
   TWorkspace = class
   private
     class var
@@ -45,7 +59,7 @@ type
     class procedure InitializeFromSource(const ASource: string); static;
     /// <summary>Ensures <paramref name="ADir"/> does not exist before a fetch, applying the
     ///   overwrite/prompt policy when it does.</summary>
-    class procedure EnsureCleanDir(const ADir: string; AOverwrite, ASilent: Boolean); static;
+    class procedure EnsureCleanDir(const ADir: string; AOptions: TWorkspaceOptions); static;
     /// <summary>Rebuilds <c>.blocks\repository\index.json</c> from the local repository.</summary>
     class procedure RebuildIndex; static;
     /// <summary>Resolves an install/uninstall argument to a package id (<c>vendor.name</c>).</summary>
@@ -59,13 +73,13 @@ type
     /// <summary>Resolves the Delphi product configured for the workspace.</summary>
     class function GetWorkspaceProduct: TProduct; static;
     /// <summary>Recursively installs the direct dependencies declared in a manifest.</summary>
-    class procedure ResolveDependencies(AManifest: TManifest; AOverwrite, ABuildOnly, ASilent, AForce: Boolean); static;
+    class procedure ResolveDependencies(AManifest: TManifest; AOptions: TWorkspaceOptions); static;
     /// <summary>Fetches (unless build-only), compiles, registers the search paths and records
     ///   in the database a single already-resolved package. Does NOT resolve dependencies.</summary>
     class procedure BuildAndRegisterPackage(
         AManifest: TManifest;
         AProduct: TProduct;
-        AOverwrite, ABuildOnly, ASilent: Boolean
+        AOptions: TWorkspaceOptions
     ); static;
     /// <summary>Returns the ids of installed packages that declare <paramref name="APackageId"/>
     ///   among their direct dependencies (reverse dependencies).</summary>
@@ -108,31 +122,35 @@ type
     /// <summary>Downloads, compiles and registers a package in the workspace.</summary>
     /// <param name="APackageName">Package id (<c>vendor.name</c>) or package name; resolved via the repository index.</param>
     /// <param name="AVersionConstraint">Version constraint string (e.g. <c>1.2.0</c>, <c>>=1.0.0</c>); empty for any version.</param>
-    /// <param name="AOverwrite">Overwrite the project directory if it already exists.</param>
-    /// <param name="ABuildOnly">Skip download; compile the already-extracted project.</param>
-    /// <param name="ASilent">Skip non-critical interactive prompts.</param>
-    /// <param name="AForce">When <c>True</c>, log a warning on version conflict and continue instead of raising an exception.</param>
+    /// <param name="AOptions">Install options (see <see cref="TWorkspaceOption"/>): <c>woOverwrite</c>,
+    ///   <c>woBuildOnly</c>, <c>woSilent</c>, <c>woForce</c>.</param>
+    /// <param name="AIsDependency">When <c>True</c> the call is a transitive dependency resolution, not a
+    ///   top-level install; suppresses the "use update" hint on a version conflict (where switching the
+    ///   installed version would break another dependent rather than fix anything).</param>
     class procedure Install(
         const APackageName, AVersionConstraint: string;
-        AOverwrite, ABuildOnly, ASilent, AForce: Boolean
+        AOptions: TWorkspaceOptions;
+        AIsDependency: Boolean = False
     ); static;
 
     /// <summary>Removes a previously installed package from the workspace and the database.</summary>
     /// <param name="APackageName">Package id (<c>vendor.name</c>) or package name; resolved via the repository index.</param>
-    /// <param name="AForce">When <c>True</c>, skip the confirmation prompt shown when other installed
-    ///   packages still depend on this one, and remove it anyway.</param>
-    class procedure Uninstall(const APackageName: string; AForce: Boolean = False); static;
+    /// <param name="AOptions">Uninstall options (see <see cref="TWorkspaceOption"/>); only <c>woForce</c>
+    ///   is relevant here: it skips the confirmation prompt shown when other installed packages still
+    ///   depend on this one, removing it anyway.</param>
+    class procedure Uninstall(const APackageName: string; AOptions: TWorkspaceOptions); static;
 
     /// <summary>Updates an already-installed package to a new version, then recompiles its
     ///   dependents so their DCUs are rebuilt against the new version.</summary>
     /// <param name="APackageName">Package id (<c>vendor.name</c>) or package name; must be installed.</param>
     /// <param name="AVersionConstraint">Target version/constraint; empty proposes the highest release
-    ///   within the installed major version (interactively, unless <paramref name="ASilent"/>).</param>
-    /// <param name="ASilent">Skip the interactive version prompt, taking the proposed version.</param>
+    ///   within the installed major version (interactively, unless <c>woSilent</c> is set).</param>
+    /// <param name="AOptions">Update options (see <see cref="TWorkspaceOption"/>); only <c>woSilent</c> is
+    ///   relevant: it skips the interactive version prompt, taking the proposed version.</param>
     /// <remarks>When the compatibility checks report problems the update is refused (the user
     ///   must uninstall or update the conflicting packages first); it never leaves the workspace
     ///   in an invalid state. On success every direct and transitive dependent is recompiled.</remarks>
-    class procedure Update(const APackageName, AVersionConstraint: string; ASilent: Boolean); static;
+    class procedure Update(const APackageName, AVersionConstraint: string; AOptions: TWorkspaceOptions); static;
 
     /// <summary>Root directory of the current workspace.</summary>
     /// <remarks>
@@ -332,17 +350,17 @@ begin
   end;
 end;
 
-class procedure TWorkspace.EnsureCleanDir(const ADir: string; AOverwrite, ASilent: Boolean);
+class procedure TWorkspace.EnsureCleanDir(const ADir: string; AOptions: TWorkspaceOptions);
 begin
   if not TDirectory.Exists(ADir) then
     Exit;
 
-  if AOverwrite then
+  if woOverwrite in AOptions then
   begin
     TDirectory.Delete(ADir, True);
     TConsole.WriteLine(Format('Directory "%s" removed.', [ADir]), clYellow);
   end
-  else if ASilent then
+  else if woSilent in AOptions then
     raise Exception.CreateFmt('Directory "%s" already exists. Use /overwrite to replace it.', [ADir])
   else
   begin
@@ -610,21 +628,21 @@ begin
   end;
 end;
 
-class procedure TWorkspace.ResolveDependencies(AManifest: TManifest; AOverwrite, ABuildOnly, ASilent, AForce: Boolean);
+class procedure TWorkspace.ResolveDependencies(AManifest: TManifest; AOptions: TWorkspaceOptions);
 begin
   if AManifest.Dependencies.IsEmpty then
     Exit;
 
   TConsole.WriteLine('Resolving dependencies...', clCyan);
   for var LDependency in AManifest.Dependencies do
-    TWorkspace.Install(LDependency.Key, LDependency.Value, AOverwrite, ABuildOnly, ASilent, AForce);
+    TWorkspace.Install(LDependency.Key, LDependency.Value, AOptions, True);
   TConsole.WriteLine;
 end;
 
 class procedure TWorkspace.BuildAndRegisterPackage(
     AManifest: TManifest;
     AProduct: TProduct;
-    AOverwrite, ABuildOnly, ASilent: Boolean
+    AOptions: TWorkspaceOptions
 );
 begin
   var LProjectDir := TPath.Combine(WorkDir, AManifest.Name);
@@ -632,12 +650,12 @@ begin
   // beforeInstall scripts
   RunManifestScripts(AManifest, TScriptRunner.EventBeforeInstall, WorkDir, LProjectDir, AProduct, Config);
 
-  if not ABuildOnly then
+  if not (woBuildOnly in AOptions) then
   begin
     // Fetch the package sources according to the repository type
     TConsole.WriteLine('--- ' + AManifest.Id + ' / ' + AManifest.Name + ' ---', clWhite);
     TConsole.WriteLine('Version: ' + AManifest.Version, clCyan);
-    EnsureCleanDir(LProjectDir, AOverwrite, ASilent);
+    EnsureCleanDir(LProjectDir, AOptions);
     var LFetcher := TRepositoryFetcher.ForRepository(AManifest.Repository);
     LFetcher.FetchTo(AManifest.Repository, LProjectDir);
     TConsole.WriteLine('Project downloaded to: ' + LProjectDir, clGreen);
@@ -686,7 +704,7 @@ begin
   end;
 
   // Update database (record the direct dependencies too)
-  if not ABuildOnly then
+  if not (woBuildOnly in AOptions) then
     Database.Update(AManifest.Id, AManifest.Version, AManifest.Dependencies);
 
   // afterInstall scripts
@@ -703,10 +721,11 @@ end;
 
 class procedure TWorkspace.Install(
     const APackageName, AVersionConstraint: string;
-    AOverwrite, ABuildOnly, ASilent, AForce: Boolean
+    AOptions: TWorkspaceOptions;
+    AIsDependency: Boolean
 );
 begin
-  var LPackageId := ResolvePackageId(APackageName, ASilent);
+  var LPackageId := ResolvePackageId(APackageName, woSilent in AOptions);
   var LManifest := TManifest.GetManifest(LPackageId, AVersionConstraint);
   try
     TConsole.WriteLine('Config: ' + LPackageId, clDkGray);
@@ -719,7 +738,7 @@ begin
     var LSelectedProduct := GetWorkspaceProduct;
 
     // Step 4 — In build-only mode the package must already be installed
-    if ABuildOnly then
+    if woBuildOnly in AOptions then
     begin
       if Database.InstalledVersion(LManifest.Id) = '' then
         raise Exception.CreateFmt(
@@ -727,7 +746,7 @@ begin
             [LManifest.Id, LManifest.Id]);
     end
     // Step 4b — Version compatibility check (unless -Overwrite)
-    else if not AOverwrite then
+    else if not (woOverwrite in AOptions) then
     begin
       var LInstalledVer := Database.InstalledVersion(LManifest.Id);
       if LInstalledVer <> '' then
@@ -742,7 +761,7 @@ begin
         end
         else
         begin
-          if AForce then
+          if woForce in AOptions then
           begin
             TConsole.WriteWarning(
                 Format(
@@ -754,9 +773,25 @@ begin
             Exit;
           end
           else
-            raise Exception.CreateFmt(
-                'Version conflict: %s installed %s, required %s',
-                [LManifest.Id, LInstalledVer, AVersionConstraint]);
+          begin
+            var LMessage :=
+                Format(
+                    'Version conflict: %s installed %s, required %s',
+                    [LManifest.Id, LInstalledVer, AVersionConstraint]
+                );
+            // Only suggest "update" for a top-level install: there switching the
+            // installed version is what the user wants. For a transitive dependency
+            // the conflict is structural (another dependent pinned it), so update
+            // would not help and the hint would be misleading.
+            if not AIsDependency then
+              LMessage :=
+                  LMessage
+                      + sLineBreak
+                      + Format(
+                          'To change the installed version run: blocks update %s@%s',
+                          [LManifest.Id, AVersionConstraint]);
+            raise Exception.Create(LMessage);
+          end;
         end;
       end;
     end;
@@ -768,19 +803,19 @@ begin
           .CreateFmt('No compatible package found for "%s". Delphi version too old?', [LSelectedProduct.DisplayName]);
 
     // Step 6 — Dependencies
-    ResolveDependencies(LManifest, AOverwrite, ABuildOnly, ASilent, AForce);
+    ResolveDependencies(LManifest, AOptions);
 
     // Steps 6.5–11 — fetch, compile, register search paths, record in database,
     // run scripts and print the completion banner for this package.
-    BuildAndRegisterPackage(LManifest, LSelectedProduct, AOverwrite, ABuildOnly, ASilent);
+    BuildAndRegisterPackage(LManifest, LSelectedProduct, AOptions);
   finally
     LManifest.Free;
   end;
 end;
 
-class procedure TWorkspace.Uninstall(const APackageName: string; AForce: Boolean);
+class procedure TWorkspace.Uninstall(const APackageName: string; AOptions: TWorkspaceOptions);
 begin
-  var LPackageId := ResolvePackageId(APackageName);
+  var LPackageId := ResolvePackageId(APackageName, woSilent in AOptions);
   TConsole.WriteLine('Config: ' + LPackageId, clDkGray);
   TConsole.WriteLine;
 
@@ -807,7 +842,7 @@ begin
   if Length(LDependents) > 0 then
   begin
     TConsole.WriteWarning(Format('%s is required by: %s', [LPackageId, string.Join(', ', LDependents)]));
-    if AForce then
+    if woForce in AOptions then
       TConsole.WriteLine('Removing anyway (/force).', clYellow)
     else
     begin
@@ -913,9 +948,9 @@ begin
   end;
 end;
 
-class procedure TWorkspace.Update(const APackageName, AVersionConstraint: string; ASilent: Boolean);
+class procedure TWorkspace.Update(const APackageName, AVersionConstraint: string; AOptions: TWorkspaceOptions);
 begin
-  var LPackageId := ResolvePackageId(APackageName, ASilent);
+  var LPackageId := ResolvePackageId(APackageName, woSilent in AOptions);
   TConsole.WriteLine('Config: ' + LPackageId, clDkGray);
   TConsole.WriteLine;
   TConsole.WriteLine('Workspace: ' + WorkDir, clDkGray);
@@ -978,7 +1013,7 @@ begin
 
     TConsole.WriteLine(Format('Latest within major %d: %s', [LInstalledSemVer.Major, LMaxSameMajor.ToString]), clCyan);
 
-    if ASilent then
+    if woSilent in AOptions then
       LTargetVer := LMaxSameMajor.ToString
     else
     begin
@@ -1073,13 +1108,13 @@ begin
     // (bpl/dcp/rsm), the IDE design-time registration and the DCU folder of the
     // old version. Uninstalling (forced, so the dependents warning is skipped)
     // gives a clean slate; the dependents are recompiled below.
-    Uninstall(LPackageId, True);
+    Uninstall(LPackageId, [woForce]);
 
     // Step 7 — Install the new version. Its missing dependencies are downloaded and
     // already-compatible ones are skipped by the install gate; overwrite stays off
     // so dependencies are not needlessly re-downloaded. The checks above guarantee
-    // there are no version conflicts, so no force is needed.
-    Install(LPackageId, LTargetVer, False, False, ASilent, False);
+    // there are no version conflicts, so no force is needed. Only woSilent is carried over.
+    Install(LPackageId, LTargetVer, AOptions * [woSilent]);
 
     // Step 8 — Recompile every dependent (direct and transitive) so their DCUs are
     // rebuilt against the new version (in Delphi DCUs are tied to the version they
@@ -1095,7 +1130,7 @@ begin
       begin
         var LDependentManifest := TManifest.GetManifest(LDependent, Database.InstalledVersion(LDependent));
         try
-          BuildAndRegisterPackage(LDependentManifest, LSelectedProduct, False, True, ASilent);
+          BuildAndRegisterPackage(LDependentManifest, LSelectedProduct, [woBuildOnly] + (AOptions * [woSilent]));
         finally
           LDependentManifest.Free;
         end;

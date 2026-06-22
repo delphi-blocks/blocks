@@ -580,7 +580,14 @@ begin
     LVersionConstraint := Trim(LParts[1]);
   end;
   ShowBanner('', '');
-  TWorkspace.Install(LPackageName, LVersionConstraint, FOverwrite, False, FSilent, FForce);
+  var LOptions: TWorkspaceOptions := [];
+  if FOverwrite then
+    Include(LOptions, woOverwrite);
+  if FSilent then
+    Include(LOptions, woSilent);
+  if FForce then
+    Include(LOptions, woForce);
+  TWorkspace.Install(LPackageName, LVersionConstraint, LOptions);
 end;
 
 procedure TInstallCommand.ShowHelp;
@@ -619,7 +626,10 @@ begin
   CheckWorkspace;
   ShowBanner('', '');
   // Recompiles an already-installed package without downloading it again.
-  TWorkspace.Install(FPackageName, '', False, True, FSilent, False);
+  var LOptions: TWorkspaceOptions := [woBuildOnly];
+  if FSilent then
+    Include(LOptions, woSilent);
+  TWorkspace.Install(FPackageName, '', LOptions);
 end;
 
 procedure TBuildCommand.ShowHelp;
@@ -663,7 +673,10 @@ begin
   if LPackageName = '' then
     raise Exception.Create('Usage: ' + AppExeName + ' update <package>[@version]');
   ShowBanner('', '');
-  TWorkspace.Update(LPackageName, LVersionConstraint, FSilent);
+  var LOptions: TWorkspaceOptions := [];
+  if FSilent then
+    Include(LOptions, woSilent);
+  TWorkspace.Update(LPackageName, LVersionConstraint, LOptions);
 end;
 
 procedure TUpdateCommand.ShowHelp;
@@ -701,7 +714,10 @@ begin
   inherited;
   CheckWorkspace;
   ShowBanner('', '');
-  TWorkspace.Uninstall(FPackageName, FForce);
+  var LOptions: TWorkspaceOptions := [];
+  if FForce then
+    Include(LOptions, woForce);
+  TWorkspace.Uninstall(FPackageName, LOptions);
 end;
 
 procedure TUninstallCommand.ShowHelp;
