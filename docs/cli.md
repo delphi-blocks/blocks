@@ -128,10 +128,11 @@ Examples:
 ## Update
 
 Updates an already-installed package to a newer version and recompiles the
-packages that depend on it (in Delphi their DCUs are tied to the version they were
-compiled against). With no version it proposes the highest release within the
-installed major version (interactively, unless `/silent`); append `@<version>` to
-target a specific one — a downgrade is allowed too.
+packages that depend on it — directly **and transitively** (in Delphi their DCUs
+are tied to the version they were compiled against). With no version it proposes
+the highest release within the installed major version (interactively, unless
+`/silent`); append `@<version>` to target a specific one — a downgrade is allowed
+too.
 
 Before updating, two compatibility checks run and report **all** problems found:
 
@@ -141,13 +142,14 @@ Before updating, two compatibility checks run and report **all** problems found:
 - **Upward** — the installed packages that depend on this one, against the new
   version's number.
 
-On problems the update is aborted and `/force` is suggested; `/force` updates
-anyway.
+If any problem is found the update is **refused** and the workspace is left
+untouched: uninstall or update the conflicting packages listed first, then retry.
+This guarantees the workspace never ends up in an invalid state.
 
 Once the checks pass, the currently installed version is **uninstalled first**
 (so version-suffixed artifacts, the IDE design-time registration and the DCU
 folder of the old version are not left behind), then the new version is installed
-and the dependents are recompiled.
+and every dependent is recompiled in dependency order.
 
 ```
 Usage: Blocks update <package> [options]
@@ -158,12 +160,10 @@ Arguments:
 
 Options:
   /silent                Skip the version prompt, taking the proposed version.
-  /force                 Update even when the compatibility checks report problems.
 
 Examples:
   Blocks update owner.package
   Blocks update owner.package@2.0.0
-  Blocks update owner.package@2.0.0 /force
 ```
 
 ## Uninstall

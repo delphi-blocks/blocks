@@ -123,7 +123,7 @@ Common options (per command — see `blocks help <command>` for the full list):
 | `/registrykey <key>` | init | Registry profile key (default: `BDS`); for `bds.exe -r <key>` |
 | `/overwrite` | install | Overwrite the project directory if it already exists |
 | `/silent` | install, build, update, version | Skip non-critical interactive prompts |
-| `/force` | install, update, upgrade | Continue past version conflicts / re-install when up to date |
+| `/force` | install, upgrade | Continue past version conflicts / re-install when up to date |
 | `/add` | config | Append to a list value instead of replacing |
 | `/system` | config | Target system-level config (registry) instead of workspace |
 | `/raw` | view | Print raw manifest JSON instead of formatted summary |

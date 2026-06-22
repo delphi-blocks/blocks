@@ -15,6 +15,7 @@
 - [ ] Test installation/uninstallation on macOS and mobile (Android, iOS): verify the `bpl<name>.so`/`.dylib` output naming and the `.imp.o` import-object location
 - [ ] Ability to pass a custom DEFINE during installation or in the manifest
 - [ ] Should the `build` command act recursively on dependencies?
+- [x] On `update`, recompile transitive dependents too (today only direct dependents are recompiled, so a dependent of a dependent can be left with stale DCUs)
 - [ ] Install "packageless" library (FastMM4, DUnitX, ...)
 - [ ] Handle naming conflicts (install folder, package names, DCU folder names)
 - [ ] New repository location (private repo? HTTP url? Authentication?)

@@ -84,6 +84,8 @@ type
   // Dependency map: name -> version
   // -----------------------------------------------------------------------
   TDependencyMap = class(TOrderedDictionary<string, string>)
+  public
+    constructor Create;
   end;
 
   // -----------------------------------------------------------------------
@@ -406,6 +408,15 @@ uses
 const
   ManifestSchemaUrl = 'https://delphi-blocks.dev/schema/package.v1.json';
   RepositoryIndexSchemaUrl = 'https://delphi-blocks.dev/schema/repository-index.v1.json';
+
+{ TDependencyMap }
+
+constructor TDependencyMap.Create;
+begin
+  // Package ids are case-insensitive, so use a case-insensitive comparer: lookups
+  // (TryGetValue / ContainsKey / the indexer) then match regardless of casing.
+  inherited Create(TIStringComparer.Ordinal);
+end;
 
 { TManifestPlatform }
 

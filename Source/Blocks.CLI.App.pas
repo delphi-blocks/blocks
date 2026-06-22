@@ -199,8 +199,6 @@ type
 
   TUpdateCommand = class(TBaseCommand)
   private
-    [Param('force')]
-    FForce: Boolean;
     [Param('silent')]
     FSilent: Boolean;
     [Param]
@@ -665,20 +663,21 @@ begin
   if LPackageName = '' then
     raise Exception.Create('Usage: ' + AppExeName + ' update <package>[@version]');
   ShowBanner('', '');
-  TWorkspace.Update(LPackageName, LVersionConstraint, FSilent, FForce);
+  TWorkspace.Update(LPackageName, LVersionConstraint, FSilent);
 end;
 
 procedure TUpdateCommand.ShowHelp;
 begin
   TConsole.WriteLine;
   TConsole.WriteLine('Updates an already-installed package to a newer version and recompiles');
-  TConsole.WriteLine('the packages that depend on it. With no version, proposes the highest');
-  TConsole.WriteLine('release within the installed major version; append @<version> to pick a');
-  TConsole.WriteLine('specific one (a downgrade is allowed too).');
+  TConsole.WriteLine('the packages that depend on it (directly or transitively). With no version,');
+  TConsole.WriteLine('proposes the highest release within the installed major version; append');
+  TConsole.WriteLine('@<version> to pick a specific one (a downgrade is allowed too).');
   TConsole.WriteLine;
   TConsole.WriteLine('Before updating, two compatibility checks run: the new version''s');
   TConsole.WriteLine('dependencies against what is installed, and the installed dependents');
-  TConsole.WriteLine('against the new version. On problems the update is aborted unless /force.');
+  TConsole.WriteLine('against the new version. On problems the update is refused, leaving the');
+  TConsole.WriteLine('workspace untouched: uninstall or update the conflicting packages first.');
   TConsole.WriteLine;
   TConsole.WriteLine('Usage: ' + AppExeName + ' update <package> [options]', clWhite);
   TConsole.WriteLine;
@@ -688,12 +687,10 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('Options:', clWhite);
   WriteOption('/silent', 'Skip the version prompt, taking the proposed version.');
-  WriteOption('/force', 'Update even when the compatibility checks report problems.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' update owner.package');
   TConsole.WriteLine('  ' + AppExeName + ' update owner.package@2.0.0');
-  TConsole.WriteLine('  ' + AppExeName + ' update owner.package@2.0.0 /force');
   TConsole.WriteLine;
 end;
 

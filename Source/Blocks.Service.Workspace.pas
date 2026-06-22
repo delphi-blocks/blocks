@@ -56,9 +56,8 @@ type
     /// </remarks>
     class function ResolvePackageId(const AArg: string; ASilent: Boolean = False): string; static;
     class procedure TestDelphiRunning(AProduct: TProduct); static;
-    /// <summary>Resolves the Delphi product configured for the workspace, optionally prints its
-    ///   identity and checks whether the IDE is running. Shared by install/uninstall/update.</summary>
-    class function ResolveProduct(APrint: Boolean = True): TProduct; static;
+    /// <summary>Resolves the Delphi product configured for the workspace.</summary>
+    class function GetWorkspaceProduct: TProduct; static;
     /// <summary>Recursively installs the direct dependencies declared in a manifest.</summary>
     class procedure ResolveDependencies(AManifest: TManifest; AOverwrite, ABuildOnly, ASilent, AForce: Boolean); static;
     /// <summary>Fetches (unless build-only), compiles, registers the search paths and records
@@ -71,6 +70,10 @@ type
     /// <summary>Returns the ids of installed packages that declare <paramref name="APackageId"/>
     ///   among their direct dependencies (reverse dependencies).</summary>
     class function FindDependents(const APackageId: string): TArray<string>; static;
+    /// <summary>Returns every installed package that depends on <paramref name="APackageId"/>
+    ///   directly or transitively, in topological order (a package always comes after the
+    ///   dependencies it requires within the set). The visited set also guards against cycles.</summary>
+    class function FindAllDependents(const APackageId: string): TArray<string>; static;
     class constructor Create;
     class destructor Destroy;
   public
@@ -126,8 +129,10 @@ type
     /// <param name="AVersionConstraint">Target version/constraint; empty proposes the highest release
     ///   within the installed major version (interactively, unless <paramref name="ASilent"/>).</param>
     /// <param name="ASilent">Skip the interactive version prompt, taking the proposed version.</param>
-    /// <param name="AForce">Update even when the compatibility checks report problems.</param>
-    class procedure Update(const APackageName, AVersionConstraint: string; ASilent, AForce: Boolean); static;
+    /// <remarks>When the compatibility checks report problems the update is refused (the user
+    ///   must uninstall or update the conflicting packages first); it never leaves the workspace
+    ///   in an invalid state. On success every direct and transitive dependent is recompiled.</remarks>
+    class procedure Update(const APackageName, AVersionConstraint: string; ASilent: Boolean); static;
 
     /// <summary>Root directory of the current workspace.</summary>
     /// <remarks>
@@ -146,6 +151,7 @@ implementation
 
 uses
   System.JSON,
+  System.Generics.Defaults,
   Blocks.Console,
   Blocks.Http,
   Blocks.GitHub,
@@ -537,36 +543,70 @@ begin
   FDelphiRunningContinue := True;
 end;
 
-class function TWorkspace.ResolveProduct(APrint: Boolean): TProduct;
+class function TWorkspace.GetWorkspaceProduct: TProduct;
 begin
-  // Delphi version (read from workspace configuration)
   var LProduct := Config.Product;
   if LProduct = '' then
     raise Exception.Create('No Delphi version configured. Run "blocks init /product <version>" first.');
   Result := TProduct.Find(LProduct, Config.RegistryKey);
-  if APrint then
-  begin
-    TConsole.WriteLine('Selected version: ' + Result.DisplayName, clGreen);
-    if not SameText(Result.RegistryKey, 'BDS') then
-      TConsole.WriteLine('Registry key    : ' + Result.RegistryKey, clGreen);
-    TConsole.WriteLine;
-  end;
   TestDelphiRunning(Result);
 end;
 
 class function TWorkspace.FindDependents(const APackageId: string): TArray<string>;
 begin
   Result := [];
+  // Dependencies uses a case-insensitive comparer, so ContainsKey matches the id
+  // regardless of casing.
   for var LEntry in Database.Packages do
+    if not SameText(LEntry.Key, APackageId) and LEntry.Value.Dependencies.ContainsKey(APackageId) then
+      Result := Result + [LEntry.Key];
+end;
+
+class function TWorkspace.FindAllDependents(const APackageId: string): TArray<string>;
+var
+  LClosure: TDictionary<string, Boolean>;
+  LVisited: TDictionary<string, Boolean>;
+  LOrdered: TList<string>;
+
+  // Reverse-transitive closure: collect every package that depends on AId, then
+  // their dependents, and so on. The closure membership check stops cycles.
+  procedure CollectClosure(const AId: string);
   begin
-    if SameText(LEntry.Key, APackageId) then
-      Continue;
-    for var LDependency in LEntry.Value.Dependencies.Keys do
-      if SameText(LDependency, APackageId) then
+    for var LDependent in FindDependents(AId) do
+      if not LClosure.ContainsKey(LDependent) then
       begin
-        Result := Result + [LEntry.Key];
-        Break;
+        LClosure.Add(LDependent, True);
+        CollectClosure(LDependent);
       end;
+  end;
+
+  // Post-order DFS over the forward dependency edges restricted to the closure:
+  // a package is emitted only after the dependencies it requires within the set,
+  // yielding a topological order (dependencies before dependents).
+  procedure TopoVisit(const AId: string);
+  begin
+    if LVisited.ContainsKey(AId) then
+      Exit;
+    LVisited.Add(AId, True);
+    for var LDep in Database.Packages[AId].Dependencies.Keys do
+      if LClosure.ContainsKey(LDep) then
+        TopoVisit(LDep);
+    LOrdered.Add(AId);
+  end;
+
+begin
+  LClosure := TDictionary<string, Boolean>.Create(TIStringComparer.Ordinal);
+  LVisited := TDictionary<string, Boolean>.Create(TIStringComparer.Ordinal);
+  LOrdered := TList<string>.Create;
+  try
+    CollectClosure(APackageId);
+    for var LId in LClosure.Keys do
+      TopoVisit(LId);
+    Result := LOrdered.ToArray;
+  finally
+    LOrdered.Free;
+    LVisited.Free;
+    LClosure.Free;
   end;
 end;
 
@@ -676,7 +716,7 @@ begin
     TConsole.WriteLine;
 
     // Step 3 — Delphi version (read from workspace configuration)
-    var LSelectedProduct := ResolveProduct;
+    var LSelectedProduct := GetWorkspaceProduct;
 
     // Step 4 — In build-only mode the package must already be installed
     if ABuildOnly then
@@ -748,7 +788,7 @@ begin
   TConsole.WriteLine;
 
   // Step 3 — Delphi version (read from workspace configuration)
-  var LSelectedProduct := ResolveProduct;
+  var LSelectedProduct := GetWorkspaceProduct;
 
   // Step 4 — Check that the package is actually installed
   var LInstalledVer := Database.InstalledVersion(LPackageId);
@@ -873,7 +913,7 @@ begin
   end;
 end;
 
-class procedure TWorkspace.Update(const APackageName, AVersionConstraint: string; ASilent, AForce: Boolean);
+class procedure TWorkspace.Update(const APackageName, AVersionConstraint: string; ASilent: Boolean);
 begin
   var LPackageId := ResolvePackageId(APackageName, ASilent);
   TConsole.WriteLine('Config: ' + LPackageId, clDkGray);
@@ -890,7 +930,7 @@ begin
   var LInstalledSemVer := TSemVer.Parse(LInstalledVer);
 
   // Step 2 — Delphi version (resolved quietly; the delegated uninstall/install print it)
-  var LSelectedProduct := ResolveProduct(False);
+  var LSelectedProduct := GetWorkspaceProduct;
 
   // Step 3 — Determine the target version
   var LTargetVer: string;
@@ -997,14 +1037,9 @@ begin
     var LTargetSemVer := TSemVer.Parse(LTargetVer);
     for var LDependent in FindDependents(LPackageId) do
     begin
-      var LConstraint := '';
-      for var LDep in Database.Packages[LDependent].Dependencies do
-        if SameText(LDep.Key, LPackageId) then
-        begin
-          LConstraint := LDep.Value;
-          Break;
-        end;
-      if not LTargetSemVer.MatchesConstraint(LConstraint) then
+      var LConstraint: string;
+      if Database.Packages[LDependent].Dependencies.TryGetValue(LPackageId, LConstraint)
+          and not LTargetSemVer.MatchesConstraint(LConstraint) then
         LProblems :=
             LProblems
                 + [
@@ -1016,18 +1051,13 @@ begin
 
     if Length(LProblems) > 0 then
     begin
-      TConsole.WriteWarning(Format('Updating %s to %s has compatibility problems:', [LPackageId, LTargetVer]));
+      TConsole.WriteWarning(Format('Cannot update %s to %s — compatibility problems:', [LPackageId, LTargetVer]));
       for var LProblem in LProblems do
         TConsole.WriteLine(LProblem, clYellow);
-      if not AForce then
-      begin
-        TConsole.WriteLine;
-        TConsole.WriteLine('Update aborted. Use /force to update anyway.', clYellow);
-        TConsole.WriteLine;
-        Exit;
-      end;
-      TConsole.WriteLine('Proceeding anyway (/force).', clYellow);
       TConsole.WriteLine;
+      TConsole.WriteLine('Resolve them first (uninstall or update the packages listed above), then retry.', clYellow);
+      TConsole.WriteLine;
+      Exit;
     end;
 
     // Step 5 — Make sure the new version targets the selected Delphi version.
@@ -1047,12 +1077,16 @@ begin
 
     // Step 7 — Install the new version. Its missing dependencies are downloaded and
     // already-compatible ones are skipped by the install gate; overwrite stays off
-    // so dependencies are not needlessly re-downloaded.
-    Install(LPackageId, LTargetVer, False, False, ASilent, AForce);
+    // so dependencies are not needlessly re-downloaded. The checks above guarantee
+    // there are no version conflicts, so no force is needed.
+    Install(LPackageId, LTargetVer, False, False, ASilent, False);
 
-    // Step 8 — Recompile the dependents so their DCUs are rebuilt against the new
-    // version (in Delphi DCUs are tied to the version they were compiled with).
-    var LDependents := FindDependents(LPackageId);
+    // Step 8 — Recompile every dependent (direct and transitive) so their DCUs are
+    // rebuilt against the new version (in Delphi DCUs are tied to the version they
+    // were compiled with). The list is in topological order, so a package is rebuilt
+    // after the dependencies it requires. No compatibility check is needed here: the
+    // checks above already passed, and recompiling never changes a package's version.
+    var LDependents := FindAllDependents(LPackageId);
     if Length(LDependents) > 0 then
     begin
       TConsole.WriteLine(Format('Recompiling dependents: %s', [string.Join(', ', LDependents)]), clCyan);
@@ -1096,6 +1130,9 @@ begin
   LSelectedProduct.CheckEnvironment(AWorkDir);
 
   Database.TouchRepository;
+
+  if Config.UpdateDCPSearchPath then
+    LSelectedProduct.CheckDCPPath(AWorkDir);
 end;
 
 end.
