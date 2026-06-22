@@ -1,0 +1,39 @@
+{
+  "$schema": "https://delphi-blocks.dev/schema/package.v1.json",
+  "id": "test.core",
+  "name": "Core",
+  "version": "1.0.0",
+  "description": "Core test library (base package, no dependencies)",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/delphi-blocks/blocks",
+  "repository": {
+    "type": "local",
+    "url": "C:\\Progetti\\DelphiBlocks\\Demo\\Projects\\Core\\1.0.0"
+  },
+  "author": "Luca",
+
+  "platforms": {
+    "Win32": {
+      "sourcePath": [
+        "Source"
+      ]
+    },
+    "Win64": {
+      "sourcePath": [
+        "Source"
+      ]
+    }
+  },
+
+  "packages": [
+    {
+      "name": "Core",
+      "type": ["runtime"]
+    }
+  ],
+  "packageOptions": {
+    "folders": {
+	  "delphi12+": ""
+    }
+  }
+}

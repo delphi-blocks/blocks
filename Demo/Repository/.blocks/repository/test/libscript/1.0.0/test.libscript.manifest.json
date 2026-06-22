@@ -1,0 +1,70 @@
+{
+  "$schema": "https://delphi-blocks.dev/schema/package.v1.json",
+  "id": "test.libscript",
+  "name": "LibScript",
+  "version": "1.0.0",
+  "description": "Core test library (base package, no dependencies)",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/delphi-blocks/blocks",
+  "repository": {
+    "type": "local",
+    "url": "C:\\Progetti\\DelphiBlocks\\Demo\\Projects\\LibScript\\1.0.0"
+  },
+  "author": "Luca",
+
+  "platforms": {
+    "Win32": {
+      "sourcePath": [
+        "Source"
+      ]
+    },
+    "Win64": {
+      "sourcePath": [
+        "Source"
+      ]
+    }
+  },
+
+  "packages": [
+    {
+      "name": "LibScript",
+      "type": ["runtime"]
+    }
+  ],
+  "packageOptions": {
+    "folders": {
+	  "delphi12+": ""
+    }
+  },
+  "scripts": [{
+	  "description": "Echo 1",
+	  "event": "beforeInstall",
+	  "command": "echo",
+	  "args": "Phase 1 (beforeInstall): %WORKSPACE_PATH% %DCU_PATH% %PLATFORM% %CONFIG%"
+  },{
+	  "description": "Echo 2",
+	  "event": "beforeCompile",
+	  "command": "echo",
+	  "args": "Phase 2 (beforeCompile): %DCU_PATH% %PLATFORM% %CONFIG%"
+  },{
+	  "description": "Echo 3",
+	  "event": "afterCompile",
+	  "command": "echo",
+	  "args": "Phase 3 (afterCompile): %DCU_PATH% %PLATFORM% %CONFIG%"
+  },{
+	  "description": "Echo 4",
+	  "event": "afterInstall",
+	  "command": "echo",
+	  "args": "Phase 4 (afterInstall): %WORKSPACE_PATH% %DCU_PATH% %PLATFORM% %CONFIG%"
+  },{
+	  "description": "Echo 5",
+	  "event": "beforeUninstall",
+	  "command": "echo",
+	  "args": "Phase 5 (beforeUninstall): %WORKSPACE_PATH% %DCU_PATH% %PLATFORM% %CONFIG%"
+  },{
+	  "description": "Echo 6",
+	  "event": "afterUninstall",
+	  "command": "echo",
+	  "args": "Phase 6 (afterUninstall): %WORKSPACE_PATH% %DCU_PATH% %PLATFORM% %CONFIG%"
+  }]
+}

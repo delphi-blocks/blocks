@@ -1,0 +1,37 @@
+{
+  "$schema": "https://delphi-blocks.dev/schema/package.v1.json",
+  "id": "test.libfoo",
+  "name": "LibFoo",
+  "version": "2.0.0",
+  "description": "LibFoo test library (depends on test.core)",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/delphi-blocks/blocks",
+  "repository": {
+    "type": "local",
+    "url": "C:\\Progetti\\DelphiBlocks\\Demo\\Projects\\LibFoo\\2.0.0"
+  },
+  "author": "Luca",
+
+  "platforms": {
+    "Win32,Win64": {
+      "sourcePath": [
+        "Sources"
+      ]
+    }
+  },
+
+  "packages": [
+    {
+      "name": "LibFoo",
+      "type": ["runtime"]
+    }
+  ],
+  "packageOptions": {
+    "folders": {
+	  "delphi12+": ""
+    }
+  },
+  "dependencies": {
+    "test.core": "^2.0.0"
+  }
+}

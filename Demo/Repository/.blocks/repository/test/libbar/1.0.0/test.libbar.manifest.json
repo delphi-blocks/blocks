@@ -1,0 +1,37 @@
+{
+  "$schema": "https://delphi-blocks.dev/schema/package.v1.json",
+  "id": "test.libbar",
+  "name": "LibBar",
+  "version": "1.0.0",
+  "description": "LibBar test library (depends on test.core and test.libfoo)",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/delphi-blocks/blocks",
+  "repository": {
+    "type": "local",
+    "url": "C:\\Progetti\\DelphiBlocks\\Demo\\Projects\\LibBar\\1.0.0"
+  },
+  "author": "Luca",
+
+  "platforms": {
+    "Win32,Win64": {
+      "sourcePath": [
+        "Source"
+      ]
+    }
+  },
+
+  "packages": [
+    {
+      "name": "LibBar",
+      "type": ["runtime"]
+    }
+  ],
+  "packageOptions": {
+    "folders": {
+	  "delphi12+": ""
+    }
+  },
+  "dependencies": {
+    "test.libfoo": ">=1.0.0"
+  }
+}
