@@ -72,6 +72,10 @@ For an annotated example and a full field-by-field reference, see [docs/manifest
 
 All source files are under `Source/`. **Building requires Delphi 13 or later**. The project has no external dependencies: open `Source\Blocks.dproj` in Delphi / RAD Studio and compile. The compiled executable (`Blocks.exe`) is placed in the project root.
 
+## Acknowledgements
+
+Thanks to [Ethea](https://ethea.it/) for providing the code-signing certificate used to sign the executables.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
