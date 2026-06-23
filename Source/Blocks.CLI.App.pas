@@ -191,6 +191,8 @@ type
     FCheck: Boolean;
     [Param('force')]
     FForce: Boolean;
+    [Param('silent')]
+    FSilent: Boolean;
     function SelectSetup(AAssets: TGitHubReleaseAssets): string;
   public
     procedure Execute; override;
@@ -1398,8 +1400,9 @@ begin
     TConsole.WriteLine('Downloading to: ' + LDestinationPath);
     ForceDirectories(ExtractFilePath(LDestinationPath));
 
+    var LParams := if FSilent then '/verysilent' else '/silent';
     THttpUtils.DownloadFile(LBrowserDownloadUrl, LDestinationPath);
-    ShellExecute(0, 'open', PChar(LDestinationPath), '', '', SW_SHOWDEFAULT);
+    ShellExecute(0, 'open', PChar(LDestinationPath), PChar(LParams), '', SW_SHOWDEFAULT);
 
   finally
     LReleases.Free;
