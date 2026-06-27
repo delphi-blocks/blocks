@@ -11,11 +11,14 @@
 - [x] Add an application icon to the executable
 - [x] Config variable to use `DCC_PreferredToolArchitecture` (`x32` or `x64`) with *msbuild* 
 - [x] Dependency check during uninstall
-- [ ] Import and export of the dependency database so the same environment can be recreated on another machine
+- [x] On `update`, recompile transitive dependents too (today only direct dependents are recompiled, so a dependent of a dependent can be left with stale DCUs)
+- [x] Import and export of the dependency database so the same environment can be recreated on another machine (`export` command + `install <manifest-file>` of a meta-package)
+- [ ] `update` without a version constraint should target the highest version within the same major that is also compatible with all other installed packages (not just the latest in-major release, but the best version satisfying the upward dependency graph)
+- [ ] Support for private SVN e GIT repository (needs command line git.exe or svn.exe)
+- [ ] Parallel builds for all the platforms supported to improve speed
 - [ ] Test installation/uninstallation on macOS and mobile (Android, iOS): verify the `bpl<name>.so`/`.dylib` output naming and the `.imp.o` import-object location
 - [ ] Ability to pass a custom DEFINE during installation or in the manifest
 - [ ] Should the `build` command act recursively on dependencies?
-- [x] On `update`, recompile transitive dependents too (today only direct dependents are recompiled, so a dependent of a dependent can be left with stale DCUs)
 - [ ] Install "packageless" library (FastMM4, DUnitX, ...)
 - [ ] Handle naming conflicts (install folder, package names, DCU folder names)
 - [ ] New repository location (private repo? HTTP url? Authentication?)

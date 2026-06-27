@@ -647,60 +647,67 @@ class procedure TWorkspace.BuildAndRegisterPackage(
 begin
   var LProjectDir := TPath.Combine(WorkDir, AManifest.Name);
 
+  // A meta-package (repository type "none") declares only dependencies: it has
+  // nothing to fetch, compile or register, but it is still recorded in the database.
+  var LIsMeta := AManifest.IsMeta;
+
   // beforeInstall scripts
   RunManifestScripts(AManifest, TScriptRunner.EventBeforeInstall, WorkDir, LProjectDir, AProduct, Config);
 
-  if not (woBuildOnly in AOptions) then
+  if not LIsMeta then
   begin
-    // Fetch the package sources according to the repository type
-    TConsole.WriteLine('--- ' + AManifest.Id + ' / ' + AManifest.Name + ' ---', clWhite);
-    TConsole.WriteLine('Version: ' + AManifest.Version, clCyan);
-    EnsureCleanDir(LProjectDir, AOptions);
-    var LFetcher := TRepositoryFetcher.ForRepository(AManifest.Repository);
-    LFetcher.FetchTo(AManifest.Repository, LProjectDir);
-    TConsole.WriteLine('Project downloaded to: ' + LProjectDir, clGreen);
-    TConsole.WriteLine;
-  end
-  else
-  begin
-    if not TDirectory.Exists(LProjectDir) then
-      raise Exception.CreateFmt('Build-only mode: project directory not found: %s', [LProjectDir]);
-    TConsole.WriteLine;
-  end;
-
-  // Compile (restricted to the workspace's enabled platforms, if any)
-  AProduct.BuildPackages(WorkDir, LProjectDir, AManifest, Config);
-
-  // Update product paths
-  var LEnvironmentVariables := TStringList.Create;
-  try
-    AProduct.FillEnvironmentVariables(LEnvironmentVariables);
-    for var LPlatformPair in AManifest.Platforms do
+    if not (woBuildOnly in AOptions) then
     begin
-      // Skip platforms the workspace does not target (empty filter = all).
-      if not Config.IsPlatformEnabled(LPlatformPair.Key) then
-        Continue;
-
-      var LPackagesPath := AProduct.GetPackagesPath(LProjectDir, AManifest);
-
-      for var LPackage in AManifest.Packages do
-      begin
-        // Packages that do not target this product were never built, so skip their paths too.
-        if not LPackage.SupportsProduct(AProduct.VersionName) then
-          Continue;
-
-        // Design-time packages are not built on runtime-only platforms, so skip their paths too.
-        if LPlatformPair.Value.RuntimeOnly and LPackage.IsDesignTime then
-          Continue;
-
-        var DprojPath := TPath.Combine(LPackagesPath, AProduct.ExpandPackageName(LPackage.Name) + '.dproj');
-        var LPlatformPaths :=
-            GetPlatformPaths(AManifest, DprojPath, LProjectDir, LPlatformPair.Key, LEnvironmentVariables);
-        AProduct.UpdateSearchPaths(LPlatformPair.Key, LProjectDir, LPlatformPaths);
-      end;
+      // Fetch the package sources according to the repository type
+      TConsole.WriteLine('--- ' + AManifest.Id + ' / ' + AManifest.Name + ' ---', clWhite);
+      TConsole.WriteLine('Version: ' + AManifest.Version, clCyan);
+      EnsureCleanDir(LProjectDir, AOptions);
+      var LFetcher := TRepositoryFetcher.ForRepository(AManifest.Repository);
+      LFetcher.FetchTo(AManifest.Repository, LProjectDir);
+      TConsole.WriteLine('Project downloaded to: ' + LProjectDir, clGreen);
+      TConsole.WriteLine;
+    end
+    else
+    begin
+      if not TDirectory.Exists(LProjectDir) then
+        raise Exception.CreateFmt('Build-only mode: project directory not found: %s', [LProjectDir]);
+      TConsole.WriteLine;
     end;
-  finally
-    LEnvironmentVariables.Free;
+
+    // Compile (restricted to the workspace's enabled platforms, if any)
+    AProduct.BuildPackages(WorkDir, LProjectDir, AManifest, Config);
+
+    // Update product paths
+    var LEnvironmentVariables := TStringList.Create;
+    try
+      AProduct.FillEnvironmentVariables(LEnvironmentVariables);
+      for var LPlatformPair in AManifest.Platforms do
+      begin
+        // Skip platforms the workspace does not target (empty filter = all).
+        if not Config.IsPlatformEnabled(LPlatformPair.Key) then
+          Continue;
+
+        var LPackagesPath := AProduct.GetPackagesPath(LProjectDir, AManifest);
+
+        for var LPackage in AManifest.Packages do
+        begin
+          // Packages that do not target this product were never built, so skip their paths too.
+          if not LPackage.SupportsProduct(AProduct.VersionName) then
+            Continue;
+
+          // Design-time packages are not built on runtime-only platforms, so skip their paths too.
+          if LPlatformPair.Value.RuntimeOnly and LPackage.IsDesignTime then
+            Continue;
+
+          var DprojPath := TPath.Combine(LPackagesPath, AProduct.ExpandPackageName(LPackage.Name) + '.dproj');
+          var LPlatformPaths :=
+              GetPlatformPaths(AManifest, DprojPath, LProjectDir, LPlatformPair.Key, LEnvironmentVariables);
+          AProduct.UpdateSearchPaths(LPlatformPair.Key, LProjectDir, LPlatformPaths);
+        end;
+      end;
+    finally
+      LEnvironmentVariables.Free;
+    end;
   end;
 
   // Update database (record the direct dependencies too)
@@ -713,8 +720,13 @@ begin
   TConsole.WriteLine;
   TConsole.WriteLine('============================================', clGreen);
   TConsole.WriteLine('  Done!', clGreen);
-  TConsole.WriteLine('  Project  : ' + LProjectDir, clGreen);
-  TConsole.WriteLine('  Packages : ' + AProduct.GetPackagesPath(LProjectDir, AManifest), clGreen);
+  if LIsMeta then
+    TConsole.WriteLine('  Meta-package : ' + AManifest.Id + '@' + AManifest.Version, clGreen)
+  else
+  begin
+    TConsole.WriteLine('  Project  : ' + LProjectDir, clGreen);
+    TConsole.WriteLine('  Packages : ' + AProduct.GetPackagesPath(LProjectDir, AManifest), clGreen);
+  end;
   TConsole.WriteLine('============================================', clGreen);
   TConsole.WriteLine;
 end;
@@ -806,7 +818,9 @@ begin
     ResolveDependencies(LManifest, AOptions);
 
     // Steps 6.5–11 — fetch, compile, register search paths, record in database,
-    // run scripts and print the completion banner for this package.
+    // run scripts and print the completion banner for this package. A meta-package
+    // (repository type "none") skips the fetch/compile/register steps inside but is
+    // still recorded in the database.
     BuildAndRegisterPackage(LManifest, LSelectedProduct, AOptions);
   finally
     LManifest.Free;
@@ -915,13 +929,14 @@ begin
     // Step 5.5 — Unregister any IDE experts pointing into this package's blocks lib folder
     LSelectedProduct.UnregisterExperts(WorkDir, LManifest.Name);
 
-    // Step 6 — Remove project directory
+    // Step 6 — Remove project directory. A meta-package (repository type "none")
+    // never created one, so its absence is expected and not worth a warning.
     if TDirectory.Exists(LProjectDir) then
     begin
       TDirectory.Delete(LProjectDir, True);
       TConsole.WriteLine('Removed: ' + LProjectDir);
     end
-    else
+    else if not LManifest.IsMeta then
       TConsole.WriteLine('Directory not found: ' + LProjectDir, clYellow);
 
     // Step 6.5 — Remove the package's DCU output folder (.blocks\lib\<name>).

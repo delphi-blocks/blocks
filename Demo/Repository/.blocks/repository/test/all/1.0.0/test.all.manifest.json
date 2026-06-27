@@ -1,0 +1,28 @@
+{
+  "$schema": "https://delphi-blocks.dev/schema/package.v1.json",
+  "id": "test.all",
+  "name": "ALL",
+  "version": "1.0.0",
+  "description": "Luca Workspace",
+  "repository": {
+    "type": "none"
+  },
+
+  "packageOptions": {
+    "folders": {
+      "delphi10": "dseattle",
+      "delphi101": "10.1Berlin",
+      "delphi102": "10.2Tokyo",
+      "delphi103": "10.3Rio",
+      "delphi104": "10.4Sydney",
+	  "delphi11": "11.0Alexandria",
+	  "delphi12+": "12.0AthensAndAbove"
+    }
+  },
+  "dependencies": {
+    "delphi-blocks.wirl": "4.6.0",
+    "paolo-rossi.delphi-neon": "3.1.0",
+    "paolo-rossi.delphi-jose-jwt": "3.3.1",
+    "paolo-rossi.openapi-delphi": "2.2.0"
+  }
+}

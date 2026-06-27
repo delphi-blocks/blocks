@@ -41,6 +41,9 @@ type
     constructor Create(const AName: string);
   end;
 
+  JsonIgnoreAttribute = class(TCustomAttribute)
+  end;
+
   TJsonHelper = class
   private
     class procedure PrettyPrint(const AJSONString: string; AWriter: TTextWriter); overload; static;
@@ -586,6 +589,8 @@ begin
 
   for var LProp in AType.GetProperties do
   begin
+    if LProp.HasAttribute(JsonIgnoreAttribute) then
+      Continue;
     var LValue := LProp.GetValue(AObject);
     var LPropName := GetJSONFieldName(LProp);
     var LJSONValue := AJSON.FindValue(LPropName);
@@ -870,6 +875,8 @@ begin
 
     for var LProp in LType.GetProperties do
     begin
+      if LProp.HasAttribute(JsonIgnoreAttribute) then
+        Continue;
       var LPropName := GetJSONFieldName(LProp);
       var LValue := WriteDataMember(LProp.PropertyType, LProp.GetValue(AObject));
       if Assigned(LValue) then

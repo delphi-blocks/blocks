@@ -78,7 +78,7 @@ which other packages are required.
 | `homepage` | Project homepage URL. |
 | `author` | Author(s); free-form, optionally with an email. |
 | `keywords` | List of keywords used by `search`. |
-| `repository.type` | Source repository type: `github`, `bitbucket`, or `local`. |
+| `repository.type` | Source repository type: `github`, `bitbucket`, `local`, or `none`. Use `none` for a **meta-package** (see below). |
 | `repository.url` | Repository URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. For `github` use a tree URL (`https://github.com/owner/repo/tree/<ref>`), for `bitbucket` a src URL (`https://bitbucket.org/owner/repo/src/<ref>`), for `local` a filesystem path. |
 | `platforms` | Per-platform `sourcePath` (registered in the Delphi "Browsing Path") and optional `releaseDCUPath` / `debugDCUPath`. Set `runtimeOnly: true` to skip design-time packages when installing that platform. A key may list several platform names separated by commas (e.g. `"Win64,Linux64"`) as shorthand for declaring the same settings on each of them — available since v0.6.3. |
 | `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. A `name` may contain the `$(PACKAGE_VERSION)` placeholder — see below. An optional `products` list restricts the package to specific Delphi versions — see below. |
@@ -105,6 +105,34 @@ repeating the same block:
 
 This is equivalent to declaring `"Win64"` and `"Linux64"` separately with
 identical settings.
+
+## Meta-packages
+
+A **meta-package** declares only dependencies: it has no sources to download and
+no packages to compile. Set `repository.type` to `none` and list the packages it
+pulls in under `dependencies`:
+
+```jsonc
+{
+  "id": "blocks.all",
+  "name": "ALL",
+  "version": "1.0.0",
+  "repository": { "type": "none" },
+  "dependencies": {
+    "delphi-blocks.wirl": "4.6.0",
+    "paolo-rossi.delphi-neon": "3.1.0"
+  }
+}
+```
+
+Installing it resolves and installs every dependency, then records the
+meta-package itself in the workspace database. There is no fetch, no MSBuild and
+no search-path registration for the meta-package; `platforms` and `packages` are
+not needed and are ignored.
+
+Meta-packages behave like any other package for `install`, `update` and
+`uninstall` (uninstalling a meta-package removes only its own database entry, not
+its dependencies).
 
 ## Package name placeholder
 

@@ -262,10 +262,13 @@ type
   // -----------------------------------------------------------------------
 
   TManifestRepository = class
+  const
+    RepoTypeNone = 'none';
   private
     FRepoType: string;
     FUrl: string;
   public
+    constructor Create;
     [JsonName('type')]
     property RepoType: string read FRepoType write FRepoType;
     property Url: string read FUrl write FUrl;
@@ -290,6 +293,7 @@ type
     FHomepage: string;
     FAuthor: string;
     FKeywords: TStringList;
+    function GetIsMeta: Boolean;
   private
     class var
       FRegistry: TDictionary<string, TManifestScriptArgumentsClass>;
@@ -320,6 +324,9 @@ type
     ///  <c>TProduct.GetPackageFolder</c>.
     /// </remarks>
     function IsProductSupported(const AProductName: string): Boolean;
+
+    [JsonIgnore]
+    property IsMeta: Boolean read GetIsMeta;
 
     property Id: string read FId write FId;
     property Name: string read FName write FName;
@@ -659,6 +666,11 @@ begin
   inherited;
 end;
 
+function TManifest.GetIsMeta: Boolean;
+begin
+  Result := SameText(FRepository.RepoType, TManifestRepository.RepoTypeNone);
+end;
+
 function TManifest.IsProductSupported(const AProductName: string): Boolean;
 
   function VersionRank(const AVersionName: string): Integer;
@@ -986,6 +998,14 @@ begin
   if not Assigned(AValue) or (AValue is not TJSONObject) then
     Exit;
   FDescription := AValue.GetValue<string>('description', '');
+end;
+
+{ TManifestRepository }
+
+constructor TManifestRepository.Create;
+begin
+  inherited;
+  FRepoType := RepoTypeNone;
 end;
 
 end.
