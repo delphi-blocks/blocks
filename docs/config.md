@@ -34,6 +34,9 @@ workspace.
 | `registrykey`         | string  | `BDS`   | Registry profile key for the target Delphi IDE, matching `bds.exe -r <key>`.            |
 | `updatedcpsearchpath` | boolean | `false` | Whether `init` adds the Blocks DCP output directory to the Delphi library Search Path.  |
 | `toolarchitecture` | `default` \| `x32` \| `x64` | `default` | Architecture of the compiler tools MSBuild uses to build packages (Delphi 13+). |
+| `idearchitecture` | `default` \| `Win32` \| `Win64` | `default` | Which IDE binary [`run`](cli.md#run) launches (Delphi 13+ ships a 64-bit IDE). |
+| `idepersonality` | `default` \| `Delphi` \| `CBuilder` | `default` | IDE personality [`run`](cli.md#run) selects (`bds.exe -p`). |
+| `idehighdpi` | `default` \| `unaware` \| `systemaware` \| `permonitor` \| `permonitorv2` \| `unawaregdiscaling` | `default` | HighDPI awareness override [`run`](cli.md#run) applies (`bds.exe -highdpi:`). |
 
 ### `sources`
 
@@ -149,6 +152,33 @@ and 64-bit target compilers; older versions simply ignore the property.
 ```
 blocks config toolarchitecture=x64
 ```
+
+### `idearchitecture`, `idepersonality` and `idehighdpi`
+
+These three keys configure how the [`run`](cli.md#run) command opens the Delphi
+IDE for this workspace. They do not affect installing or compiling packages.
+
+- `idearchitecture` — which IDE binary to launch. `default` and `Win32` open the
+  32-bit IDE (the `App` registry value, `…\bin\bds.exe`); `Win64` opens the
+  64-bit IDE (the `App64` value, `…\bin64\bds.exe`) when the installed Delphi
+  provides one, otherwise it falls back to the 32-bit IDE. Delphi started
+  shipping a 64-bit IDE with Delphi 13.
+- `idepersonality` — the IDE personality passed as `bds.exe -p <personality>`.
+  `default` passes nothing (the IDE picks its own default); `Delphi` and
+  `CBuilder` force that personality.
+- `idehighdpi` — the HighDPI awareness override passed as
+  `bds.exe -highdpi:<value>`. `default` passes nothing (the IDE uses its
+  configured setting); any other value forces that DPI awareness mode.
+
+```
+blocks config idearchitecture=Win64
+blocks config idepersonality=Delphi
+blocks config idehighdpi=permonitorv2
+```
+
+Each of these can also be supplied directly on the `run` command line as a
+`key=value` argument, which overrides the stored value **for that launch only**
+(see [`run`](cli.md#run)).
 
 ## System configuration
 

@@ -16,6 +16,20 @@ type
   ///   It only affects the tools, not the produced binary. <c>default</c> (the default)
   ///   leaves the choice to Delphi: the property is not passed to MSBuild at all.</summary>
   TToolArchitecture = (default, x32, x64);
+
+  /// <summary>Which IDE binary <c>run</c> launches: <c>Win32</c> uses the 32-bit IDE
+  ///   (registry value <c>App</c>, <c>...\bin\bds.exe</c>), <c>Win64</c> the 64-bit IDE
+  ///   (registry value <c>App64</c>, <c>...\bin64\bds.exe</c>) when available. <c>default</c>
+  ///   uses the 32-bit IDE.</summary>
+  TIdeArchitecture = (default, Win32, Win64);
+
+  /// <summary>IDE personality <c>run</c> selects via <c>bds.exe -p &lt;personality&gt;</c>.
+  ///   <c>default</c> passes nothing (the IDE picks its own default).</summary>
+  TIdePersonality = (default, Delphi, CBuilder);
+
+  /// <summary>HighDPI awareness override <c>run</c> passes via <c>bds.exe -highdpi:&lt;value&gt;</c>.
+  ///   <c>default</c> passes nothing (the IDE uses its configured setting).</summary>
+  TIdeHighDpi = (default, unaware, systemaware, permonitor, permonitorv2, unawaregdiscaling);
   {$SCOPEDENUMS OFF}
 
   TConfig = class(TObject)
@@ -27,6 +41,9 @@ type
     FWorkspaceDir: string;
     FUpdateDCPSearchPath: Boolean;
     FToolArchitecture: TToolArchitecture;
+    FIdeArchitecture: TIdeArchitecture;
+    FIdePersonality: TIdePersonality;
+    FIdeHighDpi: TIdeHighDpi;
     function ConfigPath: string;
   public
     property Sources: TStringList read FSources;
@@ -43,6 +60,14 @@ type
     ///   <c>/p:DCC_PreferredToolArchitecture=&lt;x32|x64&gt;</c> (Delphi 13+). When
     ///   <c>default</c> (the default) the property is not passed to MSBuild at all.</summary>
     property ToolArchitecture: TToolArchitecture read FToolArchitecture write FToolArchitecture;
+    /// <summary>IDE architecture <c>run</c> launches (Delphi 13+ ships a 64-bit IDE). When
+    ///   <c>Win64</c> the <c>App64</c> binary is used if present, otherwise it falls back to
+    ///   the 32-bit <c>App</c>. Default <c>default</c> (32-bit IDE).</summary>
+    property IdeArchitecture: TIdeArchitecture read FIdeArchitecture write FIdeArchitecture;
+    /// <summary>IDE personality <c>run</c> selects (<c>bds.exe -p</c>). Default <c>default</c>.</summary>
+    property IdePersonality: TIdePersonality read FIdePersonality write FIdePersonality;
+    /// <summary>HighDPI override <c>run</c> applies (<c>bds.exe -highdpi:</c>). Default <c>default</c>.</summary>
+    property IdeHighDpi: TIdeHighDpi read FIdeHighDpi write FIdeHighDpi;
 
     /// <summary>Returns True when <paramref name="APlatform"/> is enabled for this
     ///   workspace, i.e. the <c>Platforms</c> list is empty (all) or contains it.</summary>
@@ -66,6 +91,24 @@ function ToolArchitectureToStr(const AValue: TToolArchitecture): string;
 
 /// <summary>Parses <c>x32</c>/<c>x64</c> (case-insensitive); raises on anything else.</summary>
 function StrToToolArchitecture(const AValue: string): TToolArchitecture;
+
+/// <summary>Returns the config string (<c>default</c>/<c>Win32</c>/<c>Win64</c>) for an IDE architecture.</summary>
+function IdeArchitectureToStr(const AValue: TIdeArchitecture): string;
+
+/// <summary>Parses <c>default</c>/<c>win32</c>/<c>win64</c> (case-insensitive); raises on anything else.</summary>
+function StrToIdeArchitecture(const AValue: string): TIdeArchitecture;
+
+/// <summary>Returns the config string (<c>default</c>/<c>Delphi</c>/<c>CBuilder</c>) for an IDE personality.</summary>
+function IdePersonalityToStr(const AValue: TIdePersonality): string;
+
+/// <summary>Parses <c>default</c>/<c>delphi</c>/<c>cbuilder</c> (case-insensitive); raises on anything else.</summary>
+function StrToIdePersonality(const AValue: string): TIdePersonality;
+
+/// <summary>Returns the config string for a HighDPI override (e.g. <c>permonitorv2</c>).</summary>
+function IdeHighDpiToStr(const AValue: TIdeHighDpi): string;
+
+/// <summary>Parses a HighDPI override name (case-insensitive); raises on anything else.</summary>
+function StrToIdeHighDpi(const AValue: string): TIdeHighDpi;
 
 implementation
 
@@ -97,6 +140,83 @@ begin
     Result := TToolArchitecture.x64
   else
     raise Exception.CreateFmt('Invalid value "%s" for "toolArchitecture" (use default, x32 or x64)', [AValue]);
+end;
+
+function IdeArchitectureToStr(const AValue: TIdeArchitecture): string;
+begin
+  case AValue of
+    TIdeArchitecture.Win32: Result := 'Win32';
+    TIdeArchitecture.Win64: Result := 'Win64';
+  else
+    Result := 'default';
+  end;
+end;
+
+function StrToIdeArchitecture(const AValue: string): TIdeArchitecture;
+begin
+  if SameText(AValue, 'default') then
+    Result := TIdeArchitecture.default
+  else if SameText(AValue, 'Win32') then
+    Result := TIdeArchitecture.Win32
+  else if SameText(AValue, 'Win64') then
+    Result := TIdeArchitecture.Win64
+  else
+    raise Exception.CreateFmt('Invalid value "%s" for "ideArchitecture" (use default, Win32 or Win64)', [AValue]);
+end;
+
+function IdePersonalityToStr(const AValue: TIdePersonality): string;
+begin
+  case AValue of
+    TIdePersonality.Delphi: Result := 'Delphi';
+    TIdePersonality.CBuilder: Result := 'CBuilder';
+  else
+    Result := 'default';
+  end;
+end;
+
+function StrToIdePersonality(const AValue: string): TIdePersonality;
+begin
+  if SameText(AValue, 'default') then
+    Result := TIdePersonality.default
+  else if SameText(AValue, 'Delphi') then
+    Result := TIdePersonality.Delphi
+  else if SameText(AValue, 'CBuilder') then
+    Result := TIdePersonality.CBuilder
+  else
+    raise Exception.CreateFmt('Invalid value "%s" for "idePersonality" (use default, Delphi or CBuilder)', [AValue]);
+end;
+
+function IdeHighDpiToStr(const AValue: TIdeHighDpi): string;
+begin
+  case AValue of
+    TIdeHighDpi.unaware: Result := 'unaware';
+    TIdeHighDpi.systemaware: Result := 'systemaware';
+    TIdeHighDpi.permonitor: Result := 'permonitor';
+    TIdeHighDpi.permonitorv2: Result := 'permonitorv2';
+    TIdeHighDpi.unawaregdiscaling: Result := 'unawaregdiscaling';
+  else
+    Result := 'default';
+  end;
+end;
+
+function StrToIdeHighDpi(const AValue: string): TIdeHighDpi;
+begin
+  if SameText(AValue, 'default') then
+    Result := TIdeHighDpi.default
+  else if SameText(AValue, 'unaware') then
+    Result := TIdeHighDpi.unaware
+  else if SameText(AValue, 'systemaware') then
+    Result := TIdeHighDpi.systemaware
+  else if SameText(AValue, 'permonitor') then
+    Result := TIdeHighDpi.permonitor
+  else if SameText(AValue, 'permonitorv2') then
+    Result := TIdeHighDpi.permonitorv2
+  else if SameText(AValue, 'unawaregdiscaling') then
+    Result := TIdeHighDpi.unawaregdiscaling
+  else
+    raise Exception.CreateFmt(
+        'Invalid value "%s" for "ideHighDpi" (use default, unaware, systemaware, permonitor, permonitorv2 or unawaregdiscaling)',
+        [AValue]);
 end;
 
 { TConfig }
@@ -133,6 +253,12 @@ begin
   end
   else if SameText(AKey, 'toolarchitecture') then
     FToolArchitecture := StrToToolArchitecture(AValue)
+  else if SameText(AKey, 'idearchitecture') then
+    FIdeArchitecture := StrToIdeArchitecture(AValue)
+  else if SameText(AKey, 'idepersonality') then
+    FIdePersonality := StrToIdePersonality(AValue)
+  else if SameText(AKey, 'idehighdpi') then
+    FIdeHighDpi := StrToIdeHighDpi(AValue)
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;
@@ -184,6 +310,9 @@ begin
   FRegistryKey := 'BDS';
   FUpdateDCPSearchPath := False;
   FToolArchitecture := TToolArchitecture.default;
+  FIdeArchitecture := TIdeArchitecture.default;
+  FIdePersonality := TIdePersonality.default;
+  FIdeHighDpi := TIdeHighDpi.default;
 end;
 
 destructor TConfig.Destroy;
@@ -217,6 +346,12 @@ begin
   end
   else if SameText(AKey, 'toolarchitecture') then
     Result := ToolArchitectureToStr(FToolArchitecture)
+  else if SameText(AKey, 'idearchitecture') then
+    Result := IdeArchitectureToStr(FIdeArchitecture)
+  else if SameText(AKey, 'idepersonality') then
+    Result := IdePersonalityToStr(FIdePersonality)
+  else if SameText(AKey, 'idehighdpi') then
+    Result := IdeHighDpiToStr(FIdeHighDpi)
   else
     raise Exception.CreateFmt('Config "%s" does not exists', [AKey]);
 end;

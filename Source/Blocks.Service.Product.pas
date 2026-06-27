@@ -114,6 +114,18 @@ type
     /// <exception cref="Exception">Raised when no installed product matches.</exception>
     class function Find(const AVersionName: string; const ARegistryKey: string = 'BDS'): TProduct;
 
+    /// <summary>Finds the product to launch for a version and registry profile. Prefers the
+    ///   exact <paramref name="ARegistryKey"/> profile; when that profile does not exist yet,
+    ///   falls back to any installed profile of the same version (so <c>bds.exe</c> can still
+    ///   be located) and reports the fallback through <paramref name="AProfileExists"/> —
+    ///   Delphi creates the requested profile on first launch via <c>-r</c>.</summary>
+    /// <param name="AVersionName">Internal version name (e.g. <c>delphi13</c>), matched case-insensitively.</param>
+    /// <param name="ARegistryKey">Requested registry profile key.</param>
+    /// <param name="AProfileExists">Set to False when the requested profile was not found and a
+    ///   different profile of the same version is returned instead.</param>
+    /// <exception cref="Exception">Raised when the version is not installed under any profile.</exception>
+    class function FindForLaunch(const AVersionName, ARegistryKey: string; out AProfileExists: Boolean): TProduct;
+
     /// <summary>Selects an installed product interactively.</summary>
     /// <returns>The selected <see cref="TProduct"/>. Returns the newest product (index 0)
     ///   when the user presses ENTER without entering a number.</returns>
@@ -277,6 +289,15 @@ type
     ///   Existing entries in <c>AEnvironmentVariable</c> are overwritten by name.
     /// </remarks>
     procedure FillEnvironmentVariables(AEnvironmentVariable: TStrings);
+
+    /// <summary>Full path to the IDE executable (<c>bds.exe</c>) for this product, read from
+    ///   <c>HKCU\Software\Embarcadero\{RegistryKey}\{BdsVersion}</c>.</summary>
+    /// <param name="APreferWin64">When True, returns the 64-bit IDE (registry value <c>App64</c>)
+    ///   if present; otherwise falls back to the 32-bit IDE (<c>App</c>).</param>
+    /// <param name="AIsWin64">Set to True when the returned path is the 64-bit IDE (<c>App64</c>).</param>
+    /// <returns>The path stored in <c>App64</c> (when requested and present) or <c>App</c>.</returns>
+    /// <exception cref="Exception">Raised when the registry key or the <c>App</c> value is missing.</exception>
+    function IdeExecutable(const APreferWin64: Boolean; out AIsWin64: Boolean): string;
 
     /// <summary>All installed Delphi/RAD Studio products, sorted newest-first.</summary>
     class property Products: TObjectList<TProduct> read FProducts;
@@ -835,6 +856,24 @@ begin
   raise Exception.CreateFmt(
       'Product "%s" with registry key "%s" not found among installed Delphi versions.',
       [AVersionName, ARegistryKey]);
+end;
+
+class function TProduct.FindForLaunch(const AVersionName, ARegistryKey: string; out AProfileExists: Boolean): TProduct;
+begin
+  AProfileExists := True;
+  for var P in FProducts do
+    if SameText(P.FVersionName, AVersionName) and SameText(P.FRegistryKey, ARegistryKey) then
+      Exit(P);
+
+  // The requested profile does not exist yet; fall back to any installed profile of
+  // the same version so the IDE executable can still be located. Delphi will create
+  // the requested profile on launch via "-r <key>".
+  AProfileExists := False;
+  for var P in FProducts do
+    if SameText(P.FVersionName, AVersionName) then
+      Exit(P);
+
+  raise Exception.CreateFmt('Delphi version "%s" is not installed.', [AVersionName]);
 end;
 
 class function TProduct.Choose: TProduct;
@@ -1463,6 +1502,33 @@ begin
       finally
         LNames.Free;
       end;
+      LReg.CloseKey;
+    end;
+  finally
+    LReg.Free;
+  end;
+end;
+
+function TProduct.IdeExecutable(const APreferWin64: Boolean; out AIsWin64: Boolean): string;
+begin
+  AIsWin64 := False;
+  var LReg := TRegistry.Create(KEY_READ);
+  try
+    LReg.RootKey := HKEY_CURRENT_USER;
+    var LKey := 'Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion;
+    if not LReg.OpenKeyReadOnly(LKey) then
+      raise Exception.CreateFmt('Registry key "HKCU\%s" not found for %s', [LKey, FDisplayName]);
+    try
+      if APreferWin64 and LReg.ValueExists('App64') then
+      begin
+        Result := LReg.ReadString('App64');
+        AIsWin64 := True;
+      end
+      else if LReg.ValueExists('App') then
+        Result := LReg.ReadString('App')
+      else
+        raise Exception.CreateFmt('Value "App" not found under "HKCU\%s"', [LKey]);
+    finally
       LReg.CloseKey;
     end;
   finally

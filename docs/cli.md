@@ -16,6 +16,7 @@ Commands:
   build <package>        Recompile an already-installed package without downloading it.
   update <package>       Update an installed package and recompile its dependents.
   uninstall <package>    Remove a package from the workspace and database.
+  run                    Open the Delphi IDE bound to the current workspace.
   init                   Initialise the workspace and download the package repository.
   list                   List packages installed in the current workspace.
   product [name...]      Show Delphi installations. Pass names to filter and get details.
@@ -181,6 +182,49 @@ Example:
   Blocks uninstall owner.package
 ```
 
+## Run
+
+Opens the Delphi IDE bound to the current workspace. The executable is read from
+the registry profile configured for the workspace
+(`HKCU\Software\Embarcadero\<registrykey>\<bdsversion>`, value `App`, or `App64`
+when `idearchitecture=Win64`). When the registry profile is not the default
+`BDS`, the IDE is started with `-r <registrykey>`; `idepersonality` adds
+`-p <personality>` and `idehighdpi` adds `-highdpi:<value>`.
+
+When no Delphi is configured (outside a workspace) and none is given on the
+command line, you are prompted to choose from the installed versions, like
+`init`. The target can also be given as a bare `<version>` (or
+`<version>:<regkey>`), or via `product=<version>`. A registry profile that does
+not exist yet is created by Delphi on first launch (a warning is printed).
+
+```
+Usage: Blocks run [<version>[:<regkey>] | key=value ...]
+
+Arguments (override the workspace config for this launch only):
+  <version>[:<regkey>]   Target Delphi as a bare token, e.g. delphi13 or
+                         delphi13:myprofile. Shorthand for product=<version>.
+                         If omitted, you are prompted to choose.
+  product=<version>      Same as the bare form (use product=<version>:<regkey>
+                         to also set the profile).
+  idearchitecture=<v>    Which IDE to launch: default, Win32 or Win64. Win64 uses the
+                         64-bit IDE (App64) when available, else falls back to 32-bit.
+  idepersonality=<v>     IDE personality (bds.exe -p): default, Delphi or CBuilder.
+  idehighdpi=<v>         HighDPI override (bds.exe -highdpi:): default, unaware,
+                         systemaware, permonitor, permonitorv2 or unawaregdiscaling.
+
+Examples:
+  Blocks run
+  Blocks run idearchitecture=Win64
+  Blocks run idehighdpi=permonitorv2 idepersonality=Delphi
+  Blocks run delphi13
+  Blocks run delphi13:myprofile
+  Blocks run delphi13 idehighdpi=permonitorv2
+```
+
+The `idearchitecture`, `idepersonality` and `idehighdpi` keys can be persisted in
+the workspace with [`config`](config.md#idearchitecture-idepersonality-and-idehighdpi);
+passing them on the `run` command line overrides the stored value for that launch only.
+
 ## Init
 
 Creates the `.blocks\` directory in the current folder, selects the target
@@ -293,6 +337,13 @@ Workspace keys:
                          default (don't pass the flag), x32 (32-bit tools) or
                          x64 (64-bit tools, more memory). Default: default.
                          Does not change the produced binary.
+  idearchitecture        IDE "run" launches: default, Win32 or Win64 (Delphi 13+).
+                         Win64 uses the 64-bit IDE when available. Default: default.
+  idepersonality         IDE personality "run" selects (bds.exe -p):
+                         default, Delphi or CBuilder. Default: default.
+  idehighdpi             HighDPI override "run" applies (bds.exe -highdpi:):
+                         default, unaware, systemaware, permonitor, permonitorv2
+                         or unawaregdiscaling. Default: default.
 
 System keys:
   InstallPath            Specifies the directory containing the blocks.exe to launch
@@ -313,6 +364,8 @@ Examples:
   Blocks config registrykey=myprofile
   Blocks config updatedcpsearchpath=true
   Blocks config toolarchitecture=x64
+  Blocks config idearchitecture=Win64
+  Blocks config idehighdpi=permonitorv2
   Blocks config /system InstallPath
   Blocks config /system InstallPath=C:\Tools\Blocks
 ```

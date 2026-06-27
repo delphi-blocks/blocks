@@ -210,11 +210,28 @@ type
     procedure ShowHelp; override;
   end;
 
+  /// <summary>
+  ///   Opens the Delphi IDE (bds.exe) bound to the current workspace. Outside a
+  ///   workspace the target must be given via <c>product=&lt;version&gt;</c>
+  ///   (optionally <c>product=&lt;version&gt;:&lt;regkey&gt;</c>). IDE preferences
+  ///   (architecture, personality, HighDPI) come from the workspace config and can be
+  ///   overridden for this launch only via <c>key=value</c> arguments.
+  /// </summary>
+  TRunCommand = class(TBaseCommand)
+  private
+    [Param]
+    FArgs: TArray<string>;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
 implementation
 
 uses
   Blocks.Core,
   Blocks.Console,
+  Blocks.Model.Config,
   Blocks.Model.Database,
   Blocks.Model.Manifest,
   Blocks.Model.SysConfig,
@@ -282,6 +299,7 @@ begin
   WriteOption('build <package>', 'Recompile an already-installed package without downloading it.');
   WriteOption('update <package>', 'Update an installed package and recompile its dependents.');
   WriteOption('uninstall <package>', 'Remove a package from the workspace and database.');
+  WriteOption('run', 'Open the Delphi IDE bound to the current workspace.');
   WriteOption('init', 'Initialise the workspace and download the package repository.');
   WriteOption('list', 'List packages installed in the current workspace.');
   WriteOption('product [name...]', 'Show Delphi installations. Pass names to filter and get details.');
@@ -709,6 +727,154 @@ begin
   TConsole.WriteLine;
 end;
 
+{ TRunCommand }
+
+procedure TRunCommand.Execute;
+begin
+  inherited;
+
+  var LInWorkspace := TWorkspace.Exists;
+
+  // Outside a workspace use a fresh, in-memory config (never Loaded/Saved, so no
+  // .blocks directory is created); inside one use the workspace config. CLI
+  // key=value arguments override the config for this launch only and are never saved.
+  var LOwnConfig: TConfig := nil;
+  var LConfig: TConfig;
+  if LInWorkspace then
+    LConfig := TWorkspace.Config
+  else
+  begin
+    LOwnConfig := TConfig.Create(TWorkspace.WorkDir);
+    LConfig := LOwnConfig;
+  end;
+  try
+    for var LArg in FArgs do
+    begin
+      var LKey: string;
+      var LValue: string;
+      var LEqualPos := Pos('=', LArg);
+      if LEqualPos < 1 then
+      begin
+        // A bare token (no '=') is the product spec: <version> or <version>:<regkey>.
+        LKey := 'product';
+        LValue := LArg;
+      end
+      else
+      begin
+        LKey := Copy(LArg, 1, LEqualPos - 1);
+        LValue := Copy(LArg, LEqualPos + 1, Length(LArg));
+      end;
+
+      if SameText(LKey, 'product') then
+      begin
+        // product=<version> or product=<version>:<regkey>
+        var LColonPos := Pos(':', LValue);
+        if LColonPos > 0 then
+        begin
+          LConfig.Product := Copy(LValue, 1, LColonPos - 1);
+          LConfig.RegistryKey := Copy(LValue, LColonPos + 1, Length(LValue));
+        end
+        else
+          LConfig.Product := LValue;
+      end
+      else if SameText(LKey, 'idearchitecture') or SameText(LKey, 'idepersonality') or SameText(LKey, 'idehighdpi') then
+        LConfig.SetValue(LKey, LValue)
+      else
+        raise Exception
+            .CreateFmt('Unknown argument "%s" (use product, idearchitecture, idepersonality or idehighdpi).', [LKey]);
+    end;
+
+    var LProduct: TProduct;
+    var LRegistryKey: string;
+
+    if LConfig.Product = '' then
+    begin
+      // No Delphi specified (none configured in the workspace and none on the command
+      // line): let the user pick from the installed versions interactively, like "init".
+      LProduct := TProduct.Choose;
+      LRegistryKey := LProduct.RegistryKey;
+    end
+    else
+    begin
+      LRegistryKey := LConfig.RegistryKey;
+      if LRegistryKey = '' then
+        LRegistryKey := 'BDS';
+
+      var LProfileExists: Boolean;
+      LProduct := TProduct.FindForLaunch(LConfig.Product, LRegistryKey, LProfileExists);
+      if not LProfileExists then
+        TConsole.WriteWarning(
+            Format('Registry profile "%s" does not exist yet; Delphi will create it on launch.', [LRegistryKey])
+        );
+    end;
+
+    var LPreferWin64 := LConfig.IdeArchitecture = TIdeArchitecture.Win64;
+    var LIsWin64: Boolean;
+    var LExe := LProduct.IdeExecutable(LPreferWin64, LIsWin64);
+    if LPreferWin64 and not LIsWin64 then
+      TConsole.WriteWarning('No 64-bit IDE (App64) found for this profile; launching the 32-bit IDE.');
+
+    var LParams := '';
+    if not SameText(LRegistryKey, 'BDS') then
+      LParams := LParams + ' -r ' + LRegistryKey;
+    if LConfig.IdePersonality <> TIdePersonality.default then
+      LParams := LParams + ' -p ' + IdePersonalityToStr(LConfig.IdePersonality);
+    if LConfig.IdeHighDpi <> TIdeHighDpi.default then
+      LParams := LParams + ' -highdpi:' + IdeHighDpiToStr(LConfig.IdeHighDpi);
+    LParams := LParams.Trim;
+
+    var LLabel := LProduct.DisplayName;
+    if not SameText(LRegistryKey, 'BDS') then
+      LLabel := LLabel + ' (' + LRegistryKey + ')';
+
+    TConsole.WriteLine;
+    TConsole.WriteLine('Launching ' + LLabel + '...', clCyan);
+    TConsole.WriteLine('  ' + LExe + ' ' + LParams, clDkGray);
+    TConsole.WriteLine;
+
+    var LResult := ShellExecute(0, 'open', PChar(LExe), PChar(LParams), PChar(TWorkspace.WorkDir), SW_SHOWNORMAL);
+    if LResult <= 32 then
+      raise Exception.CreateFmt('Failed to launch the IDE (ShellExecute error %d): %s', [Integer(LResult), LExe]);
+  finally
+    LOwnConfig.Free;
+  end;
+end;
+
+procedure TRunCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Opens the Delphi IDE bound to the current workspace, reading the executable');
+  TConsole.WriteLine('path from the registry profile configured for the workspace.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('When no Delphi is configured (outside a workspace) and none is given on the');
+  TConsole.WriteLine('command line, you are prompted to choose from the installed versions, like');
+  TConsole.WriteLine('"init". A registry profile that does not exist yet is created by Delphi on');
+  TConsole.WriteLine('first launch.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' run [<version>[:<regkey>] | key=value ...]', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Arguments (override the workspace config for this launch only):', clWhite);
+  WriteOption('<version>[:<regkey>]', 'Target Delphi as a bare token, e.g. delphi13 or delphi13:myprofile.');
+  WriteOption('', 'Shorthand for product=<version>. If omitted, you are prompted.');
+  WriteOption('product=<version>', 'Same as the bare form (use product=<version>:<regkey> for a profile).');
+  WriteOption('idearchitecture=<v>', 'Which IDE to launch: default, Win32 or Win64. Win64 uses the');
+  WriteOption('', '64-bit IDE (App64) when available, else falls back to 32-bit.');
+  WriteOption('idepersonality=<v>', 'IDE personality (bds.exe -p): default, Delphi or CBuilder.');
+  WriteOption('idehighdpi=<v>', 'HighDPI override (bds.exe -highdpi:): default, unaware,');
+  WriteOption('', 'systemaware, permonitor, permonitorv2 or unawaregdiscaling.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('The same keys can be persisted with "' + AppExeName + ' config".', clGray);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Examples:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' run');
+  TConsole.WriteLine('  ' + AppExeName + ' run idearchitecture=Win64');
+  TConsole.WriteLine('  ' + AppExeName + ' run idehighdpi=permonitorv2 idepersonality=Delphi');
+  TConsole.WriteLine('  ' + AppExeName + ' run delphi13');
+  TConsole.WriteLine('  ' + AppExeName + ' run delphi13:myprofile');
+  TConsole.WriteLine('  ' + AppExeName + ' run delphi13 idehighdpi=permonitorv2');
+  TConsole.WriteLine;
+end;
+
 { TUninstallCommand }
 
 procedure TUninstallCommand.Execute;
@@ -975,6 +1141,9 @@ begin
     WriteField('RegistryKey', TWorkspace.Config.RegistryKey);
     WriteField('UpdateDcpSearchPath', TWorkspace.Config.GetValue('updatedcpsearchpath'));
     WriteField('ToolArchitecture', TWorkspace.Config.GetValue('toolarchitecture'));
+    WriteField('IdeArchitecture', TWorkspace.Config.GetValue('idearchitecture'));
+    WriteField('IdePersonality', TWorkspace.Config.GetValue('idepersonality'));
+    WriteField('IdeHighDpi', TWorkspace.Config.GetValue('idehighdpi'));
 
     WriteSectionTitle('Sources');
     if TWorkspace.Config.Sources.Count = 0 then
@@ -1086,6 +1255,13 @@ begin
   WriteOption('', 'default (don''t pass the flag), x32 (32-bit tools) or');
   WriteOption('', 'x64 (64-bit tools, more memory). Default: default.');
   WriteOption('', 'Does not change the produced binary.');
+  WriteOption('idearchitecture', 'IDE "run" launches: default, Win32 or Win64 (Delphi 13+).');
+  WriteOption('', 'Win64 uses the 64-bit IDE when available. Default: default.');
+  WriteOption('idepersonality', 'IDE personality "run" selects (bds.exe -p):');
+  WriteOption('', 'default, Delphi or CBuilder. Default: default.');
+  WriteOption('idehighdpi', 'HighDPI override "run" applies (bds.exe -highdpi:):');
+  WriteOption('', 'default, unaware, systemaware, permonitor, permonitorv2');
+  WriteOption('', 'or unawaregdiscaling. Default: default.');
   TConsole.WriteLine;
   TConsole.WriteLine('System keys:', clWhite);
   WriteOption('InstallPath', 'Specifies the directory containing the blocks.exe to launch');
@@ -1108,6 +1284,8 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' config registrykey=myprofile');
   TConsole.WriteLine('  ' + AppExeName + ' config updatedcpsearchpath=true');
   TConsole.WriteLine('  ' + AppExeName + ' config toolarchitecture=x64');
+  TConsole.WriteLine('  ' + AppExeName + ' config idearchitecture=Win64');
+  TConsole.WriteLine('  ' + AppExeName + ' config idehighdpi=permonitorv2');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath=C:\Tools\Blocks');
   TConsole.WriteLine('  ' + AppExeName + ' config /system AutoUpdate');
@@ -1400,7 +1578,9 @@ begin
     TConsole.WriteLine('Downloading to: ' + LDestinationPath);
     ForceDirectories(ExtractFilePath(LDestinationPath));
 
-    var LParams := if FSilent then '/verysilent' else '/silent';
+    var LParams :=
+        if FSilent then '/verysilent'
+        else '/silent';
     THttpUtils.DownloadFile(LBrowserDownloadUrl, LDestinationPath);
     ShellExecute(0, 'open', PChar(LDestinationPath), PChar(LParams), '', SW_SHOWDEFAULT);
 
@@ -1513,6 +1693,7 @@ initialization
   TCommand.RegisterCommand('build', TBuildCommand);
   TCommand.RegisterCommand('update', TUpdateCommand);
   TCommand.RegisterCommand('uninstall', TUninstallCommand);
+  TCommand.RegisterCommand('run', TRunCommand);
   TCommand.RegisterCommand('search', TSearchCommand);
   TCommand.RegisterCommand('config', TConfigCommand);
   TCommand.RegisterCommand('view', TViewCommand);

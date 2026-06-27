@@ -59,6 +59,23 @@ type
     procedure TestToolArchitectureRoundTrip;
     [Test]
     procedure TestToolArchitectureDefaultRoundTrip;
+
+    [Test]
+    procedure TestDefaultIdeSettingsAreDefault;
+    [Test]
+    procedure TestSetIdeArchitecture;
+    [Test]
+    procedure TestSetIdePersonality;
+    [Test]
+    procedure TestSetIdeHighDpi;
+    [Test]
+    procedure TestInvalidIdeArchitectureRaises;
+    [Test]
+    procedure TestInvalidIdePersonalityRaises;
+    [Test]
+    procedure TestInvalidIdeHighDpiRaises;
+    [Test]
+    procedure TestIdeSettingsRoundTrip;
   end;
 
 implementation
@@ -195,6 +212,83 @@ begin
     LLoaded.Load;
     Assert.AreEqual('default', LLoaded.GetValue('toolarchitecture'));
     Assert.IsTrue(LLoaded.ToolArchitecture = TToolArchitecture.default);
+  finally
+    LLoaded.Free;
+  end;
+end;
+
+procedure TConfigPlatformsTest.TestDefaultIdeSettingsAreDefault;
+begin
+  Assert.AreEqual('default', FConfig.GetValue('idearchitecture'));
+  Assert.AreEqual('default', FConfig.GetValue('idepersonality'));
+  Assert.AreEqual('default', FConfig.GetValue('idehighdpi'));
+  Assert.IsTrue(FConfig.IdeArchitecture = TIdeArchitecture.default);
+  Assert.IsTrue(FConfig.IdePersonality = TIdePersonality.default);
+  Assert.IsTrue(FConfig.IdeHighDpi = TIdeHighDpi.default);
+end;
+
+procedure TConfigPlatformsTest.TestSetIdeArchitecture;
+begin
+  FConfig.SetValue('idearchitecture', 'Win64');
+  Assert.IsTrue(FConfig.IdeArchitecture = TIdeArchitecture.Win64);
+  Assert.AreEqual('Win64', FConfig.GetValue('idearchitecture'));
+
+  // Case-insensitive parsing.
+  FConfig.SetValue('idearchitecture', 'win32');
+  Assert.AreEqual('Win32', FConfig.GetValue('idearchitecture'));
+end;
+
+procedure TConfigPlatformsTest.TestSetIdePersonality;
+begin
+  FConfig.SetValue('idepersonality', 'Delphi');
+  Assert.IsTrue(FConfig.IdePersonality = TIdePersonality.Delphi);
+  Assert.AreEqual('Delphi', FConfig.GetValue('idepersonality'));
+
+  FConfig.SetValue('idepersonality', 'cbuilder');
+  Assert.AreEqual('CBuilder', FConfig.GetValue('idepersonality'));
+end;
+
+procedure TConfigPlatformsTest.TestSetIdeHighDpi;
+begin
+  FConfig.SetValue('idehighdpi', 'permonitorv2');
+  Assert.IsTrue(FConfig.IdeHighDpi = TIdeHighDpi.permonitorv2);
+  Assert.AreEqual('permonitorv2', FConfig.GetValue('idehighdpi'));
+
+  FConfig.SetValue('idehighdpi', 'SYSTEMAWARE');
+  Assert.AreEqual('systemaware', FConfig.GetValue('idehighdpi'));
+end;
+
+procedure TConfigPlatformsTest.TestInvalidIdeArchitectureRaises;
+begin
+  Assert.WillRaise(procedure begin FConfig.SetValue('idearchitecture', 'x64'); end, Exception);
+end;
+
+procedure TConfigPlatformsTest.TestInvalidIdePersonalityRaises;
+begin
+  Assert.WillRaise(procedure begin FConfig.SetValue('idepersonality', 'python'); end, Exception);
+end;
+
+procedure TConfigPlatformsTest.TestInvalidIdeHighDpiRaises;
+begin
+  Assert.WillRaise(procedure begin FConfig.SetValue('idehighdpi', 'retina'); end, Exception);
+end;
+
+procedure TConfigPlatformsTest.TestIdeSettingsRoundTrip;
+begin
+  FConfig.SetValue('idearchitecture', 'Win64');
+  FConfig.SetValue('idepersonality', 'CBuilder');
+  FConfig.SetValue('idehighdpi', 'permonitorv2');
+  FConfig.Save;
+
+  var LLoaded := TConfig.Create(FWorkspaceDir);
+  try
+    LLoaded.Load;
+    Assert.AreEqual('Win64', LLoaded.GetValue('idearchitecture'));
+    Assert.AreEqual('CBuilder', LLoaded.GetValue('idepersonality'));
+    Assert.AreEqual('permonitorv2', LLoaded.GetValue('idehighdpi'));
+    Assert.IsTrue(LLoaded.IdeArchitecture = TIdeArchitecture.Win64);
+    Assert.IsTrue(LLoaded.IdePersonality = TIdePersonality.CBuilder);
+    Assert.IsTrue(LLoaded.IdeHighDpi = TIdeHighDpi.permonitorv2);
   finally
     LLoaded.Free;
   end;
