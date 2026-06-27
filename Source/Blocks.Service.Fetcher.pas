@@ -127,9 +127,10 @@ end;
 function TGitHubFetcher.BuildZipUrl(ARepository: TManifestRepository): string;
 begin
   // Repository URL format: https://github.com/owner/repo/tree/ref
-  var LRepoParts := TrimRight(ARepository.Url, ['/']).Split(['/']);
+  var LUrl := ARepository.Config<TGitHubConfig>.Url;
+  var LRepoParts := TrimRight(LUrl, ['/']).Split(['/']);
   if Length(LRepoParts) < 7 then
-    raise Exception.CreateFmt('Cannot parse repository URL: %s', [ARepository.Url]);
+    raise Exception.CreateFmt('Cannot parse repository URL: %s', [LUrl]);
   Result := TGitHub.GetGitHubZipUrl(LRepoParts[3], LRepoParts[4], LRepoParts[6]);
 end;
 
@@ -138,9 +139,10 @@ end;
 function TBitbucketFetcher.BuildZipUrl(ARepository: TManifestRepository): string;
 begin
   // Repository URL format: https://bitbucket.org/owner/repo/src/ref
-  var LRepoParts := TrimRight(ARepository.Url, ['/']).Split(['/']);
+  var LUrl := ARepository.Config<TBitBucketConfig>.Url;
+  var LRepoParts := TrimRight(LUrl, ['/']).Split(['/']);
   if Length(LRepoParts) < 7 then
-    raise Exception.CreateFmt('Cannot parse repository URL: %s', [ARepository.Url]);
+    raise Exception.CreateFmt('Cannot parse repository URL: %s', [LUrl]);
   Result := TBitbucket.GetBitbucketZipUrl(LRepoParts[3], LRepoParts[4], LRepoParts[6]);
 end;
 
@@ -148,10 +150,11 @@ end;
 
 procedure TLocalFetcher.FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
 begin
-  if not TDirectory.Exists(ARepository.Url) then
-    raise Exception.CreateFmt('Local repository path not found: %s', [ARepository.Url]);
+  var LUrl := ARepository.Config<TLocalConfig>.Url;
+  if not TDirectory.Exists(LUrl) then
+    raise Exception.CreateFmt('Local repository path not found: %s', [LUrl]);
   TConsole.WriteLine('Copying from local path...', clCyan);
-  TDirectory.Copy(ARepository.Url, ADestinationDir);
+  TDirectory.Copy(LUrl, ADestinationDir);
 end;
 
 end.

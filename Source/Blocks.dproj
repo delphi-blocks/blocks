@@ -113,6 +113,7 @@
         <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProgramID=com.embarcadero.$(MSBuildProjectName);ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <Debugger_CWD>C:\Progetti\DelphiBlocks\Demo\Workspace</Debugger_CWD>
         <Icon_MainIcon>..\blocks.ico</Icon_MainIcon>
+        <Debugger_RunParams>install test.all</Debugger_RunParams>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">

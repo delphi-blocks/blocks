@@ -1390,7 +1390,7 @@ begin
     LField('Author', LManifest.Author);
     LField('License', LManifest.License);
     LField('Homepage', LManifest.Homepage);
-    LField('Repository', LManifest.Repository.Url);
+    LField('Repository', LManifest.Repository.ToString);
 
     if LManifest.Description <> '' then
     begin

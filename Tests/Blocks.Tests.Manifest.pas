@@ -33,6 +33,8 @@ type
     [Test]
     procedure TestRepository;
     [Test]
+    procedure TestRepository_MetaPackageWithoutRepositoryNode;
+    [Test]
     procedure TestKeywords;
     [Test]
     procedure TestPlatforms;
@@ -208,7 +210,33 @@ begin
   var LManifest := TJsonHelper.JSONToObject<TManifest>(FullManifestJSON);
   try
     Assert.AreEqual('github', LManifest.Repository.RepoType, 'repository.type');
-    Assert.AreEqual('https://github.com/acme/widgets/tree/v1.2.3', LManifest.Repository.Url, 'repository.url');
+    Assert.AreEqual(
+        'https://github.com/acme/widgets/tree/v1.2.3',
+        LManifest.Repository.Config<TGitHubConfig>.Url,
+        'repository.url'
+    );
+  finally
+    LManifest.Free;
+  end;
+end;
+
+procedure TManifestDeserializationTest.TestRepository_MetaPackageWithoutRepositoryNode;
+begin
+  // A meta-package has no "repository" node: FromJSON is invoked with a nil JSON
+  // value and must not crash, leaving a "none" repository.
+  const MetaPackageJSON =
+      '''
+      {
+        "id": "acme.meta",
+        "name": "Meta",
+        "version": "1.0.0"
+      }
+      ''';
+  var LManifest := TJsonHelper.JSONToObject<TManifest>(MetaPackageJSON);
+  try
+    Assert.AreEqual('none', LManifest.Repository.RepoType, 'repository.type');
+    Assert.AreEqual('', LManifest.Repository.ToString, 'repository.ToString');
+    Assert.IsTrue(LManifest.IsMeta, 'IsMeta');
   finally
     LManifest.Free;
   end;
@@ -332,9 +360,13 @@ begin
     Assert.AreEqual('Build helper', LCompile.Description, 'scripts[1].description');
     Assert.IsTrue(LCompile.Args is TManifestCompileArguments, 'scripts[1].args type');
     Assert.AreEqual(
-        'Helper.dproj', LCompile.Args.GetAs<TManifestCompileArguments>.ProjectFile, 'scripts[1].args.projectFile');
+        'Helper.dproj',
+        LCompile.Args.GetAs<TManifestCompileArguments>.ProjectFile,
+        'scripts[1].args.projectFile'
+    );
     Assert.AreEqual(1, Length(LCompile.Args.GetAs<TManifestCompileArguments>.Platforms), 'scripts[1].args.platforms');
-    Assert.AreEqual('Win32', LCompile.Args.GetAs<TManifestCompileArguments>.Platforms[0], 'scripts[1].args.platforms[0]');
+    Assert
+        .AreEqual('Win32', LCompile.Args.GetAs<TManifestCompileArguments>.Platforms[0], 'scripts[1].args.platforms[0]');
   finally
     LManifest.Free;
   end;
@@ -357,7 +389,11 @@ begin
       Assert.AreEqual(LSrc.Homepage, LDst.Homepage, 'homepage');
       Assert.AreEqual(LSrc.Author, LDst.Author, 'author');
       Assert.AreEqual(LSrc.Repository.RepoType, LDst.Repository.RepoType, 'repository.type');
-      Assert.AreEqual(LSrc.Repository.Url, LDst.Repository.Url, 'repository.url');
+      Assert.AreEqual(
+          LSrc.Repository.Config<TGitHubConfig>.Url,
+          LDst.Repository.Config<TGitHubConfig>.Url,
+          'repository.url'
+      );
     finally
       LDst.Free;
     end;
@@ -447,7 +483,10 @@ begin
       Assert.AreEqual('echo', LDst.Scripts[0].Command, 'scripts[0].command');
       Assert.IsTrue(LDst.Scripts[0].Args is TManifestEchoArguments, 'scripts[0].args type after round trip');
       Assert.AreEqual(
-          'Installed $(NAME)', LDst.Scripts[0].Args.GetAs<TManifestEchoArguments>.Message, 'scripts[0].args.message');
+          'Installed $(NAME)',
+          LDst.Scripts[0].Args.GetAs<TManifestEchoArguments>.Message,
+          'scripts[0].args.message'
+      );
 
       Assert.AreEqual('compile', LDst.Scripts[1].Command, 'scripts[1].command');
       Assert.AreEqual('Build helper', LDst.Scripts[1].Description, 'scripts[1].description');
@@ -455,7 +494,8 @@ begin
       Assert.AreEqual(
           'Helper.dproj',
           LDst.Scripts[1].Args.GetAs<TManifestCompileArguments>.ProjectFile,
-          'scripts[1].args.projectFile');
+          'scripts[1].args.projectFile'
+      );
     finally
       LDst.Free;
     end;

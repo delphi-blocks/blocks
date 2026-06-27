@@ -257,21 +257,64 @@ type
     constructor Create;
   end;
 
+  TManifestRepositoryConfig = class
+  protected
+    FValue: TJSONValue;
+  public
+    function ToString: string; override;
+
+    constructor Create(AValue: TJSONValue);
+  end;
+
+  TNoneConfig = class(TManifestRepositoryConfig)
+  end;
+
+  TGitHubConfig = class(TManifestRepositoryConfig)
+  private
+    function GetUrl: string;
+  public
+    function ToString: string; override;
+    property Url: string read GetUrl;
+  end;
+
+  TBitBucketConfig = class(TManifestRepositoryConfig)
+  private
+    function GetUrl: string;
+  public
+    function ToString: string; override;
+    property Url: string read GetUrl;
+  end;
+
+  TLocalConfig = class(TManifestRepositoryConfig)
+  private
+    function GetUrl: string;
+  public
+    function ToString: string; override;
+    property Url: string read GetUrl;
+  end;
+
   // -----------------------------------------------------------------------
   // Manifest repository information
   // -----------------------------------------------------------------------
 
   TManifestRepository = class
-  const
-    RepoTypeNone = 'none';
+    const
+      RepoTypeNone = 'none';
   private
+    FJSONObject: TJSONObject;
     FRepoType: string;
-    FUrl: string;
+    FConfig: TManifestRepositoryConfig;
   public
+
+    function ToJSON: TJSONValue;
+    procedure FromJSON(AJSONObject: TJSONValue);
+    function Config<T: TManifestRepositoryConfig>: T;
+    function ToString: string; override;
+
     constructor Create;
-    [JsonName('type')]
+    destructor Destroy; override;
+
     property RepoType: string read FRepoType write FRepoType;
-    property Url: string read FUrl write FUrl;
   end;
 
   // -----------------------------------------------------------------------
@@ -1002,10 +1045,117 @@ end;
 
 { TManifestRepository }
 
+function TManifestRepository.Config<T>: T;
+begin
+  Result := FConfig as T;
+end;
+
 constructor TManifestRepository.Create;
 begin
   inherited;
   FRepoType := RepoTypeNone;
+  // Start with a valid, empty "none" config so Config<T>/ToString/ToJSON are safe
+  // to call even before FromJSON deserializes a real repository.
+  FJSONObject := TJSONObject.Create;
+  FConfig := TNoneConfig.Create(FJSONObject);
+end;
+
+destructor TManifestRepository.Destroy;
+begin
+  FConfig.Free;
+  FJSONObject.Free;
+  inherited;
+end;
+
+procedure TManifestRepository.FromJSON(AJSONObject: TJSONValue);
+begin
+  // Release the config/JSON set up by the constructor (or a previous call) before
+  // replacing them, so re-deserializing the same instance does not leak.
+  FreeAndNil(FConfig);
+  FreeAndNil(FJSONObject);
+
+  // Meta-packet doesn't have the repository node
+  if not Assigned(AJSONObject) then
+    FJSONObject := TJSONObject.Create
+  else
+    FJSONObject := AJSONObject.Clone as TJSONObject;
+
+  FRepoType := FJSONObject.GetValue<string>('type', 'none');
+
+  if SameText(FRepoType, 'none') then
+    FConfig := TNoneConfig.Create(FJSONObject)
+  else if SameText(FRepoType, 'github') then
+    FConfig := TGitHubConfig.Create(FJSONObject)
+  else if SameText(FRepoType, 'bitbucket') then
+    FConfig := TBitBucketConfig.Create(FJSONObject)
+  else if SameText(FRepoType, 'local') then
+    FConfig := TLocalConfig.Create(FJSONObject)
+  else
+    raise EManfestError.CreateFmt('Wrong repository type: "%s"', [FRepoType]);
+end;
+
+function TManifestRepository.ToJSON: TJSONValue;
+begin
+  // Return a clone: the caller (serializer) owns the result and frees it with the
+  // parent tree, while FJSONObject stays owned by this instance.
+  if Assigned(FJSONObject) then
+    Result := FJSONObject.Clone as TJSONValue
+  else
+    Result := TJSONObject.Create;
+end;
+
+function TManifestRepository.ToString: string;
+begin
+  Result := FConfig.ToString;
+end;
+
+{ TGitHubConfig }
+
+function TGitHubConfig.GetUrl: string;
+begin
+  Result := FValue.GetValue<string>('url', '');
+end;
+
+function TGitHubConfig.ToString: string;
+begin
+  Result := GetUrl;
+end;
+
+{ TManifestRepositoryConfig }
+
+constructor TManifestRepositoryConfig.Create(AValue: TJSONValue);
+begin
+  inherited Create;
+  FValue := AValue;
+end;
+
+function TManifestRepositoryConfig.ToString: string;
+begin
+  Result := FValue.GetValue<string>('type', '');
+end;
+
+{ TBitBucketConfig }
+
+function TBitBucketConfig.GetUrl: string;
+begin
+  Result := FValue.GetValue<string>('url', '');
+end;
+
+function TBitBucketConfig.ToString: string;
+begin
+  Result := GetUrl;
+end;
+
+{ TLocalConfig }
+
+function TLocalConfig.GetUrl: string;
+begin
+  Result := FValue.GetValue<string>('url', '');
+end;
+
+function TLocalConfig.ToString: string;
+begin
+  Result := GetUrl;
 end;
 
 end.
