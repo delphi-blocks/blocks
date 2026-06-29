@@ -35,6 +35,14 @@ type
     [Test]
     procedure TestRepository_MetaPackageWithoutRepositoryNode;
     [Test]
+    procedure TestRepository_Git;
+    [Test]
+    procedure TestRepository_GitRefSingle;
+    [Test]
+    procedure TestRepository_GitRefNone;
+    [Test]
+    procedure TestRepository_GitRefMultipleRaises;
+    [Test]
     procedure TestKeywords;
     [Test]
     procedure TestPlatforms;
@@ -237,6 +245,80 @@ begin
     Assert.AreEqual('none', LManifest.Repository.RepoType, 'repository.type');
     Assert.AreEqual('', LManifest.Repository.ToString, 'repository.ToString');
     Assert.IsTrue(LManifest.IsMeta, 'IsMeta');
+  finally
+    LManifest.Free;
+  end;
+end;
+
+procedure TManifestDeserializationTest.TestRepository_Git;
+begin
+  const GitManifestJSON =
+      '''
+      {
+        "id": "acme.easylib",
+        "name": "EasyLib",
+        "version": "1.0.0",
+        "repository": {
+          "type": "git",
+          "url": "https://bitbucket.org/infocer/easylib.git",
+          "branch": "feature/test"
+        }
+      }
+      ''';
+  var LManifest := TJsonHelper.JSONToObject<TManifest>(GitManifestJSON);
+  try
+    Assert.AreEqual('git', LManifest.Repository.RepoType, 'repository.type');
+    var LCfg := LManifest.Repository.Config<TGitConfig>;
+    Assert.AreEqual('https://bitbucket.org/infocer/easylib.git', LCfg.Url, 'url');
+    Assert.AreEqual('feature/test', LCfg.Branch, 'branch');
+    Assert.AreEqual('', LCfg.Tag, 'tag');
+    Assert.AreEqual('', LCfg.Commit, 'commit');
+    // ToString returns the URL, like the other URL-backed configs.
+    Assert.AreEqual('https://bitbucket.org/infocer/easylib.git', LManifest.Repository.ToString, 'ToString');
+  finally
+    LManifest.Free;
+  end;
+end;
+
+function MakeGitConfig(const ARepositoryFields: string): TManifest;
+begin
+  const Template =
+      '''
+      {
+        "id": "acme.x",
+        "name": "X",
+        "version": "1.0.0",
+        "repository": { "type": "git", "url": "https://example.com/x.git"%s }
+      }
+      ''';
+  Result := TJsonHelper.JSONToObject<TManifest>(Format(Template, [ARepositoryFields]));
+end;
+
+procedure TManifestDeserializationTest.TestRepository_GitRefSingle;
+begin
+  var LManifest := MakeGitConfig(', "tag": "v1.2.3"');
+  try
+    Assert.AreEqual('v1.2.3', LManifest.Repository.Config<TGitConfig>.GitRef);
+  finally
+    LManifest.Free;
+  end;
+end;
+
+procedure TManifestDeserializationTest.TestRepository_GitRefNone;
+begin
+  var LManifest := MakeGitConfig('');
+  try
+    Assert.AreEqual('', LManifest.Repository.Config<TGitConfig>.GitRef);
+  finally
+    LManifest.Free;
+  end;
+end;
+
+procedure TManifestDeserializationTest.TestRepository_GitRefMultipleRaises;
+begin
+  var LManifest := MakeGitConfig(', "tag": "v1.0.0", "branch": "main"');
+  try
+    Assert.WillRaise(procedure begin LManifest.Repository.Config<TGitConfig>.GitRef; end, EManfestError);
   finally
     LManifest.Free;
   end;

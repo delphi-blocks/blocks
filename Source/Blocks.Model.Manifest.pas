@@ -293,6 +293,26 @@ type
     property Url: string read GetUrl;
   end;
 
+  /// <summary>Repository cloned with the git CLI. <c>tag</c>, <c>commit</c> and
+  ///   <c>branch</c> are optional and mutually exclusive.</summary>
+  TGitConfig = class(TManifestRepositoryConfig)
+  private
+    function GetUrl: string;
+    function GetTag: string;
+    function GetCommit: string;
+    function GetBranch: string;
+  public
+    function ToString: string; override;
+    /// <summary>The single git ref to fetch (tag, commit or branch), or an empty
+    ///   string when none is specified (meaning the remote default branch).</summary>
+    /// <exception cref="EManfestError">Raised when more than one of tag/commit/branch is set.</exception>
+    function GitRef: string;
+    property Url: string read GetUrl;
+    property Tag: string read GetTag;
+    property Commit: string read GetCommit;
+    property Branch: string read GetBranch;
+  end;
+
   // -----------------------------------------------------------------------
   // Manifest repository information
   // -----------------------------------------------------------------------
@@ -1090,6 +1110,8 @@ begin
     FConfig := TBitBucketConfig.Create(FJSONObject)
   else if SameText(FRepoType, 'local') then
     FConfig := TLocalConfig.Create(FJSONObject)
+  else if SameText(FRepoType, 'git') then
+    FConfig := TGitConfig.Create(FJSONObject)
   else
     raise EManfestError.CreateFmt('Wrong repository type: "%s"', [FRepoType]);
 end;
@@ -1154,6 +1176,58 @@ begin
 end;
 
 function TLocalConfig.ToString: string;
+begin
+  Result := GetUrl;
+end;
+
+{ TGitConfig }
+
+function TGitConfig.GetUrl: string;
+begin
+  Result := FValue.GetValue<string>('url', '');
+end;
+
+function TGitConfig.GetTag: string;
+begin
+  Result := FValue.GetValue<string>('tag', '');
+end;
+
+function TGitConfig.GetCommit: string;
+begin
+  Result := FValue.GetValue<string>('commit', '');
+end;
+
+function TGitConfig.GetBranch: string;
+begin
+  Result := FValue.GetValue<string>('branch', '');
+end;
+
+function TGitConfig.GitRef: string;
+begin
+  Result := '';
+  var LCount := 0;
+
+  if GetTag <> '' then
+  begin
+    Result := GetTag;
+    Inc(LCount);
+  end;
+  if GetCommit <> '' then
+  begin
+    Result := GetCommit;
+    Inc(LCount);
+  end;
+  if GetBranch <> '' then
+  begin
+    Result := GetBranch;
+    Inc(LCount);
+  end;
+
+  if LCount > 1 then
+    raise EManfestError.Create('Specify only one of "tag", "commit" or "branch" in the git repository.');
+end;
+
+function TGitConfig.ToString: string;
 begin
   Result := GetUrl;
 end;

@@ -130,6 +130,13 @@ function IsApple(const APlatform: string): Boolean;
 ///   always returns True; otherwise the match is case-insensitive.</summary>
 function PlatformInList(const AList: TArray<string>; const APlatform: string): Boolean;
 
+/// <summary>Runs <paramref name="ACmdLine"/> hidden (no console window), capturing its
+///   merged stdout/stderr into <paramref name="AOutput"/> and returning the process
+///   exit code.</summary>
+/// <exception cref="EOSError">Raised when the process cannot be started (e.g. the
+///   executable is not found).</exception>
+function RunProcess(const ACmdLine: string; out AOutput: string): Integer;
+
 type
   // -- Filesystem helpers (resilient to transient AV/indexer locks) -----------
   TFileUtils = class
@@ -235,6 +242,71 @@ begin
   for var LPlatform in AList do
     if SameText(APlatform, LPlatform) then
       Exit(True);
+end;
+
+function RunProcess(const ACmdLine: string; out AOutput: string): Integer;
+var
+  SA: TSecurityAttributes;
+  SI: TStartupInfo;
+  PI: TProcessInformation;
+  hRead, hWrite: THandle;
+  Buffer: array[0..4095] of Byte;
+  BytesRead: DWORD;
+  ExitCode: DWORD;
+  MS: TMemoryStream;
+  Bytes: TBytes;
+begin
+  AOutput := '';
+
+  SA.nLength := SizeOf(SA);
+  SA.bInheritHandle := True;
+  SA.lpSecurityDescriptor := nil;
+
+  if not CreatePipe(hRead, hWrite, @SA, 0) then
+    RaiseLastOSError;
+  SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
+  ZeroMemory(@SI, SizeOf(SI));
+  SI.cb := SizeOf(SI);
+  SI.dwFlags := STARTF_USESTDHANDLES;
+  SI.hStdOutput := hWrite;
+  SI.hStdError := hWrite;
+  SI.hStdInput := GetStdHandle(STD_INPUT_HANDLE);
+
+  ZeroMemory(@PI, SizeOf(PI));
+
+  if not CreateProcess(nil, PChar(ACmdLine), nil, nil, True, CREATE_NO_WINDOW, nil, nil, SI, PI) then
+  begin
+    CloseHandle(hRead);
+    CloseHandle(hWrite);
+    RaiseLastOSError;
+  end;
+
+  CloseHandle(hWrite);
+
+  MS := TMemoryStream.Create;
+  try
+    while ReadFile(hRead, Buffer[0], SizeOf(Buffer), BytesRead, nil) and (BytesRead > 0) do
+      MS.Write(Buffer[0], BytesRead);
+
+    SetLength(Bytes, MS.Size);
+    if MS.Size > 0 then
+    begin
+      MS.Position := 0;
+      MS.Read(Bytes[0], MS.Size);
+    end;
+    AOutput := TEncoding.Default.GetString(Bytes);
+  finally
+    MS.Free;
+  end;
+
+  WaitForSingleObject(PI.hProcess, INFINITE);
+  GetExitCodeProcess(PI.hProcess, ExitCode);
+  Result := Integer(ExitCode);
+
+  CloseHandle(PI.hProcess);
+  CloseHandle(PI.hThread);
+  CloseHandle(hRead);
 end;
 
 function TrimRight(const S: string; const Chars: array of Char): string;

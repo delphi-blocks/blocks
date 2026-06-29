@@ -350,6 +350,8 @@ System keys:
                          when multiple installations are present. This key is only
                          available when Blocks was installed using the setup package
                          and requires the launcher to function.
+  GitPath                Full path to git.exe, used to fetch "git" repositories.
+                         When unset, git is taken from the PATH.
 
 Examples:
   Blocks config
@@ -368,6 +370,7 @@ Examples:
   Blocks config idehighdpi=permonitorv2
   Blocks config /system InstallPath
   Blocks config /system InstallPath=C:\Tools\Blocks
+  Blocks config /system GitPath=C:\Program Files\Git\bin\git.exe
 ```
 
 ## View

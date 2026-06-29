@@ -1270,6 +1270,8 @@ begin
   WriteOption('', 'and requires the launcher to function.');
   WriteOption('AutoUpdate', 'When true (the default), blocks checks GitHub once a day for');
   WriteOption('', 'a newer release and suggests "upgrade" (true/false).');
+  WriteOption('GitPath', 'Full path to git.exe, used to fetch "git" repositories.');
+  WriteOption('', 'When unset, git is taken from the PATH.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' config');
@@ -1290,6 +1292,7 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath=C:\Tools\Blocks');
   TConsole.WriteLine('  ' + AppExeName + ' config /system AutoUpdate');
   TConsole.WriteLine('  ' + AppExeName + ' config /system AutoUpdate=false');
+  TConsole.WriteLine('  ' + AppExeName + ' config /system GitPath=C:\Program Files\Git\bin\git.exe');
   TConsole.WriteLine;
 end;
 

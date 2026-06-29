@@ -392,73 +392,6 @@ begin
     Result := '';
 end;
 
-// -- Process execution with output capture -------------------------------------
-
-function RunProcessWithOutput(const CmdLine: string; out Output: string): Integer;
-var
-  SA: TSecurityAttributes;
-  SI: TStartupInfo;
-  PI: TProcessInformation;
-  hRead, hWrite: THandle;
-  Buffer: array[0..4095] of Byte;
-  BytesRead: DWORD;
-  ExitCode: DWORD;
-  MS: TMemoryStream;
-  Bytes: TBytes;
-begin
-  Output := '';
-
-  SA.nLength := SizeOf(SA);
-  SA.bInheritHandle := True;
-  SA.lpSecurityDescriptor := nil;
-
-  if not CreatePipe(hRead, hWrite, @SA, 0) then
-    RaiseLastOSError;
-  SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
-
-  ZeroMemory(@SI, SizeOf(SI));
-  SI.cb := SizeOf(SI);
-  SI.dwFlags := STARTF_USESTDHANDLES;
-  SI.hStdOutput := hWrite;
-  SI.hStdError := hWrite;
-  SI.hStdInput := GetStdHandle(STD_INPUT_HANDLE);
-
-  ZeroMemory(@PI, SizeOf(PI));
-
-  if not CreateProcess(nil, PChar(CmdLine), nil, nil, True, CREATE_NO_WINDOW, nil, nil, SI, PI) then
-  begin
-    CloseHandle(hRead);
-    CloseHandle(hWrite);
-    RaiseLastOSError;
-  end;
-
-  CloseHandle(hWrite);
-
-  MS := TMemoryStream.Create;
-  try
-    while ReadFile(hRead, Buffer[0], SizeOf(Buffer), BytesRead, nil) and (BytesRead > 0) do
-      MS.Write(Buffer[0], BytesRead);
-
-    SetLength(Bytes, MS.Size);
-    if MS.Size > 0 then
-    begin
-      MS.Position := 0;
-      MS.Read(Bytes[0], MS.Size);
-    end;
-    Output := TEncoding.Default.GetString(Bytes);
-  finally
-    MS.Free;
-  end;
-
-  WaitForSingleObject(PI.hProcess, INFINITE);
-  GetExitCodeProcess(PI.hProcess, ExitCode);
-  Result := Integer(ExitCode);
-
-  CloseHandle(PI.hProcess);
-  CloseHandle(PI.hThread);
-  CloseHandle(hRead);
-end;
-
 // Runs the manifest scripts registered for a compile event (beforeCompile /
 // afterCompile) for a single package, build config and platform. The per-config
 // output paths are exposed through $(DCU_PATH) / $(BPL_PATH) / $(DCP_PATH), mirroring
@@ -1746,7 +1679,7 @@ begin
             [MsBuild, AProjectFileName, AConfig, APlatform, LMSBuildParams]
         );
 
-    var LExitCode := RunProcessWithOutput(LCmdLine, Result);
+    var LExitCode := RunProcess(LCmdLine, Result);
 
     if LExitCode <> 0 then
     begin

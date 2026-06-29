@@ -46,7 +46,8 @@ uses
   Blocks.Http,
   Blocks.Console,
   Blocks.GitHub,
-  Blocks.Bitbucket;
+  Blocks.Bitbucket,
+  Blocks.Model.SysConfig;
 
 type
   /// <summary>Base class for fetchers that download a ZIP archive whose content
@@ -75,6 +76,14 @@ type
     procedure FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
   end;
 
+  /// <summary>Clones a repository with the git CLI (shallow, <c>--depth 1</c>), then
+  ///   drops the <c>.git</c> directory. git is taken from the configured <c>gitpath</c>
+  ///   or from the PATH.</summary>
+  TGitFetcher = class(TInterfacedObject, IRepositoryFetcher)
+  public
+    procedure FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
+  end;
+
 { TRepositoryFetcher }
 
 class function TRepositoryFetcher.ForRepository(ARepository: TManifestRepository): IRepositoryFetcher;
@@ -85,6 +94,8 @@ begin
     Result := TBitbucketFetcher.Create
   else if SameText(ARepository.RepoType, 'local') then
     Result := TLocalFetcher.Create
+  else if SameText(ARepository.RepoType, 'git') then
+    Result := TGitFetcher.Create
   else
     raise Exception.CreateFmt('Unsupported repository type: "%s"', [ARepository.RepoType]);
 end;
@@ -155,6 +166,57 @@ begin
     raise Exception.CreateFmt('Local repository path not found: %s', [LUrl]);
   TConsole.WriteLine('Copying from local path...', clCyan);
   TDirectory.Copy(LUrl, ADestinationDir);
+end;
+
+{ TGitFetcher }
+
+procedure TGitFetcher.FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
+var
+  LGit: string;
+
+  procedure RunGit(const ADescription, AArgs: string);
+  begin
+    var LOutput: string;
+    var LExitCode: Integer;
+    try
+      LExitCode := RunProcess(LGit + ' ' + AArgs, LOutput);
+    except
+      on E: EOSError do
+        raise Exception.Create(
+            'Cannot run git. Make sure git is installed and on the PATH, or set its '
+                + 'location with "'
+                + AppExeName
+                + ' config /system gitpath=<path to git.exe>".');
+    end;
+    if LExitCode <> 0 then
+      raise Exception
+          .CreateFmt('git %s failed (exit code %d):' + sLineBreak + '%s', [ADescription, LExitCode, LOutput.Trim]);
+  end;
+
+begin
+  var LCfg := ARepository.Config<TGitConfig>;
+  if LCfg.Url = '' then
+    raise Exception.Create('Missing "url" in the git repository.');
+
+  // Raises when more than one of tag/commit/branch is set; empty means default branch.
+  var LRef := LCfg.GitRef;
+  if LRef = '' then
+    LRef := 'HEAD';
+
+  // Quote the executable so a path with spaces works; falls back to "git" on the PATH.
+  LGit := '"' + TSystemConfig.GitExecutable + '"';
+
+  var LDest := ExcludeTrailingPathDelimiter(ADestinationDir);
+
+  TConsole.WriteLine('Cloning with git...', clCyan);
+  RunGit('init', Format('init "%s"', [LDest]));
+  RunGit('remote add', Format('-C "%s" remote add origin "%s"', [LDest, LCfg.Url]));
+  RunGit('fetch', Format('-C "%s" fetch --depth 1 origin %s', [LDest, LRef]));
+  RunGit('checkout', Format('-C "%s" checkout --detach FETCH_HEAD', [LDest]));
+
+  // Blocks only needs the working tree; drop .git so the package directory is not a
+  // nested repository (the other fetchers leave none either).
+  TFileUtils.SafeDeleteDirectory(TPath.Combine(LDest, '.git'));
 end;
 
 end.

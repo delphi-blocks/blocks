@@ -190,6 +190,7 @@ option.
 |---------------|---------|-----------------------------------------------------------------------------------------------------------|
 | `InstallPath` | string  | Directory containing the `blocks.exe` to launch when multiple installations are present.                  |
 | `AutoUpdate`  | boolean | Whether blocks checks GitHub once a day for a newer release. Defaults to `true` when unset.                |
+| `GitPath`     | string  | Full path to `git.exe`, used to fetch `git` repositories. When unset, git is taken from the PATH.          |
 
 ### `InstallPath`
 
@@ -213,4 +214,16 @@ from the registry.
 ```
 blocks config /system AutoUpdate
 blocks config /system AutoUpdate=false
+```
+
+### `GitPath`
+
+Full path to the `git.exe` used to fetch [`git`](manifest.md#repository) repositories.
+When unset (the default), Blocks runs `git` from the system PATH; set this key only
+when git is not on the PATH or you want to pin a specific install. Setting it checks
+that the file exists.
+
+```
+blocks config /system GitPath
+blocks config /system GitPath=C:\Program Files\Git\bin\git.exe
 ```
