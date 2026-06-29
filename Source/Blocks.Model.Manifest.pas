@@ -313,6 +313,19 @@ type
     property Branch: string read GetBranch;
   end;
 
+  /// <summary>Repository checked out with the svn CLI (svn export). <c>revision</c>
+  ///   is optional; when omitted HEAD is exported.</summary>
+  TSvnConfig = class(TManifestRepositoryConfig)
+  private
+    function GetUrl: string;
+    function GetRevision: string;
+  public
+    function ToString: string; override;
+    property Url: string read GetUrl;
+    /// <summary>SVN revision to export, or an empty string for HEAD.</summary>
+    property Revision: string read GetRevision;
+  end;
+
   // -----------------------------------------------------------------------
   // Manifest repository information
   // -----------------------------------------------------------------------
@@ -1112,6 +1125,8 @@ begin
     FConfig := TLocalConfig.Create(FJSONObject)
   else if SameText(FRepoType, 'git') then
     FConfig := TGitConfig.Create(FJSONObject)
+  else if SameText(FRepoType, 'svn') then
+    FConfig := TSvnConfig.Create(FJSONObject)
   else
     raise EManfestError.CreateFmt('Wrong repository type: "%s"', [FRepoType]);
 end;
@@ -1228,6 +1243,25 @@ begin
 end;
 
 function TGitConfig.ToString: string;
+begin
+  Result := GetUrl;
+end;
+
+{ TSvnConfig }
+
+function TSvnConfig.GetUrl: string;
+begin
+  Result := FValue.GetValue<string>('url', '');
+end;
+
+function TSvnConfig.GetRevision: string;
+begin
+  // Read as string so both the JSON-number form ("revision": 2) and the quoted
+  // form ("revision": "2") are accepted.
+  Result := FValue.GetValue<string>('revision', '');
+end;
+
+function TSvnConfig.ToString: string;
 begin
   Result := GetUrl;
 end;

@@ -84,6 +84,14 @@ type
     procedure FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
   end;
 
+  /// <summary>Exports a repository with the svn CLI (<c>svn export</c>), which leaves
+  ///   no <c>.svn</c> directory behind. svn is taken from the configured <c>svnpath</c>
+  ///   or from the PATH.</summary>
+  TSvnFetcher = class(TInterfacedObject, IRepositoryFetcher)
+  public
+    procedure FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
+  end;
+
 { TRepositoryFetcher }
 
 class function TRepositoryFetcher.ForRepository(ARepository: TManifestRepository): IRepositoryFetcher;
@@ -96,6 +104,8 @@ begin
     Result := TLocalFetcher.Create
   else if SameText(ARepository.RepoType, 'git') then
     Result := TGitFetcher.Create
+  else if SameText(ARepository.RepoType, 'svn') then
+    Result := TSvnFetcher.Create
   else
     raise Exception.CreateFmt('Unsupported repository type: "%s"', [ARepository.RepoType]);
 end;
@@ -217,6 +227,53 @@ begin
   // Blocks only needs the working tree; drop .git so the package directory is not a
   // nested repository (the other fetchers leave none either).
   TFileUtils.SafeDeleteDirectory(TPath.Combine(LDest, '.git'));
+end;
+
+{ TSvnFetcher }
+
+procedure TSvnFetcher.FetchTo(ARepository: TManifestRepository; const ADestinationDir: string);
+var
+  LSvn: string;
+
+  procedure RunSvn(const ADescription, AArgs: string);
+  begin
+    var LOutput: string;
+    var LExitCode: Integer;
+    try
+      LExitCode := RunProcess(LSvn + ' ' + AArgs, LOutput);
+    except
+      on E: EOSError do
+        raise Exception.Create(
+            'Cannot run svn. Make sure svn is installed and on the PATH, or set its '
+                + 'location with "'
+                + AppExeName
+                + ' config /system svnpath=<path to svn.exe>".');
+    end;
+    if LExitCode <> 0 then
+      raise Exception
+          .CreateFmt('svn %s failed (exit code %d):' + sLineBreak + '%s', [ADescription, LExitCode, LOutput.Trim]);
+  end;
+
+begin
+  var LCfg := ARepository.Config<TSvnConfig>;
+  if LCfg.Url = '' then
+    raise Exception.Create('Missing "url" in the svn repository.');
+
+  // Quote the executable so a path with spaces works; falls back to "svn" on the PATH.
+  LSvn := '"' + TSystemConfig.SvnExecutable + '"';
+
+  var LDest := ExcludeTrailingPathDelimiter(ADestinationDir);
+
+  // svn export leaves no .svn directory (unlike checkout). --non-interactive makes
+  // svn fail instead of hanging on an auth/cert prompt (RunProcess waits forever).
+  // The destination does not exist yet (the caller cleared it), so export creates it.
+  var LArgs := 'export --non-interactive ';
+  if LCfg.Revision <> '' then
+    LArgs := LArgs + Format('-r %s ', [LCfg.Revision]);
+  LArgs := LArgs + Format('"%s" "%s"', [LCfg.Url, LDest]);
+
+  TConsole.WriteLine('Exporting with svn...', clCyan);
+  RunSvn('export', LArgs);
 end;
 
 end.

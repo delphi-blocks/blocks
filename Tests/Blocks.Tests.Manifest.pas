@@ -37,6 +37,10 @@ type
     [Test]
     procedure TestRepository_Git;
     [Test]
+    procedure TestRepository_Svn;
+    [Test]
+    procedure TestRepository_SvnWithoutRevision;
+    [Test]
     procedure TestRepository_GitRefSingle;
     [Test]
     procedure TestRepository_GitRefNone;
@@ -275,6 +279,58 @@ begin
     Assert.AreEqual('', LCfg.Commit, 'commit');
     // ToString returns the URL, like the other URL-backed configs.
     Assert.AreEqual('https://bitbucket.org/infocer/easylib.git', LManifest.Repository.ToString, 'ToString');
+  finally
+    LManifest.Free;
+  end;
+end;
+
+procedure TManifestDeserializationTest.TestRepository_Svn;
+begin
+  const SvnManifestJSON =
+      '''
+      {
+        "id": "acme.svnlib",
+        "name": "SvnLib",
+        "version": "1.0.0",
+        "repository": {
+          "type": "svn",
+          "url": "https://svn.riouxsvn.com/lithiantestrepo",
+          "revision": 2
+        }
+      }
+      ''';
+  var LManifest := TJsonHelper.JSONToObject<TManifest>(SvnManifestJSON);
+  try
+    Assert.AreEqual('svn', LManifest.Repository.RepoType, 'repository.type');
+    var LCfg := LManifest.Repository.Config<TSvnConfig>;
+    Assert.AreEqual('https://svn.riouxsvn.com/lithiantestrepo', LCfg.Url, 'url');
+    Assert.AreEqual('2', LCfg.Revision, 'revision');
+    // ToString returns the URL, like the other URL-backed configs.
+    Assert.AreEqual('https://svn.riouxsvn.com/lithiantestrepo', LManifest.Repository.ToString, 'ToString');
+  finally
+    LManifest.Free;
+  end;
+end;
+
+procedure TManifestDeserializationTest.TestRepository_SvnWithoutRevision;
+begin
+  const SvnManifestJSON =
+      '''
+      {
+        "id": "acme.svnlib",
+        "name": "SvnLib",
+        "version": "1.0.0",
+        "repository": {
+          "type": "svn",
+          "url": "https://svn.riouxsvn.com/lithiantestrepo"
+        }
+      }
+      ''';
+  var LManifest := TJsonHelper.JSONToObject<TManifest>(SvnManifestJSON);
+  try
+    var LCfg := LManifest.Repository.Config<TSvnConfig>;
+    Assert.AreEqual('https://svn.riouxsvn.com/lithiantestrepo', LCfg.Url, 'url');
+    Assert.AreEqual('', LCfg.Revision, 'revision');
   finally
     LManifest.Free;
   end;

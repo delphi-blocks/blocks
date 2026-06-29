@@ -1272,6 +1272,8 @@ begin
   WriteOption('', 'a newer release and suggests "upgrade" (true/false).');
   WriteOption('GitPath', 'Full path to git.exe, used to fetch "git" repositories.');
   WriteOption('', 'When unset, git is taken from the PATH.');
+  WriteOption('SvnPath', 'Full path to svn.exe, used to fetch "svn" repositories.');
+  WriteOption('', 'When unset, svn is taken from the PATH.');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' config');
@@ -1293,6 +1295,7 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' config /system AutoUpdate');
   TConsole.WriteLine('  ' + AppExeName + ' config /system AutoUpdate=false');
   TConsole.WriteLine('  ' + AppExeName + ' config /system GitPath=C:\Program Files\Git\bin\git.exe');
+  TConsole.WriteLine('  ' + AppExeName + ' config /system SvnPath=C:\Program Files\TortoiseSVN\bin\svn.exe');
   TConsole.WriteLine;
 end;
 

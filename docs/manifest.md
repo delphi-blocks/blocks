@@ -78,8 +78,8 @@ which other packages are required.
 | `homepage` | Project homepage URL. |
 | `author` | Author(s); free-form, optionally with an email. |
 | `keywords` | List of keywords used by `search`. |
-| `repository.type` | Source repository type: `github`, `bitbucket`, `git`, `local`, or `none`. Use `none` for a **meta-package** (see below). |
-| `repository.url` | Repository URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. For `github` use a tree URL (`https://github.com/owner/repo/tree/<ref>`), for `bitbucket` a src URL (`https://bitbucket.org/owner/repo/src/<ref>`), for `git` a clone URL (see below), for `local` a filesystem path. |
+| `repository.type` | Source repository type: `github`, `bitbucket`, `git`, `svn`, `local`, or `none`. Use `none` for a **meta-package** (see below). |
+| `repository.url` | Repository URL pinned to a tag or commit; Blocks downloads the ZIP from this ref. For `github` use a tree URL (`https://github.com/owner/repo/tree/<ref>`), for `bitbucket` a src URL (`https://bitbucket.org/owner/repo/src/<ref>`), for `git` a clone URL (see below), for `svn` a repository URL (see below), for `local` a filesystem path. |
 | `platforms` | Per-platform `sourcePath` (registered in the Delphi "Browsing Path") and optional `releaseDCUPath` / `debugDCUPath`. Set `runtimeOnly: true` to skip design-time packages when installing that platform. A key may list several platform names separated by commas (e.g. `"Win64,Linux64"`) as shorthand for declaring the same settings on each of them — available since v0.6.3. |
 | `packages` | List of `.dproj` files to compile; `type` can be `runtime`, `designtime`, or both. A `name` may contain the `$(PACKAGE_VERSION)` placeholder — see below. An optional `products` list restricts the package to specific Delphi versions — see below. |
 | `packageOptions.rootFolder` | Directory (relative to the project root) that contains the package folders. Defaults to `packages`. |
@@ -130,6 +130,30 @@ directory.
 git must be available: it is taken from the system PATH, or from the path set with
 `blocks config /system GitPath=<path to git.exe>` (see
 [config](config.md#gitpath)).
+
+## SVN repositories
+
+Set `repository.type` to `svn` to fetch the sources from a **Subversion**
+repository. Blocks runs `svn export`, which writes a clean working tree with no
+`.svn` directory left behind.
+
+```json
+"repository": {
+  "type": "svn",
+  "url": "https://svn.riouxsvn.com/lithiantestrepo",
+  "revision": 2
+}
+```
+
+- `url` — the repository URL (required). A branch or tag is selected by pointing
+  the URL at its path (SVN tags and branches are just directories, conventionally
+  under `branches/` and `tags/`).
+- `revision` — optional SVN revision number. A revision is repository-global, so it
+  pins the export exactly. When omitted, `HEAD` is exported.
+
+svn must be available: it is taken from the system PATH, or from the path set with
+`blocks config /system SvnPath=<path to svn.exe>` (see
+[config](config.md#svnpath)).
 
 ## Meta-packages
 

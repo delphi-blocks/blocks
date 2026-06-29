@@ -14,12 +14,14 @@ type
     class function GetAutoUpdate: Boolean; static;
     class function GetInstallPath: string; static;
     class function GetGitPath: string; static;
+    class function GetSvnPath: string; static;
   public
     const
       DefaultRegistryKey = 'Software\Blocks';
       InstallPathKey = 'InstallPath';
       AutoUpdateKey = 'AutoUpdate';
       GitPathKey = 'GitPath';
+      SvnPathKey = 'SvnPath';
     class function GetValue(const AKey: string): string; static;
     class procedure SetValue(const AKey, AValue: string); static;
     class procedure Add(const AKey, AValue: string); static;
@@ -30,10 +32,16 @@ type
     ///   (resolved through the PATH).</summary>
     class function GitExecutable: string; static;
 
+    /// <summary>Full path to <c>svn.exe</c> when configured, otherwise <c>svn</c>
+    ///   (resolved through the PATH).</summary>
+    class function SvnExecutable: string; static;
+
     class property AutoUpdate: Boolean read GetAutoUpdate;
     class property InstallPath: string read GetInstallPath;
     /// <summary>Configured path to <c>git.exe</c>, or an empty string when unset.</summary>
     class property GitPath: string read GetGitPath;
+    /// <summary>Configured path to <c>svn.exe</c>, or an empty string when unset.</summary>
+    class property SvnPath: string read GetSvnPath;
   end;
 
 implementation
@@ -95,6 +103,18 @@ begin
       LReg.Free;
     end;
   end
+  else if SameText(AKey, SvnPathKey) then
+  begin
+    // Absent value means "use svn from PATH": return an empty string, do not raise.
+    Result := '';
+    var LReg := TRegistry.Create;
+    try
+      if LReg.OpenKeyReadOnly(DefaultRegistryKey) and LReg.ValueExists(SvnPathKey) then
+        Result := LReg.ReadString(SvnPathKey);
+    finally
+      LReg.Free;
+    end;
+  end
   else
     raise Exception.CreateFmt('System config "%s" not found', [AKey]);
 end;
@@ -111,6 +131,7 @@ begin
   // Use Add (not Values[]) so the key still appears when unset: assigning an empty
   // value through Values[] would delete the entry.
   AConfigs.Add(GitPathKey + '=' + GetValue(GitPathKey));
+  AConfigs.Add(SvnPathKey + '=' + GetValue(SvnPathKey));
 end;
 
 class function TSystemConfig.GetAutoUpdate: Boolean;
@@ -128,11 +149,23 @@ begin
   Result := GetValue(GitPathKey);
 end;
 
+class function TSystemConfig.GetSvnPath: string;
+begin
+  Result := GetValue(SvnPathKey);
+end;
+
 class function TSystemConfig.GitExecutable: string;
 begin
   Result := GetGitPath;
   if Result = '' then
     Result := 'git';
+end;
+
+class function TSystemConfig.SvnExecutable: string;
+begin
+  Result := GetSvnPath;
+  if Result = '' then
+    Result := 'svn';
 end;
 
 class procedure TSystemConfig.SetValue(const AKey, AValue: string);
@@ -173,6 +206,19 @@ begin
       if not LReg.OpenKey(DefaultRegistryKey, True) then
         raise Exception.Create('Unable to open the Blocks registry key');
       LReg.WriteString(GitPathKey, AValue);
+    finally
+      LReg.Free;
+    end;
+  end
+  else if SameText(AKey, SvnPathKey) then
+  begin
+    if not FileExists(AValue) then
+      raise Exception.CreateFmt('svn executable not found: %s', [AValue]);
+    var LReg := TRegistry.Create;
+    try
+      if not LReg.OpenKey(DefaultRegistryKey, True) then
+        raise Exception.Create('Unable to open the Blocks registry key');
+      LReg.WriteString(SvnPathKey, AValue);
     finally
       LReg.Free;
     end;
