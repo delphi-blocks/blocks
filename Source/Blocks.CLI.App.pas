@@ -1141,6 +1141,7 @@ begin
     WriteField('RegistryKey', TWorkspace.Config.RegistryKey);
     WriteField('UpdateDcpSearchPath', TWorkspace.Config.GetValue('updatedcpsearchpath'));
     WriteField('ToolArchitecture', TWorkspace.Config.GetValue('toolarchitecture'));
+    WriteField('CBuilderOutput', TWorkspace.Config.GetValue('cbuilderoutput'));
     WriteField('IdeArchitecture', TWorkspace.Config.GetValue('idearchitecture'));
     WriteField('IdePersonality', TWorkspace.Config.GetValue('idepersonality'));
     WriteField('IdeHighDpi', TWorkspace.Config.GetValue('idehighdpi'));
@@ -1255,6 +1256,9 @@ begin
   WriteOption('', 'default (don''t pass the flag), x32 (32-bit tools) or');
   WriteOption('', 'x64 (64-bit tools, more memory). Default: default.');
   WriteOption('', 'Does not change the produced binary.');
+  WriteOption('cbuilderoutput', 'Value passed to MSBuild as /p:DCC_CBuilderOutput when');
+  WriteOption('', 'compiling packages (e.g. All to generate C++ output).');
+  WriteOption('', 'Empty (the default) does not pass the property.');
   WriteOption('idearchitecture', 'IDE "run" launches: default, Win32 or Win64 (Delphi 13+).');
   WriteOption('', 'Win64 uses the 64-bit IDE when available. Default: default.');
   WriteOption('idepersonality', 'IDE personality "run" selects (bds.exe -p):');
@@ -1288,6 +1292,7 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' config registrykey=myprofile');
   TConsole.WriteLine('  ' + AppExeName + ' config updatedcpsearchpath=true');
   TConsole.WriteLine('  ' + AppExeName + ' config toolarchitecture=x64');
+  TConsole.WriteLine('  ' + AppExeName + ' config cbuilderoutput=All');
   TConsole.WriteLine('  ' + AppExeName + ' config idearchitecture=Win64');
   TConsole.WriteLine('  ' + AppExeName + ' config idehighdpi=permonitorv2');
   TConsole.WriteLine('  ' + AppExeName + ' config /system InstallPath');

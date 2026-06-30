@@ -37,16 +37,21 @@ type
     function GetPlatform: string;
     function GetConfig: string;
     function GetToolArchitecture: TToolArchitecture;
+    function GetCBuilderOutput: string;
 
     function SetPlatform(const AValue: string): ICompilerOptions;
     function SetConfig(const AValue: string): ICompilerOptions;
     function SetToolArchitecture(const AValue: TToolArchitecture): ICompilerOptions;
+    function SetCBuilderOutput(const AValue: string): ICompilerOptions;
 
     property Platform: string read GetPlatform;
     property Config: string read GetConfig;
     /// <summary>Compiler tools architecture; <c>default</c> means "do not pass
     ///   <c>/p:DCC_PreferredToolArchitecture</c> to MSBuild".</summary>
     property ToolArchitecture: TToolArchitecture read GetToolArchitecture;
+    /// <summary>Value passed verbatim as <c>/p:DCC_CBuilderOutput</c>; empty means
+    ///   "do not pass the property to MSBuild".</summary>
+    property CBuilderOutput: string read GetCBuilderOutput;
   end;
 
   TCompilerOptions = class(TInterfacedObject, ICompilerOptions)
@@ -54,15 +59,18 @@ type
     FPlatform: string;
     FConfig: string;
     FToolArchitecture: TToolArchitecture;
+    FCBuilderOutput: string;
     function GetPlatform: string;
     function GetConfig: string;
     function GetToolArchitecture: TToolArchitecture;
+    function GetCBuilderOutput: string;
   public
     /// <summary>Creates an empty options object (ToolArchitecture = default).</summary>
     class function New: ICompilerOptions; static;
     function SetPlatform(const AValue: string): ICompilerOptions;
     function SetConfig(const AValue: string): ICompilerOptions;
     function SetToolArchitecture(const AValue: TToolArchitecture): ICompilerOptions;
+    function SetCBuilderOutput(const AValue: string): ICompilerOptions;
   end;
 
   ScriptManifestAttribute = class(TCustomAttribute)
@@ -318,6 +326,11 @@ begin
   Result := FToolArchitecture;
 end;
 
+function TCompilerOptions.GetCBuilderOutput: string;
+begin
+  Result := FCBuilderOutput;
+end;
+
 function TCompilerOptions.SetPlatform(const AValue: string): ICompilerOptions;
 begin
   FPlatform := AValue;
@@ -333,6 +346,12 @@ end;
 function TCompilerOptions.SetToolArchitecture(const AValue: TToolArchitecture): ICompilerOptions;
 begin
   FToolArchitecture := AValue;
+  Result := Self;
+end;
+
+function TCompilerOptions.SetCBuilderOutput(const AValue: string): ICompilerOptions;
+begin
+  FCBuilderOutput := AValue;
   Result := Self;
 end;
 

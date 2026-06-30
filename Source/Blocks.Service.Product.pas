@@ -1659,7 +1659,9 @@ begin
             TPair<string, string>.Create('DCC_UnitSearchPath', LUnitSearchPath),
             TPair<string, string>.Create('DCC_BplOutput', TPath.Combine(LBlocksDir, APlatform, 'bpl', LSuffix)),
             TPair<string, string>.Create('DCC_DcpOutput', TPath.Combine(LBlocksDir, APlatform, 'dcp', LSuffix)),
+            TPair<string, string>.Create('DCC_HppOutput', TPath.Combine(LBlocksDir, APlatform, 'hpp', LSuffix)),
             TPair<string, string>.Create('DCC_DcuOutput', LDcuOutput),
+            TPair<string, string>.Create('DCC_CBuilderOutput', AOptions.CBuilderOutput),
             // An expert produces an executable/library; drop it next to its DCUs.
             TPair<string, string>.Create('DCC_ExeOutput', LDcuOutput)] do
       if LOverride.Value <> '' then
@@ -1835,6 +1837,7 @@ begin
                   .SetConfig(LBuildConfig)
                   .SetPlatform(LPlatform)
                   .SetToolArchitecture(AConfig.ToolArchitecture)
+                  .SetCBuilderOutput(AConfig.CBuilderOutput)
           );
           TConsole.WriteLine(' OK', clGreen);
 

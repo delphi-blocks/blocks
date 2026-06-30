@@ -41,6 +41,7 @@ type
     FWorkspaceDir: string;
     FUpdateDCPSearchPath: Boolean;
     FToolArchitecture: TToolArchitecture;
+    FCBuilderOutput: string;
     FIdeArchitecture: TIdeArchitecture;
     FIdePersonality: TIdePersonality;
     FIdeHighDpi: TIdeHighDpi;
@@ -60,6 +61,10 @@ type
     ///   <c>/p:DCC_PreferredToolArchitecture=&lt;x32|x64&gt;</c> (Delphi 13+). When
     ///   <c>default</c> (the default) the property is not passed to MSBuild at all.</summary>
     property ToolArchitecture: TToolArchitecture read FToolArchitecture write FToolArchitecture;
+    /// <summary>Value passed to MSBuild as <c>/p:DCC_CBuilderOutput=&lt;value&gt;</c> when
+    ///   compiling packages (e.g. <c>All</c> to generate C++ output). Used verbatim;
+    ///   an empty string (the default) means the property is not passed to MSBuild.</summary>
+    property CBuilderOutput: string read FCBuilderOutput write FCBuilderOutput;
     /// <summary>IDE architecture <c>run</c> launches (Delphi 13+ ships a 64-bit IDE). When
     ///   <c>Win64</c> the <c>App64</c> binary is used if present, otherwise it falls back to
     ///   the 32-bit <c>App</c>. Default <c>default</c> (32-bit IDE).</summary>
@@ -253,6 +258,8 @@ begin
   end
   else if SameText(AKey, 'toolarchitecture') then
     FToolArchitecture := StrToToolArchitecture(AValue)
+  else if SameText(AKey, 'cbuilderoutput') then
+    FCBuilderOutput := AValue
   else if SameText(AKey, 'idearchitecture') then
     FIdeArchitecture := StrToIdeArchitecture(AValue)
   else if SameText(AKey, 'idepersonality') then
@@ -310,6 +317,7 @@ begin
   FRegistryKey := 'BDS';
   FUpdateDCPSearchPath := False;
   FToolArchitecture := TToolArchitecture.default;
+  FCBuilderOutput := '';
   FIdeArchitecture := TIdeArchitecture.default;
   FIdePersonality := TIdePersonality.default;
   FIdeHighDpi := TIdeHighDpi.default;
@@ -346,6 +354,8 @@ begin
   end
   else if SameText(AKey, 'toolarchitecture') then
     Result := ToolArchitectureToStr(FToolArchitecture)
+  else if SameText(AKey, 'cbuilderoutput') then
+    Result := FCBuilderOutput
   else if SameText(AKey, 'idearchitecture') then
     Result := IdeArchitectureToStr(FIdeArchitecture)
   else if SameText(AKey, 'idepersonality') then

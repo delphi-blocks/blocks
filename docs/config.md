@@ -34,6 +34,7 @@ workspace.
 | `registrykey`         | string  | `BDS`   | Registry profile key for the target Delphi IDE, matching `bds.exe -r <key>`.            |
 | `updatedcpsearchpath` | boolean | `false` | Whether `init` adds the Blocks DCP output directory to the Delphi library Search Path.  |
 | `toolarchitecture` | `default` \| `x32` \| `x64` | `default` | Architecture of the compiler tools MSBuild uses to build packages (Delphi 13+). |
+| `cbuilderoutput` | string | *(empty)* | Value passed verbatim to MSBuild as `DCC_CBuilderOutput` when building packages (e.g. `All` to generate C++ output). |
 | `idearchitecture` | `default` \| `Win32` \| `Win64` | `default` | Which IDE binary [`run`](cli.md#run) launches (Delphi 13+ ships a 64-bit IDE). |
 | `idepersonality` | `default` \| `Delphi` \| `CBuilder` | `default` | IDE personality [`run`](cli.md#run) selects (`bds.exe -p`). |
 | `idehighdpi` | `default` \| `unaware` \| `systemaware` \| `permonitor` \| `permonitorv2` \| `unawaregdiscaling` | `default` | HighDPI awareness override [`run`](cli.md#run) applies (`bds.exe -highdpi:`). |
@@ -151,6 +152,26 @@ and 64-bit target compilers; older versions simply ignore the property.
 
 ```
 blocks config toolarchitecture=x64
+```
+
+### `cbuilderoutput`
+
+Sets the value Blocks passes to MSBuild as the `DCC_CBuilderOutput` property when
+it compiles a package. The string is used **verbatim**, so you can set any value
+the Delphi compiler accepts — for example `All` to make the compiler emit the
+C++ output (`.hpp` headers, `.obj`/`.lib`, package `.bpi`) alongside the Delphi
+output, which is what C++Builder needs to consume the package.
+
+When **empty** (the default) the `/p:DCC_CBuilderOutput` property is **not passed
+to MSBuild at all**, so the project's own setting applies.
+
+For the list of supported values and what each one produces, see the Embarcadero
+documentation:
+[Output - C/C++](https://docwiki.embarcadero.com/RADStudio/Athens/en/Output_-_C/C%2B%2B).
+
+```
+blocks config cbuilderoutput=All
+blocks config cbuilderoutput=          # clear it (property not passed)
 ```
 
 ### `idearchitecture`, `idepersonality` and `idehighdpi`

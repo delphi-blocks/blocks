@@ -939,6 +939,41 @@ begin
     else if not LManifest.IsMeta then
       TConsole.WriteLine('Directory not found: ' + LProjectDir, clYellow);
 
+    // Step 6.4 — Remove generated C++ header files (.hpp). Unlike the DCU tree,
+    // the hpp output ($(BLOCKSDIR)\<Platform>\hpp[\debug]) is shared by every
+    // package, so we cannot delete the folder wholesale: we remove only the .hpp
+    // whose name matches one of this package's .dcu files.
+    var LBlocksDir := TPath.Combine(WorkDir, '.blocks');
+    for var LPlatformPair in LManifest.Platforms do
+    begin
+      // Both build configs are compiled (release in the platform root, debug in a
+      // "debug" subfolder), each with its own hpp output folder.
+      for var LSuffix in ['', 'debug'] do
+      begin
+        var LDcuPlatformDir := TPath.Combine([LBlocksDir, 'lib', LManifest.Name, LPlatformPair.Key, LSuffix]);
+        if not TDirectory.Exists(LDcuPlatformDir) then
+          Continue;
+
+        var LHppDir := TPath.Combine([LBlocksDir, LPlatformPair.Key, 'hpp', LSuffix]);
+
+        // Candidate hpp files: one per produced .dcu, plus one named after each
+        // package (Delphi emits a header named after the package itself too).
+        var LHppFiles: TArray<string> := [];
+        for var LDcuFile in TDirectory.GetFiles(LDcuPlatformDir, '*.dcu') do
+          LHppFiles := LHppFiles + [TPath.Combine(LHppDir, TPath.GetFileNameWithoutExtension(LDcuFile) + '.hpp')];
+        for var LPackage in LManifest.Packages do
+          LHppFiles := LHppFiles + [TPath.Combine(LHppDir, LSelectedProduct.ExpandPackageName(LPackage.Name) + '.hpp')];
+
+        // Not every .dcu/package has a generated .hpp, so a missing file is normal.
+        for var LHppFile in LHppFiles do
+          if TFile.Exists(LHppFile) then
+          begin
+            TFile.Delete(LHppFile);
+            TConsole.WriteLine('Removed: ' + LHppFile);
+          end;
+      end;
+    end;
+
     // Step 6.5 — Remove the package's DCU output folder (.blocks\lib\<name>).
     // RemovePackage only deletes the bpl/dcp/rsm artifacts, so the DCU tree
     // produced under $(BLOCKSDIR)\lib\<name> would otherwise be left orphaned.
