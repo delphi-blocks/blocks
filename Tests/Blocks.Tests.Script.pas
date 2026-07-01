@@ -65,6 +65,18 @@ type
     procedure TestManifestSerializationThroughFramework;
     [Test]
     procedure TestEventBoundCommandRegistersItsArgumentsClass;
+    [Test]
+    procedure TestFetchDecodesArgs;
+    [Test]
+    procedure TestFetchMissingUrlRaises;
+    [Test]
+    procedure TestFetchMissingOutputFileRaises;
+    [Test]
+    procedure TestCopyCopiesFile;
+    [Test]
+    procedure TestCopyMissingInputFileRaises;
+    [Test]
+    procedure TestCopyMissingOutputFileRaises;
   end;
 
 implementation
@@ -314,6 +326,153 @@ begin
         'args should decode to TManifestCompileArguments, got ' + LScript.Args.ClassName
     );
   finally
+    LScript.Free;
+  end;
+end;
+
+procedure TScriptRunnerTest.TestFetchDecodesArgs;
+begin
+  var LScript := TManifestScript.Create;
+  var LEnv := TStringList.Create;
+  try
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "fetch",
+          "event": "afterCompile",
+          "args": { "url": "https://example.com/data.bin", "outputFile": "$(DCU_PATH)\\data.bin" }
+        }
+        '''
+    );
+    LEnv.Values['DCU_PATH'] := 'C:\out';
+
+    var LArgs := LScript.Args.GetAs<TManifestFetchArguments>;
+    Assert.AreEqual('https://example.com/data.bin', LArgs.Url, 'url should decode');
+    // The output file is variable-expanded by the command using the same helper.
+    Assert.AreEqual('C:\out\data.bin', ExpandVariables(LArgs.OutputFile, LEnv), 'outputFile should expand');
+  finally
+    LEnv.Free;
+    LScript.Free;
+  end;
+end;
+
+procedure TScriptRunnerTest.TestFetchMissingUrlRaises;
+begin
+  var LScript := TManifestScript.Create;
+  var LEnv := TStringList.Create;
+  try
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "fetch",
+          "event": "afterCompile",
+          "args": { "outputFile": "C:\\out\\data.bin" }
+        }
+        '''
+    );
+    Assert.WillRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end, EScriptError);
+  finally
+    LEnv.Free;
+    LScript.Free;
+  end;
+end;
+
+procedure TScriptRunnerTest.TestFetchMissingOutputFileRaises;
+begin
+  var LScript := TManifestScript.Create;
+  var LEnv := TStringList.Create;
+  try
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "fetch",
+          "event": "afterCompile",
+          "args": { "url": "https://example.com/data.bin" }
+        }
+        '''
+    );
+    Assert.WillRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end, EScriptError);
+  finally
+    LEnv.Free;
+    LScript.Free;
+  end;
+end;
+
+procedure TScriptRunnerTest.TestCopyCopiesFile;
+begin
+  var LRoot := TPath.Combine(TPath.GetTempPath, 'blocks_copy_' + TGUID.NewGuid.ToString);
+  TDirectory.CreateDirectory(LRoot);
+  try
+    TFile.WriteAllText(TPath.Combine(LRoot, 'in.txt'), 'hello');
+
+    var LScript := TManifestScript.Create;
+    var LEnv := TStringList.Create;
+    try
+      // Relative paths are resolved against $(PROJECT_PATH); the output subdir
+      // does not exist yet, so the command must create it.
+      LScript.FromJSONString(
+          '''
+          {
+            "command": "copy",
+            "event": "afterCompile",
+            "args": { "inputFile": "in.txt", "outputFile": "sub\\out.txt" }
+          }
+          '''
+      );
+      LEnv.Values['PROJECT_PATH'] := LRoot;
+
+      TScriptRunner.Execute(FManifest, LScript, LEnv);
+
+      var LOut := TPath.Combine(LRoot, TPath.Combine('sub', 'out.txt'));
+      Assert.IsTrue(TFile.Exists(LOut), 'output file should be created (with missing dir)');
+      Assert.AreEqual('hello', TFile.ReadAllText(LOut), 'content should match the source');
+    finally
+      LEnv.Free;
+      LScript.Free;
+    end;
+  finally
+    TDirectory.Delete(LRoot, True);
+  end;
+end;
+
+procedure TScriptRunnerTest.TestCopyMissingInputFileRaises;
+begin
+  var LScript := TManifestScript.Create;
+  var LEnv := TStringList.Create;
+  try
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "copy",
+          "event": "afterCompile",
+          "args": { "outputFile": "C:\\out\\data.bin" }
+        }
+        '''
+    );
+    Assert.WillRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end, EScriptError);
+  finally
+    LEnv.Free;
+    LScript.Free;
+  end;
+end;
+
+procedure TScriptRunnerTest.TestCopyMissingOutputFileRaises;
+begin
+  var LScript := TManifestScript.Create;
+  var LEnv := TStringList.Create;
+  try
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "copy",
+          "event": "afterCompile",
+          "args": { "inputFile": "C:\\in\\data.bin" }
+        }
+        '''
+    );
+    Assert.WillRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end, EScriptError);
+  finally
+    LEnv.Free;
     LScript.Free;
   end;
 end;

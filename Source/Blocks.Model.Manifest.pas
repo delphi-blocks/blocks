@@ -220,6 +220,32 @@ type
     constructor Create(AValue: TJSONValue); override;
   end;
 
+  /// <summary>Arguments for the <c>fetch</c> command. The <c>args</c> JSON is an
+  ///   object: <c>{ "url": "...", "outputFile": "..." }</c>. Both fields are
+  ///   mandatory and subject to <c>$(VAR)</c> expansion at run time.</summary>
+  TManifestFetchArguments = class(TManifestScriptArguments)
+  private
+    FUrl: string;
+    FOutputFile: string;
+  public
+    property Url: string read FUrl;
+    property OutputFile: string read FOutputFile;
+    constructor Create(AValue: TJSONValue); override;
+  end;
+
+  /// <summary>Arguments for the <c>copy</c> command. The <c>args</c> JSON is an
+  ///   object: <c>{ "inputFile": "...", "outputFile": "..." }</c>. Both fields are
+  ///   mandatory and subject to <c>$(VAR)</c> expansion at run time.</summary>
+  TManifestCopyArguments = class(TManifestScriptArguments)
+  private
+    FInputFile: string;
+    FOutputFile: string;
+  public
+    property InputFile: string read FInputFile;
+    property OutputFile: string read FOutputFile;
+    constructor Create(AValue: TJSONValue); override;
+  end;
+
   // -----------------------------------------------------------------------
   // A script to run during the install pipeline (e.g. on "afterCompile")
   // -----------------------------------------------------------------------
@@ -375,6 +401,12 @@ type
       FRegistry: TDictionary<string, TManifestScriptArgumentsClass>;
   public
     class function GetManifest(const APackageName, APackageVersion: string): TManifest;
+    /// <summary>Returns the directory a package's manifest lives in:
+    ///   <c>{AWorkspaceDir}\.blocks\repository\{vendor}\{name}\{AVersion}</c>.</summary>
+    /// <param name="AWorkspaceDir">Workspace root directory.</param>
+    /// <param name="AId">Package identifier in the form <c>vendor.name</c>.</param>
+    /// <param name="AVersion">Package version (the repository folder name, e.g. <c>1.2.3</c>).</param>
+    class function GetManifestPath(const AWorkspaceDir, AId, AVersion: string): string; static;
     /// <summary>Returns all available versions of a package, sorted ascending.</summary>
     /// <param name="APackageName">Package identifier in the form <c>vendor.name</c>.</param>
     class function GetVersions(const APackageName: string): TArray<TSemVer>;
@@ -806,9 +838,8 @@ begin
           [APackageVersion, APackageName]);
   end;
 
-  var LVersionsDir := TPath.Combine(TWorkspace.BlocksDir, 'repository', LPackagePair[0], LPackagePair[1]);
-  var LFullPath :=
-      TPath.Combine(LVersionsDir, LBest.ToString, LPackagePair[0] + '.' + LPackagePair[1] + '.manifest.json');
+  var LManifestDir := GetManifestPath(TWorkspace.WorkDir, APackageName, LBest.ToString);
+  var LFullPath := TPath.Combine(LManifestDir, LPackagePair[0] + '.' + LPackagePair[1] + '.manifest.json');
   if not FileExists(LFullPath) then
     raise Exception.CreateFmt('Manifest file not found: %s', [LFullPath]);
 
@@ -819,6 +850,15 @@ begin
   finally
     LJSON.Free;
   end;
+end;
+
+class function TManifest.GetManifestPath(const AWorkspaceDir, AId, AVersion: string): string;
+begin
+  var LPackagePair := AId.Split(['.']);
+  if Length(LPackagePair) <> 2 then
+    raise Exception.Create('Package id should be "vendor.name"');
+
+  Result := TPath.Combine([AWorkspaceDir, '.blocks', 'repository', LPackagePair[0], LPackagePair[1], AVersion]);
 end;
 
 class function TManifest.GetVersions(const APackageName: string): TArray<TSemVer>;
@@ -1074,6 +1114,28 @@ begin
   if not Assigned(AValue) or (AValue is not TJSONObject) then
     Exit;
   FDescription := AValue.GetValue<string>('description', '');
+end;
+
+{ TManifestFetchArguments }
+
+constructor TManifestFetchArguments.Create(AValue: TJSONValue);
+begin
+  inherited;
+  if not Assigned(AValue) or (AValue is not TJSONObject) then
+    Exit;
+  FUrl := AValue.GetValue<string>('url', '');
+  FOutputFile := AValue.GetValue<string>('outputFile', '');
+end;
+
+{ TManifestCopyArguments }
+
+constructor TManifestCopyArguments.Create(AValue: TJSONValue);
+begin
+  inherited;
+  if not Assigned(AValue) or (AValue is not TJSONObject) then
+    Exit;
+  FInputFile := AValue.GetValue<string>('inputFile', '');
+  FOutputFile := AValue.GetValue<string>('outputFile', '');
 end;
 
 { TManifestRepository }

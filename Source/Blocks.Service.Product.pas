@@ -71,6 +71,7 @@ type
       FProducts: TObjectList<TProduct>;
 
     function GetRank: Integer;
+    function GetShortPackageVersionSuffix: string;
     function ExpandEnvironment(const AValue: string): string;
     function GetKnownPackageRegKey(const APlatform: string): string;
     function GetBPLFileName(const AWorkspaceDir: string; APackage: TPackageProject; const APlatform: string): string;
@@ -311,6 +312,9 @@ type
     /// <summary>Package-version suffix for this IDE (e.g. <c>370</c> for <c>delphi13</c>), the value
     ///   that replaces the <c>$(PACKAGE_VERSION)</c> placeholder.</summary>
     property PackageVersionSuffix: string read FPackageVersion;
+    /// <summary>Package-version suffix without its trailing zero (e.g. <c>37</c> for <c>delphi13</c>),
+    ///   the value that replaces the <c>$(SHORT_PACKAGE_VERSION)</c> placeholder.</summary>
+    property ShortPackageVersionSuffix: string read GetShortPackageVersionSuffix;
     /// <summary>Human-readable IDE display name (e.g. <c>Delphi 12 Athens</c>).</summary>
     property DisplayName: string read FDisplayName;
     /// <summary>Root installation directory of the IDE (e.g. <c>C:\Program Files (x86)\Embarcadero\Studio\23.0</c>).</summary>
@@ -421,6 +425,9 @@ begin
     LEnv.Values['PACKAGE'] := APackage;
     LEnv.Values['WORKSPACE_PATH'] := AWorkspaceDir;
     LEnv.Values['PROJECT_PATH'] := AProjectDir;
+    // Directory holding the manifest used for this install
+    // ({WORKSPACE_PATH}\.blocks\repository\{vendor}\{name}\{version}).
+    LEnv.Values['MANIFEST_PATH'] := TManifest.GetManifestPath(AWorkspaceDir, AManifest.Id, AManifest.Version);
     LEnv.Values['BPL_PATH'] := TPath.Combine(LBlocksDir, APlatform, 'bpl', LSuffix);
     LEnv.Values['DCP_PATH'] := TPath.Combine(LBlocksDir, APlatform, 'dcp', LSuffix);
     // DCUs live under <workspace>\.blocks\lib\<manifest name>\<Platform>[\debug].
@@ -636,6 +643,15 @@ begin
     Result := Length(VersionOrder) + Round(BdsNum * 10)
   else
     Result := Length(VersionOrder) + 9999;
+end;
+
+function TProduct.GetShortPackageVersionSuffix: string;
+begin
+  // Every package-version suffix ends in a zero (e.g. 370, 290); the "short" form
+  // drops that trailing zero (37, 29). Strip a single trailing '0' defensively.
+  Result := FPackageVersion;
+  if Result.EndsWith('0') then
+    Result := Result.Substring(0, Result.Length - 1);
 end;
 
 class procedure TProduct.LoadProducts;
@@ -1288,10 +1304,12 @@ end;
 function TProduct.ExpandPackageName(const AName: string): string;
 begin
   // Reuses the shared variable expansion ($(NAME), with the legacy %NAME% still
-  // accepted) used by manifest scripts; here only $(PACKAGE_VERSION) is exposed.
+  // accepted) used by manifest scripts; here only the package-version macros are
+  // exposed.
   var LVariables := TStringList.Create;
   try
     LVariables.Values['PACKAGE_VERSION'] := FPackageVersion;
+    LVariables.Values['SHORT_PACKAGE_VERSION'] := GetShortPackageVersionSuffix;
     Result := ExpandVariables(AName, LVariables);
   finally
     LVariables.Free;

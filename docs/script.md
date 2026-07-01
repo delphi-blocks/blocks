@@ -58,20 +58,27 @@ output paths point at the exact location that compilation used.
 | `$(CONFIG)`          | Build config, `Debug` or `Release`.                                   |
 | `$(WORKSPACE_PATH)`  | Workspace root directory.                                             |
 | `$(PROJECT_PATH)`    | Extracted project directory (`<workspace>\<package name>`).           |
+| `$(MANIFEST_PATH)`   | Directory of the manifest being installed (`<workspace>\.blocks\repository\<vendor>\<name>\<version>`). |
 | `$(BPL_PATH)`        | BPL output dir (`<workspace>\.blocks\<platform>\bpl[\debug]`).        |
 | `$(DCP_PATH)`        | DCP output dir (`<workspace>\.blocks\<platform>\dcp[\debug]`).        |
 | `$(DCU_PATH)`        | DCU output dir (`<workspace>\.blocks\lib\<name>\<platform>[\debug]`). |
 
-### Install / uninstall events (`beforeInstall`, `afterInstall`, `beforeUninstall`, `afterUninstall`)
+### Install / fetch / uninstall events (`beforeInstall`, `afterInstall`, `beforeFetchSources`, `afterFetchSources`, `beforeUninstall`, `afterUninstall`)
 
 These fire **once per manifest**. Only workspace- and project-level paths are
 meaningful at this stage:
 
 | Variable              | Value                                                              |
 |-----------------------|--------------------------------------------------------------------|
-| `$(WORKSPACE_PATH)`   | Workspace root directory.                                          |
-| `$(PROJECT_PATH)`     | Extracted project directory.                                       |
-| `$(PACKAGE_VERSION)`  | Package-version suffix of the target IDE (e.g. `370` for Delphi 13). |
+| `$(WORKSPACE_PATH)`        | Workspace root directory.                                     |
+| `$(PROJECT_PATH)`          | Extracted project directory.                                  |
+| `$(MANIFEST_PATH)`         | Directory of the manifest being installed (`<workspace>\.blocks\repository\<vendor>\<name>\<version>`). |
+| `$(PACKAGE_VERSION)`       | Package-version suffix of the target IDE (e.g. `370` for Delphi 13). |
+| `$(SHORT_PACKAGE_VERSION)` | Same suffix without its trailing zero (e.g. `37` for Delphi 13). |
+
+On `beforeFetchSources` the project directory has been cleaned but the sources
+are **not on disk yet**, so `$(PROJECT_PATH)` points at a directory that does not
+exist (or is empty) at that moment.
 
 ## Events
 
@@ -81,6 +88,8 @@ meaningful at this stage:
 | `afterCompile`    | After each package is compiled (before it is registered).            | per package      |
 | `beforeInstall`   | After dependencies are resolved, before fetching/compiling sources.  | per manifest     |
 | `afterInstall`    | After the package is registered and the local database is updated.   | per manifest     |
+| `beforeFetchSources` | Before the package sources are fetched, after the project dir is cleaned. | per manifest |
+| `afterFetchSources`  | After the package sources have been fetched into the project dir.   | per manifest     |
 | `beforeUninstall` | Before unregistering packages, while the project files still exist.  | per manifest     |
 | `afterUninstall`  | After the package has been removed from the database.                 | per manifest     |
 
@@ -93,6 +102,10 @@ Notes:
   dependency tree fires its own install/uninstall events.
 - Install/uninstall events only fire when the operation actually proceeds (for
   example, they do not fire when a package is already installed and up to date).
+- `beforeFetchSources` / `afterFetchSources` fire only when sources are actually
+  fetched: they are skipped for meta-packages (repository type `none`) and for
+  build-only installs (`build` command), which fetch nothing. They fire between
+  `beforeInstall` and `afterInstall`.
 
 ## Commands
 
@@ -107,6 +120,60 @@ string. Valid for any event.
 
 ```json
 { "event": "afterInstall", "command": "echo", "args": "Installed into $(PROJECT_PATH)" }
+```
+
+### `fetch`
+
+Downloads a file from a URL to a local destination. Valid for any event.
+
+`args` is an object:
+
+| Field        | Required | Meaning                                                          |
+|--------------|----------|------------------------------------------------------------------|
+| `url`        | yes      | URL to download. Variable-expanded.                              |
+| `outputFile` | yes      | Local file path to write to. **Variable-expanded**, so it can point at any event path (e.g. `$(PROJECT_PATH)`, `$(DCU_PATH)`). |
+
+Both fields are mandatory; an empty value (including one that expands to empty)
+raises an error. Missing output directories are created, and an existing output
+file is overwritten. Redirects are followed.
+
+```json
+{
+  "description": "Download a prebuilt resource",
+  "event": "afterCompile",
+  "command": "fetch",
+  "args": {
+    "url": "https://example.com/assets/data.bin",
+    "outputFile": "$(DCU_PATH)\\data.bin"
+  }
+}
+```
+
+### `copy`
+
+Copies a single file from one path to another. Valid for any event.
+
+`args` is an object:
+
+| Field        | Required | Meaning                                                          |
+|--------------|----------|------------------------------------------------------------------|
+| `inputFile`  | yes      | Source file path. Variable-expanded; a relative path is resolved against `$(PROJECT_PATH)`. |
+| `outputFile` | yes      | Destination file path. Variable-expanded; a relative path is resolved against `$(PROJECT_PATH)`. |
+
+Both fields are mandatory; an empty value (including one that expands to empty)
+raises an error, as does a missing `inputFile`. Missing output directories are
+created, and an existing output file is overwritten.
+
+```json
+{
+  "description": "Copy a config file next to the DCUs",
+  "event": "afterCompile",
+  "command": "copy",
+  "args": {
+    "inputFile": "Source\\settings.ini",
+    "outputFile": "$(DCU_PATH)\\settings.ini"
+  }
+}
 ```
 
 ### `copyres`

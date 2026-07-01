@@ -247,9 +247,14 @@ begin
   try
     LEnv.Values['WORKSPACE_PATH'] := AWorkspaceDir;
     LEnv.Values['PROJECT_PATH'] := AProjectDir;
+    // Directory holding the manifest used for this install
+    // ({WORKSPACE_PATH}\.blocks\repository\{vendor}\{name}\{version}).
+    LEnv.Values['MANIFEST_PATH'] := TManifest.GetManifestPath(AWorkspaceDir, AManifest.Id, AManifest.Version);
     // The package-version suffix lets scripts target .dproj names that embed it
-    // (e.g. $(PACKAGE_VERSION) in the "compile" command's path).
+    // (e.g. $(PACKAGE_VERSION) in the "compile" command's path). SHORT_PACKAGE_VERSION
+    // is the same suffix without its trailing zero (e.g. 37 instead of 370).
     LEnv.Values['PACKAGE_VERSION'] := AProduct.PackageVersionSuffix;
+    LEnv.Values['SHORT_PACKAGE_VERSION'] := AProduct.ShortPackageVersionSuffix;
     // AProduct implements IScriptHelper, giving commands like "compile" a compiler;
     // AConfig carries the tool architecture a "compile" command needs.
     TScriptRunner.RunEvent(AManifest, AEvent, LEnv, AProduct, AConfig);
@@ -662,10 +667,14 @@ begin
       TConsole.WriteLine('--- ' + AManifest.Id + ' / ' + AManifest.Name + ' ---', clWhite);
       TConsole.WriteLine('Version: ' + AManifest.Version, clCyan);
       EnsureCleanDir(LProjectDir, AOptions);
+      // beforeFetchSources scripts (the sources are not on disk yet)
+      RunManifestScripts(AManifest, TScriptRunner.EventBeforeFetchSources, WorkDir, LProjectDir, AProduct, Config);
       var LFetcher := TRepositoryFetcher.ForRepository(AManifest.Repository);
       LFetcher.FetchTo(AManifest.Repository, LProjectDir);
       TConsole.WriteLine('Project downloaded to: ' + LProjectDir, clGreen);
       TConsole.WriteLine;
+      // afterFetchSources scripts (the sources are now in LProjectDir)
+      RunManifestScripts(AManifest, TScriptRunner.EventAfterFetchSources, WorkDir, LProjectDir, AProduct, Config);
     end
     else
     begin
@@ -944,6 +953,7 @@ begin
     // package, so we cannot delete the folder wholesale: we remove only the .hpp
     // whose name matches one of this package's .dcu files.
     var LBlocksDir := TPath.Combine(WorkDir, '.blocks');
+    var LRemovedHppCount := 0;
     for var LPlatformPair in LManifest.Platforms do
     begin
       // Both build configs are compiled (release in the platform root, debug in a
@@ -969,10 +979,12 @@ begin
           if TFile.Exists(LHppFile) then
           begin
             TFile.Delete(LHppFile);
-            TConsole.WriteLine('Removed: ' + LHppFile);
+            Inc(LRemovedHppCount);
           end;
       end;
     end;
+    if LRemovedHppCount > 0 then
+      TConsole.WriteLine(Format('Removed %d generated C++ header file(s).', [LRemovedHppCount]));
 
     // Step 6.5 — Remove the package's DCU output folder (.blocks\lib\<name>).
     // RemovePackage only deletes the bpl/dcp/rsm artifacts, so the DCU tree

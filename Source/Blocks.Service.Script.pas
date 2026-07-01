@@ -245,18 +245,60 @@ type
   end;
 
   // -----------------------------------------------------------------------
+  // Built-in command: downloads the file at args.url to args.outputFile. Both are
+  // $(VAR)-expanded, so the output file can point at any event path (e.g.
+  // $(PROJECT_PATH) or $(DCU_PATH)). Missing output directories are created and
+  // an existing file is overwritten. Valid for any event.
+  // -----------------------------------------------------------------------
+  [ScriptManifest(TManifestFetchArguments)]
+  TFetchCommand = class(TScriptCommand)
+  public
+    procedure Run(
+        AHelper: IScriptHelper;
+        AManifest: TManifest;
+        AArgs: TManifestScriptArguments;
+        AEnvironmentVariables: TStrings;
+        AConfig: TConfig
+    ); override;
+  end;
+
+  // -----------------------------------------------------------------------
+  // Built-in command: copies args.inputFile to args.outputFile. Both are
+  // $(VAR)-expanded, so either can point at any event path (e.g. $(PROJECT_PATH)
+  // or $(DCU_PATH)). A relative inputFile/outputFile is resolved against
+  // $(PROJECT_PATH) when that variable is set. Missing output directories are
+  // created and an existing file is overwritten. Valid for any event.
+  // -----------------------------------------------------------------------
+  [ScriptManifest(TManifestCopyArguments)]
+  TCopyCommand = class(TScriptCommand)
+  public
+    procedure Run(
+        AHelper: IScriptHelper;
+        AManifest: TManifest;
+        AArgs: TManifestScriptArguments;
+        AEnvironmentVariables: TStrings;
+        AConfig: TConfig
+    ); override;
+  end;
+
+  // -----------------------------------------------------------------------
   // Runs manifest scripts by resolving each one to a registered TScriptCommand
   // -----------------------------------------------------------------------
   TScriptRunner = class
   public
     const
       // Lifecycle events a manifest script can hook into. Compile events fire once
-      // per package (per platform/config); install/uninstall events fire once per
-      // manifest.
+      // per package (per platform/config); install/uninstall and fetch-sources
+      // events fire once per manifest.
       EventBeforeCompile = 'beforeCompile';
       EventAfterCompile = 'afterCompile';
       EventBeforeInstall = 'beforeInstall';
       EventAfterInstall = 'afterInstall';
+      // Fire around fetching the package sources (download/copy/clone/export).
+      // They do not fire for meta-packages or build-only installs, which fetch
+      // nothing. On beforeFetchSources $(PROJECT_PATH) does not exist yet.
+      EventBeforeFetchSources = 'beforeFetchSources';
+      EventAfterFetchSources = 'afterFetchSources';
       EventBeforeUninstall = 'beforeUninstall';
       EventAfterUninstall = 'afterUninstall';
   public
@@ -302,6 +344,7 @@ implementation
 uses
   System.IOUtils,
   Blocks.Core,
+  Blocks.Http,
   Blocks.Console;
 
 { TCompilerOptions }
@@ -520,10 +563,7 @@ begin
         LWorkspace,
         AManifest.Name,
         LProjectFile,
-        TCompilerOptions.New
-          .SetConfig(LConfig)
-          .SetPlatform(LPlatform)
-          .SetToolArchitecture(LToolArch)
+        TCompilerOptions.New.SetConfig(LConfig).SetPlatform(LPlatform).SetToolArchitecture(LToolArch)
     );
     TConsole.WriteLine(' OK', clGreen);
     LCompiled := True;
@@ -610,6 +650,75 @@ begin
   end;
 end;
 
+{ TFetchCommand }
+
+procedure TFetchCommand.Run(
+    AHelper: IScriptHelper;
+    AManifest: TManifest;
+    AArgs: TManifestScriptArguments;
+    AEnvironmentVariables: TStrings;
+    AConfig: TConfig
+);
+begin
+  var LFetchArgs := AArgs.GetAs<TManifestFetchArguments>;
+
+  var LUrl := ExpandVariables(LFetchArgs.Url, AEnvironmentVariables);
+  if LUrl = '' then
+    raise EScriptError.Create('fetch: missing url argument');
+
+  var LOutputFile := ExpandVariables(LFetchArgs.OutputFile, AEnvironmentVariables);
+  if LOutputFile = '' then
+    raise EScriptError.Create('fetch: missing outputFile argument');
+
+  // Make sure the target directory exists; DownloadFile creates the file itself.
+  var LOutputDir := TPath.GetDirectoryName(LOutputFile);
+  if (LOutputDir <> '') and not TDirectory.Exists(LOutputDir) then
+    TDirectory.CreateDirectory(LOutputDir);
+
+  TConsole.WriteLine(Format('  Fetching %s', [LUrl]), clCyan);
+  THttpUtils.DownloadFile(LUrl, LOutputFile);
+end;
+
+{ TCopyCommand }
+
+procedure TCopyCommand.Run(
+    AHelper: IScriptHelper;
+    AManifest: TManifest;
+    AArgs: TManifestScriptArguments;
+    AEnvironmentVariables: TStrings;
+    AConfig: TConfig
+);
+begin
+  var LCopyArgs := AArgs.GetAs<TManifestCopyArguments>;
+
+  var LInputFile := ExpandVariables(LCopyArgs.InputFile, AEnvironmentVariables);
+  if LInputFile = '' then
+    raise EScriptError.Create('copy: missing inputFile argument');
+
+  var LOutputFile := ExpandVariables(LCopyArgs.OutputFile, AEnvironmentVariables);
+  if LOutputFile = '' then
+    raise EScriptError.Create('copy: missing outputFile argument');
+
+  // Relative paths are resolved against the extracted project directory, exposed
+  // as $(PROJECT_PATH) for install/fetch events. Absolute paths are used as given.
+  var LProjectPath := AEnvironmentVariables.Values['PROJECT_PATH'];
+  if (LProjectPath <> '') and TPath.IsRelativePath(LInputFile) then
+    LInputFile := TPath.Combine(LProjectPath, LInputFile);
+  if (LProjectPath <> '') and TPath.IsRelativePath(LOutputFile) then
+    LOutputFile := TPath.Combine(LProjectPath, LOutputFile);
+
+  if not TFile.Exists(LInputFile) then
+    raise EScriptError.CreateFmt('copy: input file not found: "%s"', [LInputFile]);
+
+  // Make sure the target directory exists; TFile.Copy does not create it.
+  var LOutputDir := TPath.GetDirectoryName(LOutputFile);
+  if (LOutputDir <> '') and not TDirectory.Exists(LOutputDir) then
+    TDirectory.CreateDirectory(LOutputDir);
+
+  TConsole.WriteLine(Format('  Copying %s', [TPath.GetFileName(LInputFile)]), clCyan);
+  TFile.Copy(LInputFile, LOutputFile, True);
+end;
+
 { TScriptRunner }
 
 class procedure TScriptRunner.Execute(
@@ -649,6 +758,8 @@ end;
 procedure RegisterScripts;
 begin
   TScriptCommand.RegisterCommand('echo', TEchoCommand);
+  TScriptCommand.RegisterCommand('fetch', TFetchCommand);
+  TScriptCommand.RegisterCommand('copy', TCopyCommand);
   TScriptCommand.RegisterCommand('copyres', TCopyResCommand, [TScriptRunner.EventAfterCompile]);
   TScriptCommand
       .RegisterCommand('compile', TCompileCommand, [TScriptRunner.EventBeforeInstall, TScriptRunner.EventAfterInstall]);
