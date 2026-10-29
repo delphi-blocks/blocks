@@ -253,6 +253,29 @@ Examples:
   Blocks init /product delphi13 /platforms Win32,Win64
 ```
 
+### One workspace per Delphi profile
+
+A Delphi registry profile (a version plus a registry key, e.g. `delphi13:BDS`) has
+a single library path and PATH, so it must be used by one workspace only.
+`init` records the workspace as the owner of its profile under
+`HKCU\Software\Blocks\Workspaces` (value name `delphi13:BDS`, value data the
+workspace directory). The check also runs on every command that needs a
+workspace, so existing workspaces are registered the first time they are used.
+
+When the profile is already owned by **another existing workspace**, blocks asks
+what to do:
+
+1. **Cancel** the operation (the default, also when no answer is given).
+2. **Replace** the owner with the current directory. If the other workspace still
+   has installed packages they are listed and a confirmation is required: their
+   library paths stay registered in the IDE and may conflict with this workspace,
+   so uninstalling them first is safer.
+3. **Move** to the owner workspace and continue the command there.
+4. **Ignore** the conflict and continue (not recommended).
+
+An owner directory that is no longer a workspace (deleted or moved) is replaced
+silently.
+
 ## List
 
 Lists all packages installed in the current workspace. The Delphi version is read from the workspace configuration (set during init).

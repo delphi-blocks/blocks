@@ -43,6 +43,16 @@ type
   TWorkspaceOption = (woOverwrite, woBuildOnly, woSilent, woForce);
   TWorkspaceOptions = set of TWorkspaceOption;
 
+  /// <summary>Outcome of checking which workspace owns a Delphi registry profile.</summary>
+  /// <remarks>
+  ///   <c>poClaim</c>: the profile is free (or its owner is gone, or the user chose to replace
+  ///   it): the current workspace must be registered as its owner.
+  ///   <c>poOwned</c>: the current workspace is already the registered owner.
+  ///   <c>poIgnore</c>: another workspace owns it and the user chose to go on anyway.
+  ///   <c>poSwitched</c>: <see cref="TWorkspace.WorkDir"/> now points at the owner workspace.
+  /// </remarks>
+  TProfileOwnership = (poClaim, poOwned, poIgnore, poSwitched);
+
   TWorkspace = class
   private
     class var
@@ -53,6 +63,15 @@ type
     class function GetWorkDir: string; static;
     class function GetBlocksDir: string; static;
     class procedure SetWorkDir(const AValue: string); static;
+    /// <summary>Moves to another workspace, dropping the cached config and database.</summary>
+    class procedure SwitchWorkDir(const AWorkDir: string); static;
+    /// <summary>Checks which workspace owns the Delphi profile <c>AProduct:ARegistryKey</c>
+    ///   and, when it is another existing workspace, asks the user what to do.</summary>
+    /// <exception cref="Exception">Raised when the user cancels the operation.</exception>
+    class function ResolveProfileOwner(const AProduct, ARegistryKey: string): TProfileOwnership; static;
+    /// <summary>Before the profile is taken from <paramref name="AOwnerDir"/>, warns about the
+    ///   packages still installed there and asks for confirmation.</summary>
+    class procedure ConfirmProfileReplace(const AOwnerDir: string); static;
 
     class function GetConfig: TConfig; static;
     class function GetDatabase: TDatabase; static;
@@ -103,18 +122,35 @@ type
     ///   Delphi version is chosen interactively, the user is prompted to pick a subset).</param>
     /// <remarks>
     ///   Performs the following steps in order:
-    ///   1. Sets <see cref="WorkDir"/> to <c>AWorkDir</c> and creates <see cref="BlocksDir"/> if absent.
-    ///   2. Selects the target Delphi version and persists it in the workspace configuration.
+    ///   1. Sets <see cref="WorkDir"/> to <c>AWorkDir</c>.
+    ///   2. Selects the target Delphi version, creates <see cref="BlocksDir"/> if absent and
+    ///      persists the version in the workspace configuration.
     ///   3. Downloads the package repository archive from the canonical GitHub source
     ///      (<see cref="BlocksRepositoryUrl"/>).
     ///   4. Extracts the archive and installs <c>repository\</c> under <see cref="BlocksDir"/>.
     ///   Prompts the user before overwriting an existing repository folder.
+    ///   Once the Delphi version is known, and before anything is written, checks that no
+    ///   other workspace owns its registry profile (see <see cref="CheckProfileOwner"/>);
+    ///   on success the workspace is registered as the owner of the profile.
     /// </remarks>
-    class procedure Initialize(
+    /// <returns><c>False</c> when the user chose to move to the workspace that already owns
+    ///   the profile: nothing is created in <c>AWorkDir</c> and <see cref="WorkDir"/> points at
+    ///   that workspace. <c>True</c> when <c>AWorkDir</c> has been initialised.</returns>
+    class function Initialize(
         const AWorkDir, AProduct, ARegistryKey: string;
         const ASources: string = '';
         const APlatforms: string = ''
-    ); static;
+    ): Boolean; static;
+
+    /// <summary>Checks that the current workspace owns the registry profile of its Delphi
+    ///   version, registering it when the profile is free.</summary>
+    /// <remarks>A Delphi registry profile (<c>product:registrykey</c>) has a single library
+    ///   path and PATH, so it must be used by one workspace only. The owners are recorded under
+    ///   <c>HKCU\Software\Blocks\Workspaces</c>. When another existing workspace owns the
+    ///   profile the user can cancel, take the profile over, move to that workspace (changing
+    ///   <see cref="WorkDir"/>) or ignore the conflict.</remarks>
+    /// <exception cref="Exception">Raised when the user cancels the operation.</exception>
+    class procedure CheckProfileOwner; static;
 
     /// <summary>Refreshes the local repository cache by re-downloading the package list.</summary>
     class procedure UpdateRepositoryCache(const AWorkDir: string); static;
@@ -175,7 +211,20 @@ uses
   Blocks.GitHub,
   Blocks.Service.Fetcher,
   Blocks.Service.Script,
-  Blocks.Model.Package;
+  Blocks.Model.Package,
+  Blocks.Model.SysConfig;
+
+// Name under which the owner of a Delphi registry profile is recorded, e.g. "delphi13:BDS".
+function ProfileName(const AProduct, ARegistryKey: string): string;
+begin
+  Result := AProduct + ':' + ARegistryKey;
+end;
+
+// Canonical form of a workspace directory, so "C:\Work" and "c:\work\" compare equal.
+function NormalizeDir(const ADir: string): string;
+begin
+  Result := ExcludeTrailingPathDelimiter(ExpandFileName(ADir));
+end;
 
 procedure NormalizePath(var APaths: TArray<string>; const ABasePath: string; AEnvironmentVariable: TStrings);
 begin
@@ -321,6 +370,110 @@ begin
   FWorkDir := ExcludeTrailingPathDelimiter(AValue);
 end;
 
+class procedure TWorkspace.SwitchWorkDir(const AWorkDir: string);
+begin
+  FreeAndNil(FConfig);
+  FreeAndNil(FDatabase);
+  SetWorkDir(AWorkDir);
+end;
+
+class function TWorkspace.ResolveProfileOwner(const AProduct, ARegistryKey: string): TProfileOwnership;
+begin
+  var LProfile := ProfileName(AProduct, ARegistryKey);
+  var LOwnerDir := TSystemConfig.GetWorkspacePath(LProfile);
+  if LOwnerDir = '' then
+    Exit(poClaim);
+
+  if SameText(NormalizeDir(LOwnerDir), NormalizeDir(WorkDir)) then
+    Exit(poOwned);
+
+  // An owner that is no longer a workspace (deleted or moved) is a stale entry:
+  // take the profile over without bothering the user.
+  if not TFile.Exists(TPath.Combine(LOwnerDir, '.blocks\workspace.json')) then
+  begin
+    TConsole.WriteLine(
+        Format('The workspace registered for "%s" no longer exists (%s): replacing it.', [LProfile, LOwnerDir]),
+        clYellow
+    );
+    Exit(poClaim);
+  end;
+
+  TConsole.WriteLine;
+  TConsole.WriteWarning(Format('Delphi profile "%s" is already used by another workspace:', [LProfile]));
+  TConsole.WriteLine('  ' + LOwnerDir, clYellow);
+  TConsole.WriteLine('Workspaces sharing a profile overwrite each other''s library paths in the IDE.', clYellow);
+  TConsole.WriteLine;
+  TConsole.WriteLine('  [1] Cancel the operation');
+  TConsole.WriteLine('  [2] Replace it with the current directory');
+  TConsole.WriteLine('  [3] Move to that workspace and continue there');
+  TConsole.WriteLine('  [4] Ignore and continue (not recommended)');
+  TConsole.WriteLine;
+  TConsole.Write('Select [1-4] (default: 1): ');
+  var LChoice := Trim(TConsole.ReadLine);
+
+  if LChoice = '2' then
+  begin
+    ConfirmProfileReplace(LOwnerDir);
+    Exit(poClaim);
+  end;
+
+  if LChoice = '3' then
+  begin
+    SwitchWorkDir(LOwnerDir);
+    TConsole.WriteLine('Using workspace: ' + LOwnerDir, clGreen);
+    TConsole.WriteLine;
+    Exit(poSwitched);
+  end;
+
+  if LChoice = '4' then
+    Exit(poIgnore);
+
+  raise Exception.Create('Operation cancelled by user.');
+end;
+
+class procedure TWorkspace.ConfirmProfileReplace(const AOwnerDir: string);
+begin
+  var LBlocksDir := TPath.Combine(AOwnerDir, '.blocks');
+  // Loading a missing database would create it: only read an existing one.
+  if not TFile.Exists(TPath.Combine(LBlocksDir, 'database.json')) then
+    Exit;
+
+  var LDatabase := TDatabase.Create(LBlocksDir);
+  try
+    LDatabase.Load;
+    var LEntries := LDatabase.ListEntries;
+    if Length(LEntries) = 0 then
+      Exit;
+
+    TConsole.WriteLine;
+    TConsole.WriteWarning(Format('The workspace "%s" still has %d installed package(s):', [AOwnerDir, Length(LEntries)]));
+    for var LEntry in LEntries do
+      TConsole.WriteLine('  ' + LEntry, clYellow);
+    TConsole.WriteLine('Their library paths and packages stay registered in the IDE and may conflict', clYellow);
+    TConsole.WriteLine('with this workspace. Uninstalling them from that workspace first is safer.', clYellow);
+    TConsole.WriteLine;
+    TConsole.Write('Replace anyway? [Y/N] (default: N): ');
+    if not SameText(Trim(TConsole.ReadLine), 'Y') then
+      raise Exception.Create('Operation cancelled by user.');
+  finally
+    LDatabase.Free;
+  end;
+end;
+
+class procedure TWorkspace.CheckProfileOwner;
+begin
+  // A workspace without a Delphi version has no profile to claim yet.
+  if Config.Product = '' then
+    Exit;
+
+  var LProduct := Config.Product;
+  var LRegistryKey :=
+      if Config.RegistryKey = '' then 'BDS'
+      else Config.RegistryKey;
+  if ResolveProfileOwner(LProduct, LRegistryKey) = poClaim then
+    TSystemConfig.SetWorkspacePath(ProfileName(LProduct, LRegistryKey), NormalizeDir(WorkDir));
+end;
+
 class function TWorkspace.ResolvePackageId(const AArg: string; ASilent: Boolean): string;
 begin
   if AArg.Contains('.') then
@@ -379,19 +532,13 @@ begin
   end;
 end;
 
-class procedure TWorkspace.Initialize(
+class function TWorkspace.Initialize(
     const AWorkDir, AProduct, ARegistryKey: string;
     const ASources: string;
     const APlatforms: string
-);
+): Boolean;
 begin
   SetWorkDir(AWorkDir);
-
-  if not TDirectory.Exists(GetBlocksDir) then
-  begin
-    TDirectory.CreateDirectory(GetBlocksDir);
-    TConsole.WriteLine('Created: ' + GetBlocksDir, clGreen);
-  end;
 
   if ASources <> '' then
     Config.SetValue('sources', ASources);
@@ -418,6 +565,19 @@ begin
             if LRegistryKey = '' then 'BDS'
             else LRegistryKey
         );
+
+  // The profile check comes before anything is written, so cancelling (or moving to
+  // the owner workspace) leaves this directory untouched.
+  var LOwnership := ResolveProfileOwner(LSelectedProduct.VersionName, LSelectedProduct.RegistryKey);
+  if LOwnership = poSwitched then
+    Exit(False);
+
+  if not TDirectory.Exists(GetBlocksDir) then
+  begin
+    TDirectory.CreateDirectory(GetBlocksDir);
+    TConsole.WriteLine('Created: ' + GetBlocksDir, clGreen);
+  end;
+
   Config.Product := LSelectedProduct.VersionName;
   Config.RegistryKey := LSelectedProduct.RegistryKey;
   TConsole.WriteLine('Selected version: ' + LSelectedProduct.DisplayName, clGreen);
@@ -472,6 +632,14 @@ begin
 
   Config.Save;
   Database.TouchRepository;
+
+  // Registered last, so a failed initialisation does not claim the profile.
+  if LOwnership = poClaim then
+    TSystemConfig.SetWorkspacePath(
+        ProfileName(LSelectedProduct.VersionName, LSelectedProduct.RegistryKey),
+        NormalizeDir(AWorkDir)
+    );
+  Result := True;
 end;
 
 class procedure TWorkspace.RebuildIndex;

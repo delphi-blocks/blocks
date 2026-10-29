@@ -12,12 +12,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-Source code is under `Source/`. To compile any `.dproj` (the main app, the launcher, or the test project) **use the `DelphiServer` MCP server** (`mcp__DelphiServer__compile`) — do not run the `BuildRelease.bat` / `run-tests.bat` batch files. Use `mcp__DelphiServer__list_products` if you need to discover the installed Delphi version.
+Source code is under `Source/`. To compile any `.dproj` (the main app, the launcher, or the test project) **use the `delphi-server` MCP server** (`mcp__delphi-server__compile`) — do not run the `BuildRelease.bat` / `run-tests.bat` batch files. Use `mcp__delphi-server__list_products` if you need to discover the installed Delphi version.
 
 Example — compile the main app:
 
 ```
-mcp__DelphiServer__compile(
+mcp__delphi-server__compile(
   product="delphi13",
   projectFileName="c:\\Progetti\\DelphiBlocks\\Source\\Blocks.dproj",
   config="Release",
@@ -51,7 +51,7 @@ The project uses `pasfmt` with `begin_style = "always_wrap"` and `line_ending = 
 | `Blocks.Service.Product.pas` | Detects installed Delphi versions (registry scan), runs MSBuild to compile packages, updates Delphi library search paths in the registry |
 | `Blocks.Model.Manifest.pas` | Parses `.manifest.json` files; resolves the best package-folder for the active Delphi version |
 | `Blocks.Model.Package.pas` | `.dproj` loader; reads MSBuild properties (`LibSuffix`, `DCC_DcuOutput`, ...) |
-| `Blocks.Model.Database.pas` | Per-workspace, per-Delphi-version JSON file (`.blocks/{version}-database.json`) tracking installed packages as `owner.pkg@version` |
+| `Blocks.Model.Database.pas` | Per-workspace JSON file (`.blocks/database.json`) tracking installed packages as `owner.pkg@version` |
 | `Blocks.Model.Config.pas` | Workspace configuration (sources, target platforms, target Delphi version, registry key) persisted as `.blocks/workspace.json`. Empty `platforms` = all supported platforms; `IsPlatformEnabled` is the install/uninstall filter |
 | `Blocks.Model.SysConfig.pas` | System-level configuration stored in the Windows registry |
 | `Blocks.Http.pas` | Thin wrapper over `System.Net.HttpClient`; downloads with progress reporting |
@@ -64,7 +64,7 @@ The project uses `pasfmt` with `begin_style = "always_wrap"` and `line_ending = 
 ### Data files at runtime
 
 - `.blocks/repository/{owner}/{package}.json` — manifest files (downloaded from GitHub)
-- `.blocks/{version}-database.json` — local record of what is installed
+- `.blocks/database.json` — local record of what is installed
 
 ### Package manifest JSON shape
 

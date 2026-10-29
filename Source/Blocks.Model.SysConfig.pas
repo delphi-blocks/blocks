@@ -22,6 +22,7 @@ type
       AutoUpdateKey = 'AutoUpdate';
       GitPathKey = 'GitPath';
       SvnPathKey = 'SvnPath';
+      WorkspacesRegistryKey = DefaultRegistryKey + '\Workspaces';
     class function GetValue(const AKey: string): string; static;
     class procedure SetValue(const AKey, AValue: string); static;
     class procedure Add(const AKey, AValue: string); static;
@@ -35,6 +36,15 @@ type
     /// <summary>Full path to <c>svn.exe</c> when configured, otherwise <c>svn</c>
     ///   (resolved through the PATH).</summary>
     class function SvnExecutable: string; static;
+
+    /// <summary>Directory of the workspace registered as the owner of a Delphi
+    ///   registry profile, or an empty string when none is.</summary>
+    /// <param name="AProfile">Profile name, <c>product:registrykey</c> (e.g. <c>delphi13:BDS</c>).</param>
+    class function GetWorkspacePath(const AProfile: string): string; static;
+
+    /// <summary>Registers <paramref name="APath"/> as the workspace owning the Delphi
+    ///   registry profile <paramref name="AProfile"/>, replacing any previous owner.</summary>
+    class procedure SetWorkspacePath(const AProfile, APath: string); static;
 
     class property AutoUpdate: Boolean read GetAutoUpdate;
     class property InstallPath: string read GetInstallPath;
@@ -166,6 +176,30 @@ begin
   Result := GetSvnPath;
   if Result = '' then
     Result := 'svn';
+end;
+
+class function TSystemConfig.GetWorkspacePath(const AProfile: string): string;
+begin
+  Result := '';
+  var LReg := TRegistry.Create;
+  try
+    if LReg.OpenKeyReadOnly(WorkspacesRegistryKey) and LReg.ValueExists(AProfile) then
+      Result := LReg.ReadString(AProfile);
+  finally
+    LReg.Free;
+  end;
+end;
+
+class procedure TSystemConfig.SetWorkspacePath(const AProfile, APath: string);
+begin
+  var LReg := TRegistry.Create;
+  try
+    if not LReg.OpenKey(WorkspacesRegistryKey, True) then
+      raise Exception.Create('Unable to open the Blocks workspaces registry key');
+    LReg.WriteString(AProfile, APath);
+  finally
+    LReg.Free;
+  end;
 end;
 
 class procedure TSystemConfig.SetValue(const AKey, AValue: string);

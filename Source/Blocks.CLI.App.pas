@@ -538,15 +538,22 @@ begin
   ShowBanner('', '');
   if TWorkspace.Exists then
   begin
-    TWorkspace.UpdateRepositoryCache(GetCurrentDir);
+    // May move to the workspace owning the Delphi profile: refresh that one.
+    TWorkspace.CheckProfileOwner;
+    TWorkspace.UpdateRepositoryCache(TWorkspace.WorkDir);
   end
   else
   begin
     TConsole.WriteLine('Initialising workspace: ' + GetCurrentDir, clWhite);
     TConsole.WriteLine;
-    TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey, FSource, FPlatforms);
-    TConsole.WriteLine('Workspace initialised.', clGreen);
-    TConsole.WriteLine;
+    if TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey, FSource, FPlatforms) then
+    begin
+      TConsole.WriteLine('Workspace initialised.', clGreen);
+      TConsole.WriteLine;
+    end
+    else
+      // The user moved to the workspace that owns the profile: "init" there is a refresh.
+      TWorkspace.UpdateRepositoryCache(TWorkspace.WorkDir);
   end;
   // Once a day, check GitHub for a newer blocks release and suggest "upgrade".
   if TSystemConfig.AutoUpdate and TWorkspace.Database.IsReleaseCheckStale(1) then
@@ -1007,9 +1014,13 @@ begin
     var Confirm := TConsole.ReadLine;
     if not SameText(Trim(Confirm), 'Y') then
       raise Exception.Create('Operation cancelled. Run "blocks Init" to initialise the workspace first.');
+    // When the user moves to the workspace owning the Delphi profile, the command
+    // simply goes on there: that workspace is already initialised.
     TWorkspace.Initialize(TWorkspace.WorkDir, '', '');
     TConsole.WriteLine;
-  end;
+  end
+  else
+    TWorkspace.CheckProfileOwner;
 
   // Refresh the repository list when it has not been updated for more than a day.
   if TWorkspace.Database.IsRepositoryStale(1) then

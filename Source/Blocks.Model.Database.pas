@@ -110,7 +110,11 @@ type
     /// <summary>Save the package database to systems.</summary>
     procedure Save;
 
-    constructor Create;
+    /// <summary>Database of the current workspace (<c>TWorkspace.BlocksDir</c>).</summary>
+    constructor Create; overload;
+    /// <summary>Database stored in <paramref name="ABlocksDir"/>, e.g. to inspect
+    ///   another workspace.</summary>
+    constructor Create(const ABlocksDir: string); overload;
     destructor Destroy; override;
   end;
 
@@ -222,9 +226,14 @@ end;
 
 constructor TDatabase.Create;
 begin
-  inherited;
+  Create(TWorkspace.BlocksDir);
+end;
+
+constructor TDatabase.Create(const ABlocksDir: string);
+begin
+  inherited Create;
   FPackages := TObjectDictionary<string, TInstalledPackage>.Create([doOwnsValues]);
-  FDatabasePath := TPath.Combine(TWorkspace.BlocksDir, 'database.json')
+  FDatabasePath := TPath.Combine(ABlocksDir, 'database.json')
 end;
 
 destructor TDatabase.Destroy;
