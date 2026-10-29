@@ -119,6 +119,8 @@ type
     [Test]
     procedure TestToJSON_OmitsEmptyDescriptionAndMissingArgs;
     [Test]
+    procedure TestFilterRoundTrips;
+    [Test]
     procedure TestFromJSONString_EchoArgsParsed;
     [Test]
     procedure TestFromJSONString_CompileArgsMissingPlatformsRaises;
@@ -826,6 +828,34 @@ begin
       Assert.AreEqual('afterInstall', LJSON.GetValue<string>('event'), 'event');
       Assert.IsNull(LJSON.FindValue('description'), 'empty description is omitted');
       Assert.IsNull(LJSON.FindValue('args'), 'missing args is omitted');
+      Assert.IsNull(LJSON.FindValue('filter'), 'empty filter is omitted');
+    finally
+      LJSON.Free;
+    end;
+  finally
+    LScript.Free;
+  end;
+end;
+
+procedure TManifestScriptJSONTest.TestFilterRoundTrips;
+begin
+  var LScript := TManifestScript.Create;
+  try
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "echo",
+          "event": "afterCompile",
+          "filter": "$(PLATFORM) = 'Win32'",
+          "args": "hi"
+        }
+        '''
+    );
+    Assert.AreEqual('$(PLATFORM) = ''Win32''', LScript.Filter, 'filter is read from the manifest');
+
+    var LJSON := LScript.ToJSON as TJSONObject;
+    try
+      Assert.AreEqual('$(PLATFORM) = ''Win32''', LJSON.GetValue<string>('filter'), 'filter is written back');
     finally
       LJSON.Free;
     end;

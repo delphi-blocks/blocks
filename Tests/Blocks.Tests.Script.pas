@@ -77,6 +77,28 @@ type
     procedure TestCopyMissingInputFileRaises;
     [Test]
     procedure TestCopyMissingOutputFileRaises;
+    [Test]
+    procedure TestCopyCopiesFileWithSourceAndTarget;
+    [Test]
+    procedure TestCopyDirectoryNonRecursive;
+    [Test]
+    procedure TestCopyDirectoryRecursive;
+    [Test]
+    procedure TestFilterTrueRunsTheScript;
+    [Test]
+    procedure TestFilterFalseSkipsTheScript;
+    [Test]
+    procedure TestFilterComparisonIsCaseSensitive;
+    [Test]
+    procedure TestFilterCombinesOperators;
+    [Test]
+    procedure TestFilterUnknownVariableIsEmptyString;
+    [Test]
+    procedure TestMissingFilterRunsTheScript;
+    [Test]
+    procedure TestFilterFalseSkipsUnknownCommand;
+    [Test]
+    procedure TestInvalidFilterRaises;
   end;
 
 implementation
@@ -470,6 +492,238 @@ begin
         }
         '''
     );
+    Assert.WillRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end, EScriptError);
+  finally
+    LEnv.Free;
+    LScript.Free;
+  end;
+end;
+
+procedure TScriptRunnerTest.TestCopyCopiesFileWithSourceAndTarget;
+begin
+  var LRoot := TPath.Combine(TPath.GetTempPath, 'blocks_copy_' + TGUID.NewGuid.ToString);
+  TDirectory.CreateDirectory(LRoot);
+  try
+    TFile.WriteAllText(TPath.Combine(LRoot, 'in.txt'), 'hello');
+
+    var LScript := TManifestScript.Create;
+    var LEnv := TStringList.Create;
+    try
+      LScript.FromJSONString(
+          '''
+          {
+            "command": "copy",
+            "event": "afterCompile",
+            "args": { "source": "in.txt", "target": "sub\\out.txt" }
+          }
+          '''
+      );
+      LEnv.Values['PROJECT_PATH'] := LRoot;
+
+      TScriptRunner.Execute(FManifest, LScript, LEnv);
+
+      var LOut := TPath.Combine(LRoot, TPath.Combine('sub', 'out.txt'));
+      Assert.IsTrue(TFile.Exists(LOut), 'output file should be created (with missing dir)');
+      Assert.AreEqual('hello', TFile.ReadAllText(LOut), 'content should match the source');
+    finally
+      LEnv.Free;
+      LScript.Free;
+    end;
+  finally
+    TDirectory.Delete(LRoot, True);
+  end;
+end;
+
+procedure TScriptRunnerTest.TestCopyDirectoryNonRecursive;
+begin
+  var LRoot := TPath.Combine(TPath.GetTempPath, 'blocks_copy_' + TGUID.NewGuid.ToString);
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, TPath.Combine('src', 'nested')));
+  try
+    TFile.WriteAllText(TPath.Combine(LRoot, TPath.Combine('src', 'a.inc')), 'a');
+    TFile.WriteAllText(TPath.Combine(LRoot, TPath.Combine('src', TPath.Combine('nested', 'b.inc'))), 'b');
+
+    var LScript := TManifestScript.Create;
+    var LEnv := TStringList.Create;
+    try
+      LScript.FromJSONString(
+          '''
+          {
+            "command": "copy",
+            "event": "afterCompile",
+            "args": { "source": "src", "target": "dst" }
+          }
+          '''
+      );
+      LEnv.Values['PROJECT_PATH'] := LRoot;
+
+      TScriptRunner.Execute(FManifest, LScript, LEnv);
+
+      var LDst := TPath.Combine(LRoot, 'dst');
+      Assert.IsTrue(TFile.Exists(TPath.Combine(LDst, 'a.inc')), 'top-level file should be copied');
+      Assert.AreEqual('a', TFile.ReadAllText(TPath.Combine(LDst, 'a.inc')), 'content should match the source');
+      Assert.IsFalse(
+          TDirectory.Exists(TPath.Combine(LDst, 'nested')),
+          'sub-directories should be skipped without "recursive"'
+      );
+    finally
+      LEnv.Free;
+      LScript.Free;
+    end;
+  finally
+    TDirectory.Delete(LRoot, True);
+  end;
+end;
+
+procedure TScriptRunnerTest.TestCopyDirectoryRecursive;
+begin
+  var LRoot := TPath.Combine(TPath.GetTempPath, 'blocks_copy_' + TGUID.NewGuid.ToString);
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, TPath.Combine('src', 'nested')));
+  try
+    TFile.WriteAllText(TPath.Combine(LRoot, TPath.Combine('src', 'a.inc')), 'a');
+    TFile.WriteAllText(TPath.Combine(LRoot, TPath.Combine('src', TPath.Combine('nested', 'b.inc'))), 'b');
+
+    var LScript := TManifestScript.Create;
+    var LEnv := TStringList.Create;
+    try
+      LScript.FromJSONString(
+          '''
+          {
+            "command": "copy",
+            "event": "afterCompile",
+            "args": { "source": "src", "target": "dst", "recursive": true }
+          }
+          '''
+      );
+      LEnv.Values['PROJECT_PATH'] := LRoot;
+
+      TScriptRunner.Execute(FManifest, LScript, LEnv);
+
+      var LDst := TPath.Combine(LRoot, 'dst');
+      Assert.IsTrue(TFile.Exists(TPath.Combine(LDst, 'a.inc')), 'top-level file should be copied');
+      var LNested := TPath.Combine(LDst, TPath.Combine('nested', 'b.inc'));
+      Assert.IsTrue(TFile.Exists(LNested), 'nested file should be copied with "recursive"');
+      Assert.AreEqual('b', TFile.ReadAllText(LNested), 'nested content should match the source');
+    finally
+      LEnv.Free;
+      LScript.Free;
+    end;
+  finally
+    TDirectory.Delete(LRoot, True);
+  end;
+end;
+
+// Runs the 'fake' command with AFilter and the Win32/Release compile variables,
+// returning what the command recorded ('' when the filter skipped the script).
+function RunFiltered(AManifest: TManifest; const AFilter: string): string;
+begin
+  TScriptCommand.RegisterCommand('fake', TFakeCommand);
+  TFakeCommand.LastArgs := '';
+
+  var LScript := TManifestScript.Create;
+  var LEnv := TStringList.Create;
+  try
+    LScript.FromJSONString(
+        '''
+        {
+          "command": "fake",
+          "args": "ran",
+          "event": "afterCompile"
+        }
+        '''
+    );
+    LScript.Filter := AFilter;
+
+    LEnv.Values['PLATFORM'] := 'Win32';
+    LEnv.Values['CONFIG'] := 'Release';
+    LEnv.Values['PACKAGE'] := 'JclVcl';
+
+    TScriptRunner.Execute(AManifest, LScript, LEnv);
+    Result := TFakeCommand.LastArgs;
+  finally
+    LEnv.Free;
+    LScript.Free;
+  end;
+end;
+
+procedure TScriptRunnerTest.TestFilterTrueRunsTheScript;
+begin
+  Assert.AreEqual('ran', RunFiltered(FManifest, '$(PLATFORM) = ''Win32'''), 'matching filter should run the script');
+end;
+
+procedure TScriptRunnerTest.TestFilterFalseSkipsTheScript;
+begin
+  Assert.AreEqual('', RunFiltered(FManifest, '$(PLATFORM) = ''Win64'''), 'non-matching filter should skip the script');
+end;
+
+procedure TScriptRunnerTest.TestFilterComparisonIsCaseSensitive;
+begin
+  // String comparisons are delegated to the bindings evaluator; docs/script.md
+  // promises they are case-sensitive.
+  Assert.AreEqual('ran', RunFiltered(FManifest, '$(PLATFORM) = ''Win32'''), 'exact casing should match');
+  Assert.AreEqual('', RunFiltered(FManifest, '$(PLATFORM) = ''win32'''), 'lower-case literal should not match');
+  Assert.AreEqual('', RunFiltered(FManifest, '$(PLATFORM) = ''WIN32'''), 'upper-case literal should not match');
+  Assert.AreEqual('ran', RunFiltered(FManifest, '$(PLATFORM) <> ''win32'''), 'different casing should compare unequal');
+end;
+
+procedure TScriptRunnerTest.TestFilterCombinesOperators;
+begin
+  Assert.AreEqual(
+      'ran',
+      RunFiltered(FManifest, '$(PLATFORM) = ''Win64'' or $(PACKAGE) = ''JclVcl'''),
+      '"or" should run the script when the second operand holds'
+  );
+  Assert.AreEqual(
+      'ran',
+      RunFiltered(FManifest, '($(PLATFORM) = ''Win32'') and ($(CONFIG) <> ''Debug'')'),
+      '"and"/"<>"/parentheses should be supported'
+  );
+  Assert.AreEqual(
+      '',
+      RunFiltered(FManifest, '$(PLATFORM) = ''Win32'' and $(CONFIG) = ''Debug'''),
+      '"and" should skip the script when one operand fails'
+  );
+end;
+
+procedure TScriptRunnerTest.TestFilterUnknownVariableIsEmptyString;
+begin
+  // A variable not defined for the event binds to '', as ExpandVariables does.
+  Assert.AreEqual('ran', RunFiltered(FManifest, '$(NOPE) = '''''), 'unknown variables should compare equal to ""');
+  Assert.AreEqual('', RunFiltered(FManifest, '$(NOPE) <> '''''), 'unknown variables should not compare unequal to ""');
+end;
+
+procedure TScriptRunnerTest.TestMissingFilterRunsTheScript;
+begin
+  Assert.AreEqual('ran', RunFiltered(FManifest, ''), 'an empty filter means "always run"');
+  Assert.AreEqual('ran', RunFiltered(FManifest, '   '), 'a blank filter means "always run"');
+end;
+
+procedure TScriptRunnerTest.TestFilterFalseSkipsUnknownCommand;
+begin
+  // The filter is evaluated before the command is resolved, so a script excluded
+  // by it never reports the unknown command.
+  var LScript := TManifestScript.Create;
+  var LEnv := TStringList.Create;
+  try
+    LScript.Command := 'doesnotexist';
+    LScript.Filter := '$(PLATFORM) = ''Win64''';
+    LEnv.Values['PLATFORM'] := 'Win32';
+
+    Assert.WillNotRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end);
+  finally
+    LEnv.Free;
+    LScript.Free;
+  end;
+end;
+
+procedure TScriptRunnerTest.TestInvalidFilterRaises;
+begin
+  var LScript := TManifestScript.Create;
+  var LEnv := TStringList.Create;
+  try
+    LScript.Command := 'echo';
+    LScript.Filter := '$(PLATFORM) = ';
+    LEnv.Values['PLATFORM'] := 'Win32';
+
     Assert.WillRaise(procedure begin TScriptRunner.Execute(FManifest, LScript, LEnv); end, EScriptError);
   finally
     LEnv.Free;

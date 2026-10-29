@@ -263,11 +263,13 @@ type
   end;
 
   // -----------------------------------------------------------------------
-  // Built-in command: copies args.inputFile to args.outputFile. Both are
-  // $(VAR)-expanded, so either can point at any event path (e.g. $(PROJECT_PATH)
-  // or $(DCU_PATH)). A relative inputFile/outputFile is resolved against
-  // $(PROJECT_PATH) when that variable is set. Missing output directories are
-  // created and an existing file is overwritten. Valid for any event.
+  // Built-in command: copies args.source to args.target. Both are $(VAR)-expanded,
+  // so either can point at any event path (e.g. $(PROJECT_PATH) or $(DCU_PATH)).
+  // A relative source/target is resolved against $(PROJECT_PATH) when that
+  // variable is set. When source is a directory its files are copied into the
+  // target directory, and args.recursive extends the copy to the sub-directories.
+  // Missing target directories are created and existing files are overwritten.
+  // Valid for any event.
   // -----------------------------------------------------------------------
   [ScriptManifest(TManifestCopyArguments)]
   TCopyCommand = class(TScriptCommand)
@@ -302,17 +304,19 @@ type
       EventBeforeUninstall = 'beforeUninstall';
       EventAfterUninstall = 'afterUninstall';
   public
-    /// <summary>Runs a single manifest script: expands the <c>$(VAR)</c> macros on the
+    /// <summary>Runs a single manifest script: evaluates its <c>Filter</c> and returns
+    ///   at once when it is false, otherwise expands the <c>$(VAR)</c> macros on the
     ///   command name, resolves the command by name and runs it. The command expands
     ///   the macros in its own typed args.</summary>
     /// <param name="AManifest">The owning manifest, made available to the command
     ///   (e.g. to inspect packages or platforms).</param>
     /// <param name="AScript">The script configuration to execute.</param>
     /// <param name="AEnvironmentVariables">name=value pairs holding the variables
-    ///   that are meaningful for the current event.</param>
+    ///   that are meaningful for the current event; they also feed the filter.</param>
     /// <param name="AHelper">Host services forwarded to the command (may be <c>nil</c>).</param>
-    /// <exception cref="EScriptError">Raised when the command name is unknown, or when the
-    ///   command is bound to a set of events that does not include the script's event.</exception>
+    /// <exception cref="EScriptError">Raised when the filter is not a valid expression,
+    ///   when the command name is unknown, or when the command is bound to a set of
+    ///   events that does not include the script's event.</exception>
     class procedure Execute(
         AManifest: TManifest;
         AScript: TManifestScript;
@@ -322,7 +326,7 @@ type
     ); static;
 
     /// <summary>Runs, in declaration order, every manifest script registered for
-    ///   <paramref name="AEvent"/>.</summary>
+    ///   <paramref name="AEvent"/> whose <c>Filter</c> holds.</summary>
     /// <param name="AManifest">Manifest whose <c>Scripts</c> are scanned.</param>
     /// <param name="AEvent">Event name to match (see the <c>Event*</c> constants).</param>
     /// <param name="AEnvironmentVariables">Variables meaningful for this event; the
@@ -343,9 +347,47 @@ implementation
 
 uses
   System.IOUtils,
+  System.RegularExpressions,
+  System.Bindings.EvalProtocol,
+  System.Bindings.Evaluator,
+  System.Bindings.EvalSys,
   Blocks.Core,
   Blocks.Http,
   Blocks.Console;
+
+// Evaluates a script "filter" expression with the Delphi bindings evaluator, the
+// same engine that resolves the MSBuild conditions of a .dproj. Every $(NAME)
+// referenced becomes the bare identifier NAME, bound as a *string* taken from the
+// event variables (unknown names bind to '', as ExpandVariables does), so the
+// comparisons are plain, case-sensitive string comparisons (see
+// TestFilterComparisonIsCaseSensitive):
+//   $(PLATFORM) = 'Win32' or $(PACKAGE) = 'JclVcl'
+// An empty filter means "always run".
+function EvaluateFilter(const AFilter: string; AEnvironmentVariables: TStrings): Boolean;
+const
+  VariablePattern = '\$\(([^)]+)\)';
+begin
+  if AFilter.Trim = '' then
+    Exit(True);
+
+  var LDictScope := TDictionaryScope.Create;
+  var LScope: IScope := LDictScope;
+
+  for var LMatch in TRegEx.Matches(AFilter, VariablePattern) do
+  begin
+    var LName := LMatch.Groups[1].Value;
+    LDictScope.Map.AddOrSetValue(LName, TValueWrapper.Create(AEnvironmentVariables.Values[LName]));
+  end;
+
+  LScope := TNestedScope.Create(BasicOperators, LScope);
+
+  // The quoted form '$(NAME)' is accepted too (it is how MSBuild conditions spell
+  // it); both collapse to the identifier the scope above was populated with.
+  var LExpr := TRegEx.Replace(AFilter, '''' + VariablePattern + '''', '$1');
+  LExpr := TRegEx.Replace(LExpr, VariablePattern, '$1');
+
+  Result := Compile(LExpr, LScope).Evaluate(LScope, nil, nil).GetValue.AsBoolean;
+end;
 
 { TCompilerOptions }
 
@@ -688,35 +730,64 @@ procedure TCopyCommand.Run(
     AEnvironmentVariables: TStrings;
     AConfig: TConfig
 );
+
+  // Copies every file of ASourceDir into ATargetDir, descending into the
+  // sub-directories only when ARecursive is set. The target tree is created as
+  // needed, so an empty source directory still produces the target directory.
+  procedure CopyDirectory(const ASourceDir, ATargetDir: string; ARecursive: Boolean);
+  begin
+    if not TDirectory.Exists(ATargetDir) then
+      TDirectory.CreateDirectory(ATargetDir);
+
+    for var LFile in TDirectory.GetFiles(ASourceDir) do
+      TFile.Copy(LFile, TPath.Combine(ATargetDir, TPath.GetFileName(LFile)), True);
+
+    if ARecursive then
+      for var LDir in TDirectory.GetDirectories(ASourceDir) do
+        CopyDirectory(LDir, TPath.Combine(ATargetDir, TPath.GetFileName(LDir)), True);
+  end;
+
 begin
   var LCopyArgs := AArgs.GetAs<TManifestCopyArguments>;
 
-  var LInputFile := ExpandVariables(LCopyArgs.InputFile, AEnvironmentVariables);
-  if LInputFile = '' then
-    raise EScriptError.Create('copy: missing inputFile argument');
+  var LSource := ExpandVariables(LCopyArgs.Source, AEnvironmentVariables);
+  if LSource = '' then
+    raise EScriptError.Create('copy: missing source argument');
 
-  var LOutputFile := ExpandVariables(LCopyArgs.OutputFile, AEnvironmentVariables);
-  if LOutputFile = '' then
-    raise EScriptError.Create('copy: missing outputFile argument');
+  var LTarget := ExpandVariables(LCopyArgs.Target, AEnvironmentVariables);
+  if LTarget = '' then
+    raise EScriptError.Create('copy: missing target argument');
 
   // Relative paths are resolved against the extracted project directory, exposed
   // as $(PROJECT_PATH) for install/fetch events. Absolute paths are used as given.
   var LProjectPath := AEnvironmentVariables.Values['PROJECT_PATH'];
-  if (LProjectPath <> '') and TPath.IsRelativePath(LInputFile) then
-    LInputFile := TPath.Combine(LProjectPath, LInputFile);
-  if (LProjectPath <> '') and TPath.IsRelativePath(LOutputFile) then
-    LOutputFile := TPath.Combine(LProjectPath, LOutputFile);
+  if (LProjectPath <> '') and TPath.IsRelativePath(LSource) then
+    LSource := TPath.Combine(LProjectPath, LSource);
+  if (LProjectPath <> '') and TPath.IsRelativePath(LTarget) then
+    LTarget := TPath.Combine(LProjectPath, LTarget);
 
-  if not TFile.Exists(LInputFile) then
-    raise EScriptError.CreateFmt('copy: input file not found: "%s"', [LInputFile]);
+  if TDirectory.Exists(LSource) then
+  begin
+    TConsole.WriteLine(Format('  Copying %s', [LSource]), clCyan);
+    CopyDirectory(LSource, LTarget, LCopyArgs.Recursive);
+    Exit;
+  end;
+
+  if not TFile.Exists(LSource) then
+    raise EScriptError.CreateFmt('copy: source not found: "%s"', [LSource]);
+
+  // A directory target means "copy the file into it", keeping the file name.
+  var LTargetFile :=
+      if TDirectory.Exists(LTarget) then TPath.Combine(LTarget, TPath.GetFileName(LSource))
+      else LTarget;
 
   // Make sure the target directory exists; TFile.Copy does not create it.
-  var LOutputDir := TPath.GetDirectoryName(LOutputFile);
-  if (LOutputDir <> '') and not TDirectory.Exists(LOutputDir) then
-    TDirectory.CreateDirectory(LOutputDir);
+  var LTargetDir := TPath.GetDirectoryName(LTargetFile);
+  if (LTargetDir <> '') and not TDirectory.Exists(LTargetDir) then
+    TDirectory.CreateDirectory(LTargetDir);
 
-  TConsole.WriteLine(Format('  Copying %s', [TPath.GetFileName(LInputFile)]), clCyan);
-  TFile.Copy(LInputFile, LOutputFile, True);
+  TConsole.WriteLine(Format('  Copying %s', [TPath.GetFileName(LSource)]), clCyan);
+  TFile.Copy(LSource, LTargetFile, True);
 end;
 
 { TScriptRunner }
@@ -729,6 +800,18 @@ class procedure TScriptRunner.Execute(
     AConfig: TConfig
 );
 begin
+  // The filter comes first: a script excluded by it must not run *nor* fail, so it
+  // is checked before the command name is even resolved.
+  var LRun: Boolean;
+  try
+    LRun := EvaluateFilter(AScript.Filter, AEnvironmentVariables);
+  except
+    on E: Exception do
+      raise EScriptError.CreateFmt('Invalid script filter "%s": %s', [AScript.Filter, E.Message]);
+  end;
+  if not LRun then
+    Exit;
+
   var LCommandName := ExpandVariables(AScript.Command, AEnvironmentVariables);
 
   // Reject commands that declare a set of events they support but exclude this one.
@@ -736,6 +819,9 @@ begin
 
   var LCommand := TScriptCommand.Create(LCommandName);
   try
+    // Echo the script that is about to run, so the log shows which manifest hook
+    // produced the output that follows.
+    TConsole.WriteLine(Format('  Running script "%s" (%s)', [LCommandName, AScript.Event]), clDkGray);
     LCommand.Run(AHelper, AManifest, AScript.Args, AEnvironmentVariables, AConfig);
   finally
     LCommand.Free;

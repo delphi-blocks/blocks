@@ -400,7 +400,8 @@ end;
 // afterCompile) for a single package, build config and platform. The per-config
 // output paths are exposed through $(DCU_PATH) / $(BPL_PATH) / $(DCP_PATH), mirroring
 // the layout produced by TProduct.BuildPackages, plus $(PACKAGE) / $(PLATFORM) /
-// $(CONFIG) for the current compilation.
+// $(CONFIG) for the current compilation. $(PACKAGE) is the bare package name (the
+// already-expanded manifest name, with no path and no .dproj extension).
 procedure RunCompileScripts(
     const AManifest: TManifest;
     const AEvent, AWorkspaceDir, AProjectDir, APlatform, AConfig, APackage: string;

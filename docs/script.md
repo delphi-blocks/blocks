@@ -31,6 +31,7 @@ lifecycle **event**, with optional **args**:
 | `command`     | yes      | Name of the built-in command to run (see [Commands](#commands)).   |
 | `event`       | yes      | Lifecycle event the script is bound to (see [Events](#events)).    |
 | `description` | no       | Free-text label, for humans.                                       |
+| `filter`      | no       | Boolean expression deciding whether the script actually runs when its event fires. See [Filtering](#filtering). |
 | `args`        | no       | Arguments for the command. **The shape is command-specific** — a string for `echo`, an object for `compile`/`expert`. See each command below. |
 
 Scripts run **in declaration order** for a given event. A script whose `event`
@@ -53,7 +54,7 @@ output paths point at the exact location that compilation used.
 
 | Variable             | Value                                                                 |
 |----------------------|-----------------------------------------------------------------------|
-| `$(PACKAGE)`         | Name of the package (`.dproj`) being compiled.                        |
+| `$(PACKAGE)`         | Name of the package being compiled, **without path and without the `.dproj` extension** — the `name` from the manifest's `packages` list, with `$(PACKAGE_VERSION)` already expanded (e.g. `JclVcl`, or `Trysil370` for a manifest declaring `Trysil$(PACKAGE_VERSION)`). |
 | `$(PLATFORM)`        | Target platform, e.g. `Win32`, `Win64`.                               |
 | `$(CONFIG)`          | Build config, `Debug` or `Release`.                                   |
 | `$(WORKSPACE_PATH)`  | Workspace root directory.                                             |
@@ -79,6 +80,53 @@ meaningful at this stage:
 On `beforeFetchSources` the project directory has been cleaned but the sources
 are **not on disk yet**, so `$(PROJECT_PATH)` points at a directory that does not
 exist (or is empty) at that moment.
+
+## Filtering
+
+An `event` alone is often too coarse: the compile events fire once per package,
+**per platform and per config**, so a script bound to `afterCompile` runs many
+times. The optional `filter` narrows that down to the runs you care about:
+
+```json
+{
+  "description": "Only on the Win32 release build of JclVcl",
+  "event": "afterCompile",
+  "command": "copyres",
+  "filter": "$(PLATFORM) = 'Win32' and $(CONFIG) = 'Release' and $(PACKAGE) = 'JclVcl'"
+}
+```
+
+The expression is evaluated by the same Delphi expression evaluator that resolves
+the MSBuild conditions of a `.dproj`, with these rules:
+
+- Every `$(VAR)` is the event variable of that name — see the tables in
+  [Variable expansion](#variable-expansion) for what each event exposes.
+- **All values are strings**, so string literals go in single quotes:
+  `$(PLATFORM) = 'Win32'`. Comparisons are **case-sensitive**, and the values
+  Blocks produces have a fixed casing: `Win32` / `Win64` / `Linux64` …,
+  `Debug` / `Release`.
+- A variable **not available for that event** (or misspelled) evaluates to the
+  empty string, exactly as it does in variable expansion — so
+  `$(DCU_PATH) <> ''` is a way to ask "am I on a compile event?".
+- Operators: `=`, `<>`, `<`, `>`, `and`, `or`, `not`, and parentheses.
+- An **absent or empty** `filter` means "always run".
+- An expression that is not valid raises an error and stops the install, so a
+  typo in a filter is reported instead of silently disabling the script.
+
+More examples:
+
+```json
+{ "event": "afterCompile", "command": "copyres", "filter": "$(CONFIG) = 'Release'" }
+```
+
+```json
+{
+  "event": "afterCompile",
+  "command": "echo",
+  "filter": "$(PLATFORM) = 'Win32' or $(PLATFORM) = 'Win64'",
+  "args": "Built the Windows target $(PACKAGE)"
+}
+```
 
 ## Events
 
@@ -151,18 +199,28 @@ file is overwritten. Redirects are followed.
 
 ### `copy`
 
-Copies a single file from one path to another. Valid for any event.
+Copies a file or a whole directory from one path to another. Valid for any event.
 
 `args` is an object:
 
-| Field        | Required | Meaning                                                          |
-|--------------|----------|------------------------------------------------------------------|
-| `inputFile`  | yes      | Source file path. Variable-expanded; a relative path is resolved against `$(PROJECT_PATH)`. |
-| `outputFile` | yes      | Destination file path. Variable-expanded; a relative path is resolved against `$(PROJECT_PATH)`. |
+| Field       | Required | Meaning                                                          |
+|-------------|----------|------------------------------------------------------------------|
+| `source`    | yes      | File or directory to copy. Variable-expanded; a relative path is resolved against `$(PROJECT_PATH)`. |
+| `target`    | yes      | Destination file (when `source` is a file) or directory. Variable-expanded; a relative path is resolved against `$(PROJECT_PATH)`. |
+| `recursive` | no       | When `source` is a directory, also copy its sub-directories. Defaults to `false`; ignored for a single-file copy. |
 
-Both fields are mandatory; an empty value (including one that expands to empty)
-raises an error, as does a missing `inputFile`. Missing output directories are
-created, and an existing output file is overwritten.
+`source` and `target` are mandatory; an empty value (including one that expands
+to empty) raises an error, as does a `source` that does not exist. Missing target
+directories are created, and existing files are overwritten.
+
+When `source` is a directory, its files are copied **into** `target` (the
+directory itself is not recreated as a level); with `"recursive": true` the whole
+tree below it is copied as well. When `source` is a file and `target` is an
+existing directory, the file is copied into it keeping its name.
+
+> The former field names `inputFile` and `outputFile` are deprecated but still
+> accepted, so existing manifests keep working. They are only read when `source` /
+> `target` are absent.
 
 ```json
 {
@@ -170,8 +228,21 @@ created, and an existing output file is overwritten.
   "event": "afterCompile",
   "command": "copy",
   "args": {
-    "inputFile": "Source\\settings.ini",
-    "outputFile": "$(DCU_PATH)\\settings.ini"
+    "source": "Source\\settings.ini",
+    "target": "$(DCU_PATH)\\settings.ini"
+  }
+}
+```
+
+```json
+{
+  "description": "Copy the include files, sub-directories included",
+  "event": "afterFetchSources",
+  "command": "copy",
+  "args": {
+    "source": "$(PROJECT_PATH)\\jcl\\source\\include",
+    "target": "$(DCU_PATH)\\include",
+    "recursive": true
   }
 }
 ```

@@ -234,15 +234,32 @@ type
   end;
 
   /// <summary>Arguments for the <c>copy</c> command. The <c>args</c> JSON is an
-  ///   object: <c>{ "inputFile": "...", "outputFile": "..." }</c>. Both fields are
-  ///   mandatory and subject to <c>$(VAR)</c> expansion at run time.</summary>
+  ///   object: <c>{ "source": "...", "target": "...", "recursive": true }</c>.
+  ///   <c>source</c> and <c>target</c> are mandatory and subject to <c>$(VAR)</c>
+  ///   expansion at run time; <c>recursive</c> is optional and defaults to
+  ///   <c>False</c>. The legacy names <c>inputFile</c>/<c>outputFile</c> are still
+  ///   accepted as a fallback when <c>source</c>/<c>target</c> are absent.</summary>
   TManifestCopyArguments = class(TManifestScriptArguments)
   private
-    FInputFile: string;
-    FOutputFile: string;
+    FSource: string;
+    FTarget: string;
+    FRecursive: Boolean;
   public
-    property InputFile: string read FInputFile;
-    property OutputFile: string read FOutputFile;
+    /// <summary>File or directory to copy from.</summary>
+    property Source: string read FSource;
+    /// <summary>Destination file (when <see cref="Source"/> is a file) or directory.</summary>
+    property Target: string read FTarget;
+    /// <summary>When <c>True</c> and <see cref="Source"/> is a directory, its
+    ///   sub-directories are copied as well. Ignored for a single-file copy.</summary>
+    property Recursive: Boolean read FRecursive;
+
+    /// <summary>DEPRECATED - use <see cref="Source"/>. Legacy alias kept for
+    ///   manifests written before the rename; reads the very same field.</summary>
+    property InputFile: string read FSource;
+    /// <summary>DEPRECATED - use <see cref="Target"/>. Legacy alias kept for
+    ///   manifests written before the rename; reads the very same field.</summary>
+    property OutputFile: string read FTarget;
+
     constructor Create(AValue: TJSONValue); override;
   end;
 
@@ -254,6 +271,7 @@ type
     FDescription: string;
     FEvent: string;
     FCommand: string;
+    FFilter: string;
     FArgs: TManifestScriptArguments;
   public
     constructor Create;
@@ -270,6 +288,12 @@ type
     property Description: string read FDescription write FDescription;
     property Event: string read FEvent write FEvent;
     property Command: string read FCommand write FCommand;
+    /// <summary>Optional boolean expression deciding whether the script actually
+    ///   runs when its event fires, e.g.
+    ///   <c>$(PLATFORM) = 'Win32' or $(PACKAGE) = 'JclVcl'</c>. Every referenced
+    ///   variable is bound as a string taken from the event variables. An empty
+    ///   filter means "always run".</summary>
+    property Filter: string read FFilter write FFilter;
     /// <summary>Typed arguments, owned by this script. Nil until
     ///   <see cref="FromJSON"/> runs (a script built by hand has no args).</summary>
     property Args: TManifestScriptArguments read FArgs;
@@ -700,6 +724,7 @@ begin
   FCommand := AJSONObject.GetValue<string>('command');
   FDescription := AJSONObject.GetValue<string>('description', '');
   FEvent := AJSONObject.GetValue<string>('event');
+  FFilter := AJSONObject.GetValue<string>('filter', '');
 
   if not AJSONObject.TryGetValue<TJSONValue>('args', LArguments) then
     LArguments := nil;
@@ -729,6 +754,8 @@ begin
   if FDescription <> '' then
     LResult.AddPair('description', FDescription);
   LResult.AddPair('event', FEvent);
+  if FFilter <> '' then
+    LResult.AddPair('filter', FFilter);
   // The args are stored verbatim; clone so the result owns its copy and the
   // arguments object keeps ownership of its own JSONValue.
   if Assigned(FArgs) and Assigned(FArgs.JSONValue) then
@@ -1134,8 +1161,17 @@ begin
   inherited;
   if not Assigned(AValue) or (AValue is not TJSONObject) then
     Exit;
-  FInputFile := AValue.GetValue<string>('inputFile', '');
-  FOutputFile := AValue.GetValue<string>('outputFile', '');
+  // "inputFile"/"outputFile" are the pre-rename names: they are only read when the
+  // current ones are absent, so a manifest using either spelling keeps working.
+  FSource := AValue.GetValue<string>('source', '');
+  if FSource = '' then
+    FSource := AValue.GetValue<string>('inputFile', '');
+
+  FTarget := AValue.GetValue<string>('target', '');
+  if FTarget = '' then
+    FTarget := AValue.GetValue<string>('outputFile', '');
+
+  FRecursive := AValue.GetValue<Boolean>('recursive', False);
 end;
 
 { TManifestRepository }

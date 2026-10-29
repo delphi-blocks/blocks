@@ -20,7 +20,6 @@ uses
   System.IOUtils,
   System.Generics.Collections,
   System.Generics.Defaults,
-
   Xml.XMLIntf,
   Xml.XMLDoc;
 
@@ -74,28 +73,29 @@ type
   ///   property for a given Config/Platform by simulating the MSBuild
   ///   cascade.</summary>
   TPackageProject = class
-  public const
-    // Project identity
-    ProjectGuid          = 'ProjectGuid';
-    ProjectVersion       = 'ProjectVersion';
-    ProjectName          = 'ProjectName';
-    SanitizedProjectName = 'SanitizedProjectName';
-    MainSource           = 'MainSource';
-    FrameworkType        = 'FrameworkType';
-    AppType              = 'AppType';
+  public
+    const
+      // Project identity
+      ProjectGuid = 'ProjectGuid';
+      ProjectVersion = 'ProjectVersion';
+      ProjectName = 'ProjectName';
+      SanitizedProjectName = 'SanitizedProjectName';
+      MainSource = 'MainSource';
+      FrameworkType = 'FrameworkType';
+      AppType = 'AppType';
 
-    // Output
-    DCCExeOutput = 'DCC_ExeOutput';
-    DCCDcuOutput = 'DCC_DcuOutput';
-    DllSuffix    = 'DllSuffix';
+      // Output
+      DCCExeOutput = 'DCC_ExeOutput';
+      DCCDcuOutput = 'DCC_DcuOutput';
+      DllSuffix = 'DllSuffix';
 
-    // Compiler / package
-    DCCDescription    = 'DCC_Description';
-    DCCDefine         = 'DCC_Define';
-    DCCNamespace      = 'DCC_Namespace';
-    DCCUsePackage     = 'DCC_UsePackage';
-    DCCUnitSearchPath = 'DCC_UnitSearchPath';
-    DesignOnlyPackage = 'DesignOnlyPackage';
+      // Compiler / package
+      DCCDescription = 'DCC_Description';
+      DCCDefine = 'DCC_Define';
+      DCCNamespace = 'DCC_Namespace';
+      DCCUsePackage = 'DCC_UsePackage';
+      DCCUnitSearchPath = 'DCC_UnitSearchPath';
+      DesignOnlyPackage = 'DesignOnlyPackage';
   private
     FPropertyGroups: TPropertyGroupList;
     FReferences: TPackageReferenceList;
@@ -105,6 +105,8 @@ type
     procedure ReadItemGroup(const ANode: IXMLNode);
     procedure ReadDccReference(const ANode: IXMLNode);
     procedure ParseDpkDirectives(const ADpkFileName: string);
+    function IsProjectProperty(const AName: string): Boolean;
+    function ExpandMacros(const AValue: string; AVariables: TDictionary<string, string>): string;
     function GetName: string;
     function GetDirectiveValue(const AName: string): string;
     function GetDescription: string;
@@ -166,7 +168,7 @@ const
 function ConvertMSBuildExpression(const AExpression: string): string;
 begin
   Result := TRegEx.Replace(AExpression, '''\$\(([^)]+)\)''', '$1');
-  Result := StringReplace(Result, '==', '=',  [rfReplaceAll]);
+  Result := StringReplace(Result, '==', '=', [rfReplaceAll]);
   Result := StringReplace(Result, '!=', '<>', [rfReplaceAll]);
 end;
 
@@ -186,8 +188,7 @@ end;
 
 { TPropertyGroup }
 
-function TPropertyGroup.IsActive(AVariables: TDictionary<string, string>;
-  const AConfig, APlatform: string): Boolean;
+function TPropertyGroup.IsActive(AVariables: TDictionary<string, string>; const AConfig, APlatform: string): Boolean;
 begin
   if FCondition = '' then
     Exit(True);
@@ -200,7 +201,7 @@ begin
   for var LMatch in TRegEx.Matches(FCondition, '\$\(([^)]+)\)') do
     LDictScope.Map.AddOrSetValue(LMatch.Groups[1].Value, TValueWrapper.Create(''));
 
-  LDictScope.Map.AddOrSetValue('Config',   TValueWrapper.Create(AConfig));
+  LDictScope.Map.AddOrSetValue('Config', TValueWrapper.Create(AConfig));
   LDictScope.Map.AddOrSetValue('Platform', TValueWrapper.Create(APlatform));
   for var LPair in AVariables do
     LDictScope.Map.AddOrSetValue(LPair.Key, TValueWrapper.Create(LPair.Value));
@@ -270,6 +271,42 @@ begin
   Result := ChangeFileExt(GetProperty('MainSource', '', ''), '');
 end;
 
+// True when any property group of this project declares AName, whether or not the
+// group is active for the build state being resolved.
+function TPackageProject.IsProjectProperty(const AName: string): Boolean;
+begin
+  for var LPropertyGroup in PropertyGroups do
+    if LPropertyGroup.ContainsKey(AName) then
+      Exit(True);
+  Result := False;
+end;
+
+// Expands the $(NAME) macros of a property value the way MSBuild does while it
+// evaluates the XML, i.e. against the values gathered so far:
+//   - a name already resolved yields its value. This is what makes a config
+//     inherit from Base: <DCC_UnitSearchPath>..\lib;$(DCC_UnitSearchPath)</...>
+//     appends to the value the Base group had set;
+//   - a name the project declares but has not set yet yields an empty string,
+//     as it does in MSBuild;
+//   - anything else is left verbatim: $(BDS), $(Auto), $(APPDATA) and friends
+//     come from outside the .dproj and are resolved by MSBuild itself.
+function TPackageProject.ExpandMacros(const AValue: string; AVariables: TDictionary<string, string>): string;
+begin
+  Result := AValue;
+  for var LMatch in TRegEx.Matches(AValue, '\$\(([^)]+)\)') do
+  begin
+    var LName := LMatch.Groups[1].Value;
+    var LValue: string;
+    if not AVariables.TryGetValue(LName, LValue) then
+    begin
+      if not IsProjectProperty(LName) then
+        Continue;
+      LValue := '';
+    end;
+    Result := StringReplace(Result, LMatch.Value, LValue, [rfReplaceAll, rfIgnoreCase]);
+  end;
+end;
+
 function TPackageProject.GetProperty(const AName, AConfig, APlatform: string): string;
 begin
   var LVariables := TDictionary<string, string>.Create(TIStringComparer.Ordinal);
@@ -283,7 +320,7 @@ begin
           if SameText(LPair.Key, 'Config') or SameText(LPair.Key, 'Platform') then
             Continue;
 
-          LVariables.AddOrSetValue(LPair.Key, LPair.Value);
+          LVariables.AddOrSetValue(LPair.Key, ExpandMacros(LPair.Value, LVariables));
         end;
 
     if not LVariables.TryGetValue(AName, Result) then
@@ -311,8 +348,7 @@ begin
   end;
 end;
 
-class function TPackageProject.LoadFromStream(
-  AStream: TStream; AEncodingType: TXMLEncodingType): TPackageProject;
+class function TPackageProject.LoadFromStream(AStream: TStream; AEncodingType: TXMLEncodingType): TPackageProject;
 begin
   if not Assigned(AStream) then
     raise Exception.Create('Package stream not found');
@@ -322,8 +358,7 @@ begin
   Result := TPackageProject.LoadFromXML(LDoc);
 end;
 
-class function TPackageProject.LoadFromString(
-  const AString: string): TPackageProject;
+class function TPackageProject.LoadFromString(const AString: string): TPackageProject;
 begin
   var LDoc: IXMLDocument := TXMLDocument.Create(nil);
   LDoc.LoadFromXML(AString);
@@ -405,15 +440,14 @@ begin
     var LName, LValue: string;
     if LSepPos < 0 then
     begin
-      LName  := LDirective;
+      LName := LDirective;
       LValue := '';
     end
     else
     begin
-      LName  := LDirective.Substring(0, LSepPos);
+      LName := LDirective.Substring(0, LSepPos);
       LValue := LDirective.Substring(LSepPos + 1).Trim;
-      if (LValue.Length >= 2) and (LValue.Chars[0] = '''') and
-          (LValue.Chars[LValue.Length - 1] = '''') then
+      if (LValue.Length >= 2) and (LValue.Chars[0] = '''') and (LValue.Chars[LValue.Length - 1] = '''') then
         LValue := LValue.Substring(1, LValue.Length - 2);
     end;
     FDirectives.Add(LName.ToUpper + '=' + LValue);
