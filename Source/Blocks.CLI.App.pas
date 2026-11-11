@@ -89,12 +89,13 @@ type
   private
     [Param('product')]
     FProduct: string;
-    [Param('registrykey')]
-    FRegistryKey: string;
     [Param('source', 'sources')]
     FSource: string;
     [Param('platforms', 'platform')]
     FPlatforms: string;
+    [Param]
+    FArgs: TArray<string>;
+    function GetProductSpec: string;
   public
     procedure Execute; override;
     procedure ShowHelp; override;
@@ -252,6 +253,18 @@ begin
   TConsole.WriteLine('Interrupted.', clYellow);
   TConsole.WriteLine;
   Result := False; // pass to the default handler, which terminates the process
+end;
+
+// Splits a product spec "<version>[:<regkey>]"; ARegistryKey is empty when no key is given.
+procedure SplitProductSpec(const ASpec: string; out AVersionName, ARegistryKey: string);
+begin
+  var LParts := ASpec.Split([':'], 2);
+  AVersionName := '';
+  ARegistryKey := '';
+  if Length(LParts) > 0 then
+    AVersionName := LParts[0];
+  if Length(LParts) > 1 then
+    ARegistryKey := LParts[1];
 end;
 
 class procedure TApp.RunBlocks;
@@ -477,11 +490,11 @@ begin
     TConsole.WriteLine;
     for var LArg in FProductArgs do
     begin
-      var LParts := LArg.Split([':'], 2);
-      var LVersionName := LParts[0];
-      var LRegistryKey :=
-          if Length(LParts) > 1 then LParts[1]
-          else 'BDS';
+      var LVersionName: string;
+      var LRegistryKey: string;
+      SplitProductSpec(LArg, LVersionName, LRegistryKey);
+      if LRegistryKey = '' then
+        LRegistryKey := 'BDS';
       ShowDetail(TProduct.Find(LVersionName, LRegistryKey));
     end;
     Exit;
@@ -532,12 +545,35 @@ end;
 
 { TInitCommand }
 
+function TInitCommand.GetProductSpec: string;
+begin
+  if Length(FArgs) > 1 then
+    raise Exception.CreateFmt('Too many arguments: "%s".', [string.Join(' ', FArgs)]);
+  if (Length(FArgs) = 1) and (FProduct <> '') then
+    raise Exception.Create('Specify the Delphi version either as a bare argument or with /product, not both.');
+
+  if Length(FArgs) = 1 then
+    Result := FArgs[0]
+  else
+    Result := FProduct;
+end;
+
 procedure TInitCommand.Execute;
 begin
   inherited;
   ShowBanner('', '');
+  var LProductName: string;
+  var LRegistryKey: string;
+  SplitProductSpec(GetProductSpec, LProductName, LRegistryKey);
+
   if TWorkspace.Exists then
   begin
+    if LProductName <> '' then
+      TConsole.WriteWarning(
+          'The workspace is already initialised: the Delphi version argument is ignored. Use "'
+              + AppExeName
+              + ' config product=..." to change it.'
+      );
     // May move to the workspace owning the Delphi profile: refresh that one.
     TWorkspace.CheckProfileOwner;
     TWorkspace.UpdateRepositoryCache(TWorkspace.WorkDir);
@@ -546,7 +582,7 @@ begin
   begin
     TConsole.WriteLine('Initialising workspace: ' + GetCurrentDir, clWhite);
     TConsole.WriteLine;
-    if TWorkspace.Initialize(GetCurrentDir, FProduct, FRegistryKey, FSource, FPlatforms) then
+    if TWorkspace.Initialize(GetCurrentDir, LProductName, LRegistryKey, FSource, FPlatforms) then
     begin
       TConsole.WriteLine('Workspace initialised.', clGreen);
       TConsole.WriteLine;
@@ -567,14 +603,19 @@ begin
   TConsole.WriteLine('Delphi version, and downloads the remote package repository.');
   TConsole.WriteLine('Run this once per workspace before using install.');
   TConsole.WriteLine;
-  TConsole.WriteLine('Usage: ' + AppExeName + ' init [options]', clWhite);
+  TConsole.WriteLine('Usage: ' + AppExeName + ' init [<version>[:<regkey>]] [options]', clWhite);
   TConsole.WriteLine;
-  TConsole.WriteLine('Options:', clWhite);
-  WriteOption('/product <version>', 'Target Delphi version (e.g. delphi12, delphi13).');
+  TConsole.WriteLine('Arguments:', clWhite);
+  WriteOption('<version>[:<regkey>]', 'Target Delphi version (e.g. delphi12, delphi13), optionally');
+  WriteOption('', 'followed by the registry profile key used with bds.exe -r <key>');
+  WriteOption('', '(default: BDS), e.g. delphi13:myprofile.');
   WriteOption('', 'If omitted, you will be prompted to choose.');
   WriteOption('', 'Run "' + AppExeName + ' product" to see valid values.');
-  WriteOption('/registrykey <key>', 'Registry profile key (default: BDS).');
-  WriteOption('', 'Use this when Delphi is started with -r <key>.');
+  WriteOption('', 'The profile must already exist: if it does not, run');
+  WriteOption('', '"' + AppExeName + ' run <version>:<regkey>" first to let Delphi create it.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Options:', clWhite);
+  WriteOption('/product <spec>', 'Same as the bare <version>[:<regkey>] argument.');
   WriteOption('/source <url>', 'Package source(s) to use instead of the default.');
   WriteOption('/sources <url>', 'Alias of /source. Separate multiple sources with commas.');
   WriteOption('/platforms <list>', 'Comma-separated platforms to target (e.g. Win32,Win64).');
@@ -586,6 +627,7 @@ begin
   TConsole.WriteLine('  ' + AppExeName + ' init /source https://github.com/owner/repo');
   TConsole.WriteLine('  ' + AppExeName + ' init /sources https://github.com/a/r1,https://github.com/b/r2');
   TConsole.WriteLine('  ' + AppExeName + ' init /product delphi13 /platforms Win32,Win64');
+  TConsole.WriteLine('  ' + AppExeName + ' init delphi13:myprofile');
   TConsole.WriteLine;
 end;
 
@@ -775,14 +817,12 @@ begin
       if SameText(LKey, 'product') then
       begin
         // product=<version> or product=<version>:<regkey>
-        var LColonPos := Pos(':', LValue);
-        if LColonPos > 0 then
-        begin
-          LConfig.Product := Copy(LValue, 1, LColonPos - 1);
-          LConfig.RegistryKey := Copy(LValue, LColonPos + 1, Length(LValue));
-        end
-        else
-          LConfig.Product := LValue;
+        var LVersionName: string;
+        var LRegistryKey: string;
+        SplitProductSpec(LValue, LVersionName, LRegistryKey);
+        LConfig.Product := LVersionName;
+        if LRegistryKey <> '' then
+          LConfig.RegistryKey := LRegistryKey;
       end
       else if SameText(LKey, 'idearchitecture') or SameText(LKey, 'idepersonality') or SameText(LKey, 'idehighdpi') then
         LConfig.SetValue(LKey, LValue)

@@ -446,7 +446,8 @@ begin
       Exit;
 
     TConsole.WriteLine;
-    TConsole.WriteWarning(Format('The workspace "%s" still has %d installed package(s):', [AOwnerDir, Length(LEntries)]));
+    TConsole
+        .WriteWarning(Format('The workspace "%s" still has %d installed package(s):', [AOwnerDir, Length(LEntries)]));
     for var LEntry in LEntries do
       TConsole.WriteLine('  ' + LEntry, clYellow);
     TConsole.WriteLine('Their library paths and packages stay registered in the IDE and may conflict', clYellow);
@@ -559,12 +560,18 @@ begin
   if LProductChosenInteractively then
     LSelectedProduct := TProduct.Choose
   else
-    LSelectedProduct :=
-        TProduct.Find(
-            LProductName,
-            if LRegistryKey = '' then 'BDS'
-            else LRegistryKey
-        );
+  begin
+    if LRegistryKey = '' then
+      LRegistryKey := 'BDS';
+    // Raises when the Delphi version itself is not installed.
+    var LProfileExists: Boolean;
+    LSelectedProduct := TProduct.FindForLaunch(LProductName, LRegistryKey, LProfileExists);
+    if not LProfileExists then
+      raise Exception.CreateFmt(
+          'Registry profile "%s" does not exist yet for %s. Run "%s run %s:%s" first to let Delphi '
+              + 'create it, then run init again.',
+          [LRegistryKey, LSelectedProduct.DisplayName, AppExeName, LProductName, LRegistryKey]);
+  end;
 
   // The profile check comes before anything is written, so cancelling (or moving to
   // the owner workspace) leaves this directory untouched.

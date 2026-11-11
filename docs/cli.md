@@ -232,14 +232,19 @@ Delphi version, and downloads the remote package repository.
 Run this once per workspace before using install.
 
 ```
-Usage: Blocks init [options]
+Usage: Blocks init [<version>[:<regkey>]] [options]
 
-Options:
-  /product <version>     Target Delphi version (e.g. delphi12, delphi13).
+Arguments:
+  <version>[:<regkey>]   Target Delphi version (e.g. delphi12, delphi13), optionally
+                         followed by the registry profile key used with bds.exe -r <key>
+                         (default: BDS), e.g. delphi13:myprofile.
                          If omitted, you will be prompted to choose.
                          Run "Blocks product" to see valid values.
-  /registrykey <key>     Registry profile key (default: BDS).
-                         Use this when Delphi is started with -r <key>.
+                         The profile must already exist: if it does not, run
+                         "Blocks run <version>:<regkey>" first to let Delphi create it.
+
+Options:
+  /product <spec>        Same as the bare <version>[:<regkey>] argument.
   /source <url>          Package source(s) to use instead of the default.
   /sources <url>         Alias of /source. Separate multiple sources with commas.
   /platforms <list>      Comma-separated platforms to target (e.g. Win32,Win64).
@@ -251,7 +256,12 @@ Examples:
   Blocks init /source https://github.com/owner/repo
   Blocks init /sources https://github.com/a/r1,https://github.com/b/r2
   Blocks init /product delphi13 /platforms Win32,Win64
+  Blocks init delphi13:myprofile
 ```
+
+When the workspace is already initialised, `init` only refreshes the repository:
+a Delphi version argument is ignored (with a warning); use
+[`config`](config.md) to change it.
 
 ### One workspace per Delphi profile
 

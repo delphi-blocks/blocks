@@ -118,9 +118,8 @@ Common options (per command — see `blocks help <command>` for the full list):
 
 | Option | Used by | Effect |
 |--------|---------|--------|
-| `/product <version>` | init | Target Delphi version (e.g. `delphi13`) |
+| `/product <version>[:<regkey>]` | init | Target Delphi version (e.g. `delphi13`, `delphi13:myprofile`); also accepted as a bare argument (`blocks init delphi13:myprofile`). The registry profile must already exist (create it with `blocks run <version>:<regkey>`) |
 | `/platforms <list>` | init | Comma-separated platforms to target (empty/prompt = all) |
-| `/registrykey <key>` | init | Registry profile key (default: `BDS`); for `bds.exe -r <key>` |
 | `/overwrite` | install | Overwrite the project directory if it already exists |
 | `/silent` | install, build, update, version | Skip non-critical interactive prompts |
 | `/force` | install, upgrade | Continue past version conflicts / re-install when up to date |

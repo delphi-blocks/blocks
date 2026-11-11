@@ -14,11 +14,9 @@ unit Blocks.Tests.Command;
 
 interface
 
-
 uses
   System.SysUtils,
   DUnitX.TestFramework,
-
   Blocks.CLI.Command;
 
 type
@@ -39,6 +37,8 @@ type
     procedure TestMixedFlagsAndUnnamed;
     [Test]
     procedure TestArrayUnnamedParam;
+    [Test]
+    procedure TestMixedNamedValuesAndUnnamed;
     [Test]
     procedure TestUnknownFlagRaises;
     [Test]
@@ -99,6 +99,16 @@ type
     FItems: TArray<string>;
   end;
 
+  TInitLikeCommand = class(TCommand)
+  public
+    [Param('product')]
+    FProduct: string;
+    [Param('source')]
+    FSource: string;
+    [Param]
+    FArgs: TArray<string>;
+  end;
+
   TIntegerCommand = class(TCommand)
   public
     [Param('count')]
@@ -111,9 +121,9 @@ type
     FThreshold: Double;
   end;
 
-{$SCOPEDENUMS ON}
+  {$SCOPEDENUMS ON}
   TLogLevel = (Debug, Info, Warning, Error);
-{$SCOPEDENUMS OFF}
+  {$SCOPEDENUMS OFF}
 
   TLogLevelCommand = class(TCommand)
   public
@@ -200,15 +210,38 @@ begin
   end;
 end;
 
+procedure TCommandTest.TestMixedNamedValuesAndUnnamed;
+begin
+  var LCommand := CreateCommand<TInitLikeCommand>('Blocks init delphi13:r1 /source http://x');
+  try
+    Assert.AreEqual<Integer>(1, Length(LCommand.FArgs));
+    Assert.AreEqual('delphi13:r1', LCommand.FArgs[0]);
+    Assert.AreEqual('http://x', LCommand.FSource);
+    Assert.AreEqual('', LCommand.FProduct);
+  finally
+    LCommand.Free;
+  end;
+
+  LCommand := CreateCommand<TInitLikeCommand>('Blocks init /source http://x /product delphi13:r1');
+  try
+    Assert.AreEqual<Integer>(0, Length(LCommand.FArgs));
+    Assert.AreEqual('http://x', LCommand.FSource);
+    Assert.AreEqual('delphi13:r1', LCommand.FProduct);
+  finally
+    LCommand.Free;
+  end;
+end;
+
 procedure TCommandTest.TestUnknownFlagRaises;
 begin
   Assert.WillRaise(
-    procedure
-    begin
-      var LCommand := CreateCommand<TBoolFlagCommand>('Blocks command /unknown');
-      LCommand.Free;
-    end,
-    Exception);
+      procedure
+      begin
+        var LCommand := CreateCommand<TBoolFlagCommand>('Blocks command /unknown');
+        LCommand.Free;
+      end,
+      Exception
+  );
 end;
 
 procedure TCommandTest.TestNamedIntegerParam;
@@ -254,12 +287,13 @@ end;
 procedure TCommandTest.TestInvalidEnumValueRaises;
 begin
   Assert.WillRaise(
-    procedure
-    begin
-      var LCommand := CreateCommand<TLogLevelCommand>('Blocks command /level Trace');
-      LCommand.Free;
-    end,
-    Exception);
+      procedure
+      begin
+        var LCommand := CreateCommand<TLogLevelCommand>('Blocks command /level Trace');
+        LCommand.Free;
+      end,
+      Exception
+  );
 end;
 
 { TStringParamReader }
