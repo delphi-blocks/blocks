@@ -24,7 +24,8 @@ blocks config /system InstallPath=C:\Tools\Blocks
 ## Workspace configuration
 
 These values live in `.blocks/workspace.json` and apply only to the current
-workspace.
+workspace. Reading or writing them requires an initialised workspace: outside one,
+`blocks config` (without `/system`) fails and asks you to run `blocks init` first.
 
 | Key                   | Type    | Default | Meaning                                                                                  |
 |-----------------------|---------|---------|------------------------------------------------------------------------------------------|

@@ -396,6 +396,8 @@ end;
 procedure TListCommand.Execute;
 begin
   inherited;
+  if not TWorkspace.Exists then
+    raise Exception.Create('The current directory is not a Blocks workspace. Run "' + AppExeName + ' init" first.');
   var LProductName := TWorkspace.Config.Product;
   if LProductName = '' then
     raise Exception.Create('No Delphi version configured. Run "blocks init -product <version>" first.');
@@ -1061,8 +1063,9 @@ end;
 
 procedure TBaseCommand.CheckWorkspace;
 begin
-  // Offer to initialise if .blocks\ is absent
-  if not TDirectory.Exists(TWorkspace.BlocksDir) then
+  // Offer to initialise if the workspace is missing (a bare .blocks\ without
+  // workspace.json is not a workspace either)
+  if not TWorkspace.Exists then
   begin
     TConsole.WriteLine;
     TConsole.WriteWarning('The current directory is not a valid Blocks workspace.');
@@ -1187,6 +1190,12 @@ begin
   inherited;
   if FAdd and FDelete then
     raise Exception.Create('Options /add and /delete cannot be used together.');
+  if not FSystem and not TWorkspace.Exists then
+    raise Exception.Create(
+        'The current directory is not a Blocks workspace. Run "'
+            + AppExeName
+            + ' init" first, or use /system '
+            + 'for system-level configuration.');
 
   if Length(FConfigs) = 0 then
   begin

@@ -302,9 +302,7 @@ end;
 
 function TConfig.ConfigPath: string;
 begin
-  var LBlocksDir := TPath.Combine(FWorkspaceDir, '.blocks');
-  ForceDirectories(LBlocksDir);
-  Result := TPath.Combine(LBlocksDir, 'workspace.json');
+  Result := TPath.Combine([FWorkspaceDir, '.blocks', 'workspace.json']);
 end;
 
 constructor TConfig.Create(const AWorkspaceDir: string);
@@ -385,6 +383,8 @@ begin
   var LJSON := TJsonHelper.ObjectToJSON(Self) as TJSONObject;
   try
     LJSON.AddPair('$schema', WorkspaceSchemaUrl);
+    // Only saving creates .blocks\: merely reading the config must leave the directory untouched.
+    ForceDirectories(ExtractFilePath(ConfigPath));
     TFile.WriteAllText(ConfigPath, TJsonHelper.PrettyPrint(LJSON));
   finally
     LJSON.Free;
