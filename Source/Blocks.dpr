@@ -24,7 +24,8 @@ uses
   Blocks.Model.Config in 'Blocks.Model.Config.pas',
   Blocks.Model.SysConfig in 'Blocks.Model.SysConfig.pas',
   Blocks.Model.Package in 'Blocks.Model.Package.pas',
-  Blocks.Service.Script in 'Blocks.Service.Script.pas';
+  Blocks.Service.Script in 'Blocks.Service.Script.pas',
+  Blocks.Model.ManifestValidator in 'Blocks.Model.ManifestValidator.pas';
 
 begin
   {$IFDEF DEBUG}

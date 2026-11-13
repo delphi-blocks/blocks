@@ -139,6 +139,7 @@
         <DCCReference Include="Blocks.Model.SysConfig.pas"/>
         <DCCReference Include="Blocks.Model.Package.pas"/>
         <DCCReference Include="Blocks.Service.Script.pas"/>
+        <DCCReference Include="Blocks.Model.ManifestValidator.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

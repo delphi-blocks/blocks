@@ -50,7 +50,9 @@ uses
   Blocks.Bitbucket in '..\Source\Blocks.Bitbucket.pas',
   Blocks.Tests.Bitbucket in 'Blocks.Tests.Bitbucket.pas',
   Blocks.Model.Config in '..\Source\Blocks.Model.Config.pas',
-  Blocks.Tests.Config in 'Blocks.Tests.Config.pas';
+  Blocks.Tests.Config in 'Blocks.Tests.Config.pas',
+  Blocks.Model.ManifestValidator in '..\Source\Blocks.Model.ManifestValidator.pas',
+  Blocks.Tests.ManifestValidator in 'Blocks.Tests.ManifestValidator.pas';
 
 var
   runner : ITestRunner;

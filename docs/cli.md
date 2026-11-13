@@ -23,6 +23,7 @@ Commands:
   search [pattern]       Search the repository index by id, name, description or keywords.
   config                 Read or write workspace or system configuration values.
   view <id[@version]>    Show details of a package from the repository.
+  validate <file>        Check a package manifest file for errors.
   version                Print the version of the blocks executable.
   upgrade                Check for a newer release and download the setup if available.
   help [command]         Show this message, or detailed help for a specific command.
@@ -73,6 +74,9 @@ blocks product delphi12 delphi13
 REM View package info
 blocks view owner.package@1.2.0
 blocks view owner.package /versions
+
+REM Check a manifest before publishing it
+blocks validate owner.package.manifest.json
 
 REM Manage repository sources
 blocks config sources
@@ -427,6 +431,60 @@ Examples:
   Blocks view owner.package@1.2.0 /raw
   Blocks view owner.package /versions
 ```
+
+## Validate
+
+Checks a package manifest file for errors before publishing it to the repository.
+It does not need a workspace.
+
+```
+Usage: Blocks validate <file>
+
+Arguments:
+  <file>                 Path of the manifest JSON file (e.g. owner.package.manifest.json).
+
+Example:
+  Blocks validate owner.package.manifest.json
+```
+
+Every problem is reported at once, as an **error** or a **warning**, prefixed by the
+JSON path of the offending node (e.g. `packages[0].type`). The exit code is `1` when
+the manifest has at least one error; warnings alone keep it at `0`.
+
+Errors:
+
+- A mandatory field is missing or empty: `$schema`, `id`, `name`, `version`, and —
+  unless the manifest is a [meta-package](manifest.md#meta-packages) — `platforms`
+  (at least one platform) and `packages` (at least one package).
+- `$schema` is not a supported schema. Currently only
+  `https://delphi-blocks.dev/schema/package.v1.json` is accepted.
+- `id` is not in `vendor.name` form: it must contain exactly one dot, and both parts
+  must be valid Windows file names (no `< > : " / \ | ? *`, no control characters,
+  no trailing dot or space, no reserved device names such as `CON` or `NUL`).
+- `name` contains a dot or is not a valid file name.
+- `version` is not `MAJOR.MINOR.PATCH` (an optional fourth build number is allowed).
+- `repository.type` is not one of `github`, `bitbucket`, `git`, `svn`, `local`, `none`.
+- `repository.url` is missing (for any type but `none`) or invalid: an `http(s)` URL
+  for `github`/`bitbucket`; an `http(s)`, `ssh`, `git`, `file` URL or the
+  `user@host:path` form for `git`; an `http(s)`, `svn`, `svn+ssh` or `file` URL for
+  `svn`; a path without invalid characters for `local`.
+- A `git` repository sets more than one of `tag`, `commit`, `branch`.
+- A `packages[]` entry has no `name`, or its `type` does not contain `runtime`
+  and/or `designtime`.
+- A `packageOptions.folders` key or a `packages[].products` entry is not a supported
+  Delphi version (`delphixe6` … `delphi13`, optionally followed by `+`).
+- A `dependencies` key is not a valid `vendor.name` id.
+- A field has the wrong JSON type (e.g. `keywords` not an array of strings,
+  `runtimeOnly` not a boolean), `homepage` is not an `http(s)` URL, or the file is
+  not valid JSON.
+
+Warnings:
+
+- `packages[].type` contains a value other than `runtime`/`designtime` (e.g. `FMX`):
+  it is allowed but ignored by Blocks.
+- The `repository` node is missing: the manifest is treated as a meta-package.
+- A meta-package declares no `dependencies`.
+- The file name does not match the id (`<id>.manifest.json`).
 
 ## Version
 

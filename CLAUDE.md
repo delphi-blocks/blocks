@@ -50,6 +50,7 @@ The project uses `pasfmt` with `begin_style = "always_wrap"` and `line_ending = 
 | `Blocks.Service.Workspace.pas` | Owns the install/uninstall pipeline; initialises the `.blocks/` workspace and clones the remote repository |
 | `Blocks.Service.Product.pas` | Detects installed Delphi versions (registry scan), runs MSBuild to compile packages, updates Delphi library search paths in the registry |
 | `Blocks.Model.Manifest.pas` | Parses `.manifest.json` files; resolves the best package-folder for the active Delphi version |
+| `Blocks.Model.ManifestValidator.pas` | Validates a raw manifest JSON (used by `validate`); collects errors/warnings instead of raising |
 | `Blocks.Model.Package.pas` | `.dproj` loader; reads MSBuild properties (`LibSuffix`, `DCC_DcuOutput`, ...) |
 | `Blocks.Model.Database.pas` | Per-workspace JSON file (`.blocks/database.json`) tracking installed packages as `owner.pkg@version` |
 | `Blocks.Model.Config.pas` | Workspace configuration (sources, target platforms, target Delphi version, registry key) persisted as `.blocks/workspace.json`. Empty `platforms` = all supported platforms; `IsPlatformEnabled` is the install/uninstall filter |
@@ -109,6 +110,7 @@ Commands:
   search [pattern]         Search the repository index by id, name, description or keywords
   config                   Read or write workspace or system configuration values
   view <id[@version]>      Show details of a package from the repository
+  validate <file>          Check a package manifest file (schema, required fields, id/name, repository, versions)
   version                  Print the version of the blocks executable
   upgrade                  Check for a newer release and download the setup
   help [command]           Show general help, or detailed help for a command

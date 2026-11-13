@@ -227,6 +227,20 @@ type
     procedure ShowHelp; override;
   end;
 
+  /// <summary>
+  ///   Validates a package manifest file: mandatory fields, supported schema,
+  ///   id/name format, repository type and URL, package types and Delphi version
+  ///   keys. Does not need a workspace. Sets a non-zero exit code when errors are found.
+  /// </summary>
+  TValidateCommand = class(TBaseCommand)
+  private
+    [Param]
+    FFileName: string;
+  public
+    procedure Execute; override;
+    procedure ShowHelp; override;
+  end;
+
 implementation
 
 uses
@@ -235,6 +249,7 @@ uses
   Blocks.Model.Config,
   Blocks.Model.Database,
   Blocks.Model.Manifest,
+  Blocks.Model.ManifestValidator,
   Blocks.Model.SysConfig,
   Blocks.Service.Workspace,
   Blocks.JSON,
@@ -319,6 +334,7 @@ begin
   WriteOption('search [pattern]', 'Search the repository index by id, name, description or keywords.');
   WriteOption('config', 'Read or write workspace or system configuration values.');
   WriteOption('view <id[@version]>', 'Show details of a package from the repository.');
+  WriteOption('validate <file>', 'Check a package manifest file for errors.');
   WriteOption('version', 'Print the version of the blocks executable.');
   WriteOption('upgrade', 'Check for a newer release and download the setup if available.');
   WriteOption('help [command]', 'Show this message, or detailed help for a specific command.');
@@ -1565,6 +1581,82 @@ begin
   TConsole.WriteLine;
 end;
 
+{ TValidateCommand }
+
+procedure TValidateCommand.Execute;
+begin
+  inherited;
+  if FFileName = '' then
+    raise Exception.Create('Manifest file name needed');
+
+  var LFileName := TPath.GetFullPath(FFileName);
+  var LValidator := TManifestValidator.Create;
+  try
+    LValidator.ValidateFile(LFileName);
+
+    TConsole.WriteLine;
+    TConsole.WriteLine('Validating ' + LFileName, clWhite);
+    TConsole.WriteLine;
+    for var LMessage in LValidator.Messages do
+    begin
+      case LMessage.Severity of
+        vsError: TConsole.WriteLine('  [ERROR]   ' + LMessage.ToString, clRed);
+        vsWarning: TConsole.WriteLine('  [WARNING] ' + LMessage.ToString, clYellow);
+      else
+        raise Exception.Create('Unexpected validation severity');
+      end;
+    end;
+    if LValidator.Messages.Count > 0 then
+      TConsole.WriteLine;
+
+    if LValidator.ErrorCount = 0 then
+    begin
+      TConsole.WriteLine(Format('Manifest is valid (%d warning(s)).', [LValidator.WarningCount]), clGreen);
+    end
+    else
+    begin
+      TConsole.WriteLine(
+          Format(
+              'Manifest is not valid: %d error(s), %d warning(s).',
+              [LValidator.ErrorCount, LValidator.WarningCount]
+          ),
+          clRed
+      );
+      ExitCode := 1;
+    end;
+    TConsole.WriteLine;
+  finally
+    LValidator.Free;
+  end;
+end;
+
+procedure TValidateCommand.ShowHelp;
+begin
+  TConsole.WriteLine;
+  TConsole.WriteLine('Checks a package manifest file for errors before publishing it to the repository.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Usage: ' + AppExeName + ' validate <file>', clWhite);
+  TConsole.WriteLine;
+  TConsole.WriteLine('Arguments:', clWhite);
+  WriteOption('<file>', 'Path of the manifest JSON file (e.g. owner.package.manifest.json).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Checks:', clWhite);
+  TConsole.WriteLine('  mandatory fields: $schema, id, name, version; platforms and packages too,');
+  TConsole.WriteLine('    unless it is a meta-package (repository.type "none" or no repository);');
+  TConsole.WriteLine('  $schema is a supported schema;');
+  TConsole.WriteLine('  id is vendor.name (one dot, file-name-safe characters);');
+  TConsole.WriteLine('  name is a valid file name without dots;');
+  TConsole.WriteLine('  repository.type is supported and repository.url is a valid URL;');
+  TConsole.WriteLine('  packages[].type contains runtime and/or designtime;');
+  TConsole.WriteLine('  packageOptions.folders keys and packages[].products are known Delphi versions.');
+  TConsole.WriteLine;
+  TConsole.WriteLine('The exit code is 1 when the manifest has errors (warnings do not count).');
+  TConsole.WriteLine;
+  TConsole.WriteLine('Example:', clWhite);
+  TConsole.WriteLine('  ' + AppExeName + ' validate owner.package.manifest.json');
+  TConsole.WriteLine;
+end;
+
 { TVersionCommand }
 
 procedure TVersionCommand.Execute;
@@ -1759,6 +1851,7 @@ initialization
   TCommand.RegisterCommand('search', TSearchCommand);
   TCommand.RegisterCommand('config', TConfigCommand);
   TCommand.RegisterCommand('view', TViewCommand);
+  TCommand.RegisterCommand('validate', TValidateCommand);
   TCommand.RegisterCommand('version', TVersionCommand);
   TCommand.RegisterCommand('upgrade', TUpgradeCommand);
   TCommand.RegisterCommand('', TDefaultCommand, True);
