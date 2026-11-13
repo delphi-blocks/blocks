@@ -55,6 +55,21 @@ type
     property PackageSearchPath: string read FPackageSearchPath write FPackageSearchPath;
   end;
 
+  /// <summary>Where a trace of a package installed outside Blocks was found.</summary>
+  /// <remarks>
+  ///   <c>etKnownPackages</c>: a BPL registered in <c>Known Packages</c> / <c>Known Packages x64</c>.
+  ///   <c>etDisabledPackages</c>: a BPL registered in <c>Disabled Packages</c>.
+  ///   <c>etSharedDcp</c>: a DCP in the IDE default DCP output folder (<c>$(BDSCOMMONDIR)\Dcp</c>),
+  ///   which is shared by every registry profile.
+  /// </remarks>
+  TExternalTraceSource = (etKnownPackages, etDisabledPackages, etSharedDcp);
+
+  TExternalTrace = record
+    Source: TExternalTraceSource;
+    /// <summary>Full path of the BPL (registry sources) or DCP found, macros expanded.</summary>
+    Path: string;
+  end;
+
   /// <summary>Represents a single Delphi/RAD Studio installation.</summary>
   TProduct = class(TNoRefCountObject, IScriptHelper)
   private
@@ -192,6 +207,28 @@ type
     ///   <c>.dproj</c> name embeds that suffix. Case-insensitive; names without
     ///   the placeholder are returned unchanged.</summary>
     function ExpandPackageName(const AName: string): string;
+
+    /// <summary>Looks for traces of the packages declared in <paramref name="AManifest"/>
+    ///   that were installed outside Blocks (by hand, by a vendor setup, by GetIt, or
+    ///   bundled with Delphi). Uses only the manifest, so it can run before the download.</summary>
+    /// <param name="AWorkspaceDir">Workspace root: anything under its <c>.blocks</c> folder
+    ///   belongs to Blocks and is ignored.</param>
+    /// <param name="AManifest">Manifest whose <c>packages[].name</c> are searched for.</param>
+    /// <param name="AConfig">Workspace configuration: only enabled platforms are checked
+    ///   for DCPs.</param>
+    /// <returns>The traces found, empty when there are none.</returns>
+    /// <remarks>
+    ///   Checks the <c>Known Packages</c>, <c>Known Packages x64</c> and <c>Disabled Packages</c>
+    ///   keys of this product's registry profile (BPL names, matched with
+    ///   <see cref="MatchesBplName"/> because of the unknown <c>LibSuffix</c>), and the
+    ///   <c>Package DCP Output</c> folder of every enabled platform of the manifest (exact
+    ///   <c>&lt;name&gt;.dcp</c>, since DCPs carry no <c>LibSuffix</c>).
+    /// </remarks>
+    function FindExternalTraces(
+        const AWorkspaceDir: string;
+        AManifest: TManifest;
+        AConfig: TConfig
+    ): TArray<TExternalTrace>;
 
     /// <summary>Compiles all declared packages and updates the Delphi library registry paths.</summary>
     /// <param name="AProjectDir">Root directory of the extracted project.</param>
@@ -1315,6 +1352,132 @@ begin
   finally
     LVariables.Free;
   end;
+end;
+
+function TProduct.FindExternalTraces(
+    const AWorkspaceDir: string;
+    AManifest: TManifest;
+    AConfig: TConfig
+): TArray<TExternalTrace>;
+const
+  RegistrySources: array[0..2] of string = ('Known Packages', 'Known Packages x64', 'Disabled Packages');
+var
+  LNames: TArray<string>;
+  LTraces: TArray<TExternalTrace>;
+
+  procedure AddTrace(ASource: TExternalTraceSource; const APath: string);
+  begin
+    for var LTrace in LTraces do
+      if (LTrace.Source = ASource) and SameText(LTrace.Path, APath) then
+        Exit;
+    var LNewTrace: TExternalTrace;
+    LNewTrace.Source := ASource;
+    LNewTrace.Path := APath;
+    LTraces := LTraces + [LNewTrace];
+  end;
+
+begin
+  LTraces := [];
+
+  LNames := [];
+  for var LPackage in AManifest.Packages do
+    if LPackage.SupportsProduct(FVersionName) then
+      LNames := LNames + [ExpandPackageName(LPackage.Name)];
+  if Length(LNames) = 0 then
+    Exit(LTraces);
+
+  // Everything under the workspace .blocks folder was installed by Blocks itself.
+  var LBlocksDir := TPath.Combine(AWorkspaceDir, '.blocks');
+  var LBlocksPrefix := IncludeTrailingPathDelimiter(LBlocksDir);
+
+  var LEnv := TStringList.Create;
+  try
+    // IDE macros used in registry paths: $(BDS), $(BDSBIN), the user's environment
+    // variables, plus $(BDSCOMMONDIR) and $(BLOCKSDIR) (forced to this workspace, so the
+    // macro form of our own entries expands under LBlocksDir and is excluded).
+    FillEnvironmentVariables(LEnv);
+    if LEnv.Values['BDSCOMMONDIR'] = '' then
+      LEnv.Values['BDSCOMMONDIR'] := ExpandEnvironment('$(BDSCOMMONDIR)');
+    LEnv.Values['BLOCKSDIR'] := LBlocksDir;
+
+    // Registry: design-time packages installed (or disabled) in this profile.
+    var LReg := TRegistry.Create(KEY_READ);
+    try
+      LReg.RootKey := HKEY_CURRENT_USER;
+      var LValueNames := TStringList.Create;
+      try
+        for var LSubKey in RegistrySources do
+        begin
+          if not LReg.OpenKeyReadOnly('Software\Embarcadero\' + FRegistryKey + '\' + FBdsVersion + '\' + LSubKey) then
+            Continue;
+          try
+            LReg.GetValueNames(LValueNames);
+          finally
+            LReg.CloseKey;
+          end;
+
+          var LSource :=
+              if SameText(LSubKey, 'Disabled Packages') then etDisabledPackages
+              else etKnownPackages;
+
+          for var LValueName in LValueNames do
+          begin
+            var LPath := ExpandVariables(LValueName, LEnv);
+            if StartsText(LBlocksPrefix, LPath) then
+              Continue;
+            var LBplName := ChangeFileExt(ExtractFileName(LPath), '');
+            for var LName in LNames do
+              if MatchesBplName(LBplName, LName) then
+                AddTrace(LSource, LPath);
+          end;
+        end;
+      finally
+        LValueNames.Free;
+      end;
+    finally
+      LReg.Free;
+    end;
+
+    // Shared DCP folders: the IDE default "Package DCP Output" of each enabled platform.
+    for var LPlatformPair in AManifest.Platforms do
+    begin
+      if not AConfig.IsPlatformEnabled(LPlatformPair.Key) then
+        Continue;
+
+      var LDcpOutput := '';
+      var LFound := False;
+      for var LProductPlatform in Platforms.Values do
+        if SameText(LProductPlatform.Name, LPlatformPair.Key) then
+        begin
+          LDcpOutput := LProductPlatform.PackageDCPOutput;
+          LFound := True;
+          Break;
+        end;
+      if not LFound then
+        Continue;
+
+      if LDcpOutput = '' then
+        LDcpOutput := if SameText(LPlatformPair.Key, 'Win32') then '$(BDSCOMMONDIR)\Dcp'
+      else
+        '$(BDSCOMMONDIR)\Dcp\$(Platform)';
+
+      LEnv.Values['Platform'] := LPlatformPair.Key;
+      var LDcpDir := ExpandVariables(LDcpOutput, LEnv);
+      if (LDcpDir = '') or StartsText(LBlocksPrefix, IncludeTrailingPathDelimiter(LDcpDir)) then
+        Continue;
+
+      for var LName in LNames do
+      begin
+        var LDcpPath := TPath.Combine(LDcpDir, LName + '.dcp');
+        if FileExists(LDcpPath) then
+          AddTrace(etSharedDcp, LDcpPath);
+      end;
+    end;
+  finally
+    LEnv.Free;
+  end;
+
+  Result := LTraces;
 end;
 
 procedure TProduct.LoadRsVarsEnvironment(const APlatform: string);

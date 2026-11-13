@@ -68,6 +68,27 @@ type
     procedure TestPlatformNotInListReturnsFalse;
   end;
 
+  [TestFixture]
+  TMatchesBplNameTest = class(TObject)
+  public
+    [Test]
+    procedure TestExactNameMatches;
+    [Test]
+    procedure TestDigitSuffixMatches;
+    [Test]
+    procedure TestDottedSuffixWithUnderscoreMatches;
+    [Test]
+    procedure TestDSuffixMatches;
+    [Test]
+    procedure TestMatchIsCaseInsensitive;
+    [Test]
+    procedure TestAlphabeticSuffixDoesNotMatch;
+    [Test]
+    procedure TestDifferentNameDoesNotMatch;
+    [Test]
+    procedure TestDotInNameIsLiteral;
+  end;
+
 implementation
 
 procedure TExpandVariablesTest.Setup;
@@ -167,8 +188,53 @@ begin
   Assert.IsFalse(PlatformInList(['Win32'], 'Win64'));
 end;
 
+{ TMatchesBplNameTest }
+
+procedure TMatchesBplNameTest.TestExactNameMatches;
+begin
+  Assert.IsTrue(MatchesBplName('Spring.Base', 'Spring.Base'));
+end;
+
+procedure TMatchesBplNameTest.TestDigitSuffixMatches;
+begin
+  Assert.IsTrue(MatchesBplName('Spring.Base290', 'Spring.Base'));
+end;
+
+procedure TMatchesBplNameTest.TestDottedSuffixWithUnderscoreMatches;
+begin
+  Assert.IsTrue(MatchesBplName('Core_37.0', 'Core'));
+end;
+
+procedure TMatchesBplNameTest.TestDSuffixMatches;
+begin
+  Assert.IsTrue(MatchesBplName('JclD370', 'Jcl'));
+end;
+
+procedure TMatchesBplNameTest.TestMatchIsCaseInsensitive;
+begin
+  Assert.IsTrue(MatchesBplName('dclindycore370', 'dclIndyCore'));
+end;
+
+procedure TMatchesBplNameTest.TestAlphabeticSuffixDoesNotMatch;
+begin
+  // "Core" must not match an unrelated package that merely shares the prefix.
+  Assert.IsFalse(MatchesBplName('CoreUtils370', 'Core'));
+end;
+
+procedure TMatchesBplNameTest.TestDifferentNameDoesNotMatch;
+begin
+  Assert.IsFalse(MatchesBplName('MyCore370', 'Core'));
+end;
+
+procedure TMatchesBplNameTest.TestDotInNameIsLiteral;
+begin
+  // The dot in the package name is not a regex wildcard.
+  Assert.IsFalse(MatchesBplName('SpringXBase290', 'Spring.Base'));
+end;
+
 initialization
   TDUnitX.RegisterTestFixture(TExpandVariablesTest);
   TDUnitX.RegisterTestFixture(TPlatformInListTest);
+  TDUnitX.RegisterTestFixture(TMatchesBplNameTest);
 
 end.

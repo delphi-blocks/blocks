@@ -130,6 +130,15 @@ function IsApple(const APlatform: string): Boolean;
 ///   always returns True; otherwise the match is case-insensitive.</summary>
 function PlatformInList(const AList: TArray<string>; const APlatform: string): Boolean;
 
+/// <summary>Returns True when <paramref name="ABplName"/> (a BPL file name without path
+///   and extension) looks like the BPL of package <paramref name="APackageName"/>.</summary>
+/// <remarks>The BPL name carries the <c>LibSuffix</c> declared in the <c>.dproj</c>, which
+///   is not known before the download, so the name is accepted when it is exactly the
+///   package name or the package name followed by a version-like suffix: digits, possibly
+///   with dots, optionally preceded by <c>_</c> or <c>D</c> (e.g. <c>Spring.Base290</c>,
+///   <c>JclD370</c>, <c>Core_37.0</c>). The match is case-insensitive.</remarks>
+function MatchesBplName(const ABplName, APackageName: string): Boolean;
+
 /// <summary>Runs <paramref name="ACmdLine"/> hidden (no console window), capturing its
 ///   merged stdout/stderr into <paramref name="AOutput"/> and returning the process
 ///   exit code.</summary>
@@ -242,6 +251,13 @@ begin
   for var LPlatform in AList do
     if SameText(APlatform, LPlatform) then
       Exit(True);
+end;
+
+function MatchesBplName(const ABplName, APackageName: string): Boolean;
+begin
+  if APackageName = '' then
+    Exit(False);
+  Result := TRegEx.IsMatch(ABplName, '^' + TRegEx.Escape(APackageName) + '(?:[_D]?\d[\d.]*)?$', [roIgnoreCase]);
 end;
 
 function RunProcess(const ACmdLine: string; out AOutput: string): Integer;

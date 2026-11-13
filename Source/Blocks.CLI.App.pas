@@ -694,6 +694,8 @@ begin
   WriteOption('/silent', 'Skip non-critical interactive prompts (use defaults).');
   WriteOption('/force', 'Skip dependencies that conflict with the requested constraint');
   WriteOption('', 'instead of raising an error, using the already-installed version.');
+  WriteOption('', 'Also skips, without asking, packages that seem to be already');
+  WriteOption('', 'installed outside Blocks (with /silent alone the install fails).');
   TConsole.WriteLine;
   TConsole.WriteLine('Examples:', clWhite);
   TConsole.WriteLine('  ' + AppExeName + ' install owner.package');

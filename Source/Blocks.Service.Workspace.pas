@@ -37,10 +37,14 @@ type
   ///   <c>woOverwrite</c>: replace the project directory if it already exists (propagates to dependencies).
   ///   <c>woBuildOnly</c>: skip the download and compile the already-extracted project.
   ///   <c>woSilent</c>: skip non-critical interactive prompts, taking the defaults.
-  ///   <c>woForce</c>: on install, skip a conflicting dependency instead of raising; on uninstall, skip the
-  ///   dependents confirmation prompt.
+  ///   <c>woForce</c>: on install, skip a conflicting dependency, or a package that seems to be already
+  ///   installed outside Blocks, instead of raising or prompting; on uninstall, skip the dependents
+  ///   confirmation prompt.
+  ///   <c>woSkipExternalCheck</c>: do not look for an installation made outside Blocks of the requested
+  ///   package (used by update, which reinstalls a package Blocks already owned). Not propagated to
+  ///   dependencies.
   /// </remarks>
-  TWorkspaceOption = (woOverwrite, woBuildOnly, woSilent, woForce);
+  TWorkspaceOption = (woOverwrite, woBuildOnly, woSilent, woForce, woSkipExternalCheck);
   TWorkspaceOptions = set of TWorkspaceOption;
 
   /// <summary>Outcome of checking which workspace owns a Delphi registry profile.</summary>
@@ -60,6 +64,10 @@ type
       FConfig: TConfig;
       FDatabase: TDatabase;
       FDelphiRunningContinue: Boolean;
+      // Ids of the dependencies skipped in this run because they seemed to be installed
+      // outside Blocks. Kept in memory only (never recorded in the database): a skip
+      // holds for one constraint, so it is asked again on every install.
+      FSkippedDependencies: TDictionary<string, Boolean>;
     class function GetWorkDir: string; static;
     class function GetBlocksDir: string; static;
     class procedure SetWorkDir(const AValue: string); static;
@@ -93,6 +101,22 @@ type
     class function GetWorkspaceProduct: TProduct; static;
     /// <summary>Recursively installs the direct dependencies declared in a manifest.</summary>
     class procedure ResolveDependencies(AManifest: TManifest; AOptions: TWorkspaceOptions); static;
+    /// <summary>Looks for traces of an installation of <paramref name="AManifest"/> made
+    ///   outside Blocks and, when some are found, decides whether to install it anyway.</summary>
+    /// <param name="AVersionConstraint">Constraint requested for the package, shown to the user.</param>
+    /// <param name="ARequiredBy">Id of the package that requires it; empty for a top-level install.</param>
+    /// <returns><c>True</c> to go on with the install (nothing found, or the user chose
+    ///   "install anyway"); <c>False</c> to skip the package and rely on the existing
+    ///   installation (user choice for a dependency, or <c>woForce</c>). A skipped dependency
+    ///   is remembered for this run only, to be mentioned if its dependent fails to compile.</returns>
+    /// <exception cref="Exception">Raised when the user aborts (the default answer), or with
+    ///   <c>woSilent</c> (without <c>woForce</c>) when something is found.</exception>
+    class function ConfirmExternalInstall(
+        AManifest: TManifest;
+        AProduct: TProduct;
+        const AVersionConstraint, ARequiredBy: string;
+        AOptions: TWorkspaceOptions
+    ): Boolean; static;
     /// <summary>Fetches (unless build-only), compiles, registers the search paths and records
     ///   in the database a single already-resolved package. Does NOT resolve dependencies.</summary>
     class procedure BuildAndRegisterPackage(
@@ -160,13 +184,14 @@ type
     /// <param name="AVersionConstraint">Version constraint string (e.g. <c>1.2.0</c>, <c>>=1.0.0</c>); empty for any version.</param>
     /// <param name="AOptions">Install options (see <see cref="TWorkspaceOption"/>): <c>woOverwrite</c>,
     ///   <c>woBuildOnly</c>, <c>woSilent</c>, <c>woForce</c>.</param>
-    /// <param name="AIsDependency">When <c>True</c> the call is a transitive dependency resolution, not a
-    ///   top-level install; suppresses the "use update" hint on a version conflict (where switching the
-    ///   installed version would break another dependent rather than fix anything).</param>
+    /// <param name="ARequiredBy">Id of the package that requires this one when the call is a transitive
+    ///   dependency resolution; empty for a top-level install. A dependency suppresses the "use update"
+    ///   hint on a version conflict (where switching the installed version would break another dependent
+    ///   rather than fix anything), and is reported with its requirer when found installed outside Blocks.</param>
     class procedure Install(
         const APackageName, AVersionConstraint: string;
         AOptions: TWorkspaceOptions;
-        AIsDependency: Boolean = False
+        const ARequiredBy: string = ''
     ); static;
 
     /// <summary>Removes a previously installed package from the workspace and the database.</summary>
@@ -346,12 +371,14 @@ class constructor TWorkspace.Create;
 begin
   FConfig := nil;
   FDatabase := nil;
+  FSkippedDependencies := TDictionary<string, Boolean>.Create(TIStringComparer.Ordinal);
 end;
 
 class destructor TWorkspace.Destroy;
 begin
   FConfig.Free;
   FDatabase.Free;
+  FSkippedDependencies.Free;
 end;
 
 class function TWorkspace.Exists: Boolean;
@@ -815,8 +842,110 @@ begin
 
   TConsole.WriteLine('Resolving dependencies...', clCyan);
   for var LDependency in AManifest.Dependencies do
-    TWorkspace.Install(LDependency.Key, LDependency.Value, AOptions, True);
+    TWorkspace.Install(LDependency.Key, LDependency.Value, AOptions - [woSkipExternalCheck], AManifest.Id);
   TConsole.WriteLine;
+end;
+
+class function TWorkspace.ConfirmExternalInstall(
+    AManifest: TManifest;
+    AProduct: TProduct;
+    const AVersionConstraint, ARequiredBy: string;
+    AOptions: TWorkspaceOptions
+): Boolean;
+begin
+  Result := True;
+  var LTraces := AProduct.FindExternalTraces(WorkDir, AManifest, Config);
+  if Length(LTraces) = 0 then
+    Exit;
+
+  var LIsDependency := ARequiredBy <> '';
+  var LConstraint :=
+      if AVersionConstraint <> '' then AVersionConstraint
+      else 'any version';
+
+  TConsole.WriteLine;
+  if LIsDependency then
+    TConsole.WriteWarning(
+        Format(
+            'Dependency %s (required by %s: %s) seems to be already installed outside Blocks:',
+            [AManifest.Id, ARequiredBy, LConstraint]
+        )
+    )
+  else
+    TConsole.WriteWarning(Format('Possible existing installation of %s detected outside Blocks:', [AManifest.Id]));
+
+  var LHasSharedDcp := False;
+  for var LTrace in LTraces do
+  begin
+    var LLabel :=
+        if LTrace.Source = etKnownPackages then 'Known Packages:'
+        else if LTrace.Source = etDisabledPackages then 'Disabled Packages:'
+        else 'Shared DCP folder:';
+    TConsole.WriteLine(Format('  - %-19s %s', [LLabel, LTrace.Path]), clYellow);
+    if LTrace.Source = etSharedDcp then
+      LHasSharedDcp := True;
+  end;
+  // The shared DCP folder is on the library path of every registry profile, so a
+  // same-named DCP there can be picked up even when this profile never installed it.
+  if LHasSharedDcp then
+    TConsole.WriteLine('  (the shared DCP folder is on the library path of every registry profile)', clYellow);
+  TConsole.WriteLine;
+
+  // Abort is the recommended answer: the user removes the external installation and
+  // retries, so that Blocks manages the library.
+  var LAbortMessage :=
+      Format(
+          'Installation of %s aborted: it seems to be already installed outside Blocks.'
+              + sLineBreak
+              + 'Remove the existing installation (see the files listed above) and run the install again',
+          [AManifest.Id]
+      );
+
+  // /force: skip and rely on the existing installation. "Install anyway" is never
+  // taken automatically, since it almost certainly fails (duplicate units).
+  if woForce in AOptions then
+  begin
+    if LIsDependency then
+    begin
+      TConsole.WriteWarning(Format('Skipping %s: the existing installation will be used (/force).', [AManifest.Id]));
+      FSkippedDependencies.AddOrSetValue(AManifest.Id, True);
+    end
+    else
+      TConsole
+          .WriteWarning(Format('%s not installed: the existing installation will be used (/force).', [AManifest.Id]));
+    TConsole.WriteLine;
+    Exit(False);
+  end;
+
+  if woSilent in AOptions then
+    raise Exception.Create(LAbortMessage + ', or use /force to skip it and keep the existing installation.');
+
+  TConsole.WriteLine('  [A] Abort (recommended): remove the existing installation, then install again with Blocks');
+  if LIsDependency then
+    TConsole.WriteLine(Format('  [S] Skip it and use the existing installation (it must satisfy %s)', [LConstraint]));
+  TConsole.WriteLine('  [I] Install it anyway (NOT recommended: duplicate-unit errors are very likely,', clYellow);
+  TConsole.WriteLine('      and you would end up with two copies of the library)', clYellow);
+
+  while True do
+  begin
+    TConsole.Write('Choice (default: A): ');
+    var LAnswer := UpperCase(Trim(TConsole.ReadLine));
+    if (LAnswer = '') or (LAnswer = 'A') then
+      raise Exception.Create(LAbortMessage + '.')
+    else if LIsDependency and (LAnswer = 'S') then
+    begin
+      TConsole.WriteLine(Format('Skipped %s: the existing installation will be used.', [AManifest.Id]), clYellow);
+      TConsole.WriteLine;
+      FSkippedDependencies.AddOrSetValue(AManifest.Id, True);
+      Exit(False);
+    end
+    else if LAnswer = 'I' then
+    begin
+      TConsole.WriteWarning(Format('Installing %s although another installation was detected.', [AManifest.Id]));
+      TConsole.WriteLine;
+      Exit(True);
+    end;
+  end;
 end;
 
 class procedure TWorkspace.BuildAndRegisterPackage(
@@ -918,7 +1047,7 @@ end;
 class procedure TWorkspace.Install(
     const APackageName, AVersionConstraint: string;
     AOptions: TWorkspaceOptions;
-    AIsDependency: Boolean
+    const ARequiredBy: string
 );
 begin
   var LPackageId := ResolvePackageId(APackageName, woSilent in AOptions);
@@ -979,7 +1108,7 @@ begin
             // installed version is what the user wants. For a transitive dependency
             // the conflict is structural (another dependent pinned it), so update
             // would not help and the hint would be misleading.
-            if not AIsDependency then
+            if ARequiredBy = '' then
               LMessage :=
                   LMessage
                       + sLineBreak
@@ -998,6 +1127,14 @@ begin
       raise Exception
           .CreateFmt('No compatible package found for "%s". Delphi version too old?', [LSelectedProduct.DisplayName]);
 
+    // Step 5b — Installation made outside Blocks (by hand, vendor setup, GetIt, bundled
+    // with Delphi). Checked before the dependencies, so aborting (or skipping) a top-level
+    // package leaves nothing behind. Asked every time: nothing is remembered.
+    if not (woBuildOnly in AOptions)
+        and not (woSkipExternalCheck in AOptions)
+        and not ConfirmExternalInstall(LManifest, LSelectedProduct, AVersionConstraint, ARequiredBy, AOptions) then
+      Exit;
+
     // Step 6 — Dependencies
     ResolveDependencies(LManifest, AOptions);
 
@@ -1005,7 +1142,29 @@ begin
     // run scripts and print the completion banner for this package. A meta-package
     // (repository type "none") skips the fetch/compile/register steps inside but is
     // still recorded in the database.
-    BuildAndRegisterPackage(LManifest, LSelectedProduct, AOptions);
+    try
+      BuildAndRegisterPackage(LManifest, LSelectedProduct, AOptions);
+    except
+      on E: Exception do
+      begin
+        // A failure caused by a skipped dependency surfaces as a compiler error that
+        // does not mention it: remind the user which ones were skipped.
+        var LSkipped := '';
+        for var LDependency in LManifest.Dependencies do
+          if FSkippedDependencies.ContainsKey(LDependency.Key) then
+            LSkipped := LSkipped + sLineBreak + Format('  - %s (required: %s)', [LDependency.Key, LDependency.Value]);
+        if LSkipped <> '' then
+          E.Message :=
+              E.Message
+                  + sLineBreak
+                  + Format(
+                      'Note: these dependencies of %s were skipped and the installation made outside Blocks '
+                          + 'is used instead; check that it is reachable and satisfies the constraint:',
+                      [LManifest.Id])
+                  + LSkipped;
+        raise;
+      end;
+    end;
   finally
     LManifest.Free;
   end;
@@ -1351,7 +1510,9 @@ begin
     // already-compatible ones are skipped by the install gate; overwrite stays off
     // so dependencies are not needlessly re-downloaded. The checks above guarantee
     // there are no version conflicts, so no force is needed. Only woSilent is carried over.
-    Install(LPackageId, LTargetVer, AOptions * [woSilent]);
+    // The package itself was installed by Blocks, so the external-installation check
+    // is skipped for it (new dependencies are still checked).
+    Install(LPackageId, LTargetVer, AOptions * [woSilent] + [woSkipExternalCheck]);
 
     // Step 8 — Recompile every dependent (direct and transitive) so their DCUs are
     // rebuilt against the new version (in Delphi DCUs are tied to the version they
